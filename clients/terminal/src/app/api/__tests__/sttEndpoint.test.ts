@@ -20,6 +20,14 @@ describe("sttEndpoint — the shared TRANSCRIPTION_SERVICE_URL rule", () => {
     expect(sttEndpoint(`${full}/`)).toBe(full);
   });
 
+  it("does NOT double-path a provider-namespaced endpoint URL", () => {
+    // DeepInfra serves /v1/openai/audio/transcriptions — no prefix rewrite of the env var
+    // reproduces that path, so the full URL has to be used exactly as the operator gave it
+    const deepinfra = "https://api.deepinfra.com/v1/openai/audio/transcriptions";
+    expect(sttEndpoint(deepinfra)).toBe(deepinfra);
+    expect(sttEndpoint(`${deepinfra}/`)).toBe(deepinfra);
+  });
+
   it("returns empty for an unset value so the route can answer 503", () => {
     expect(sttEndpoint("")).toBe("");
     expect(sttEndpoint("   ")).toBe("");

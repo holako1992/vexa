@@ -142,11 +142,20 @@ def probe_url(base: str, path: str) -> str:
     a bare base (``https://api.openai.com``) and a full endpoint URL that already carries the path
     (``https://api.openai.com/v1/audio/transcriptions``). Appending blindly would double-path the
     latter into a 404 — the same URL that works in a meeting. This is the ONE rule, shared with the
-    bot's client (``whisper/src/transcription-client.ts``) and the terminal's dictation route."""
+    bot's client (``whisper/src/transcription-client.ts``) and the terminal's dictation route.
+
+    A provider namespaces the version prefix its own way — OpenAI serves
+    ``/v1/audio/transcriptions``, DeepInfra ``/v1/openai/audio/transcriptions`` — so "already
+    carries the endpoint" is decided by the RESOURCE the path names (its trailing segments), never
+    by the vendor's prefix: a full endpoint URL that no prefix rewrite can reproduce is still used
+    as given, rather than double-pathed into a 404 that no setting of the env var can avoid."""
     base = (base or "").strip().rstrip("/")
     if not path:
         return base
-    return base if base.endswith(path) else base + path
+    if base.endswith(path):
+        return base
+    resource = "/" + "/".join(path.strip("/").split("/")[-2:])
+    return base if base.endswith(resource) else base + path
 
 
 #: A ~1s 16 kHz mono WAV of a quiet tone — the smallest body that is unambiguously *audio*, so a
@@ -174,11 +183,25 @@ def _probe_wav() -> bytes:
     )
 
 
+def audio_probe_model(env: Optional[Mapping[str, str]] = None, pinned: str = "") -> str:
+    """The ``model`` id the audio probe sends — the ONE definition, shared with the Test button
+    exactly as ``audio_probe_body`` shares the body and ``probe_url`` shares the URL.
+
+    A bot transcribes under the deployment's ``TRANSCRIPTION_MODEL``, so the probe asks under it
+    too. Backends that VALIDATE the id (DeepInfra, Groq, vLLM) answer an unknown one
+    ``404 model_not_found``, which is indistinguishable from a wrong URL — so a probe that asked
+    under a fixed default would condemn a backend that transcribes perfectly, and no value of
+    ``TRANSCRIPTION_SERVICE_URL`` could clear it. A declaration may pin an id for a backend that
+    serves one regardless of the deployment's; the OpenAI default stands when neither is set."""
+    env = os.environ if env is None else env
+    return (env.get("TRANSCRIPTION_MODEL") or "").strip() or (pinned or "").strip() or "whisper-1"
+
+
 def audio_probe_body(model: str = "whisper-1") -> tuple:
     """The audio round-trip's (content_type, body) — the ONE definition of "ask the STT backend the
     real question", shared with the terminal's Test button (``core/agent/control_plane/config_test``)
     exactly as ``probe_url`` shares the URL rule. Both must ask identically, or the wizard greens
-    what the boot refuses."""
+    what the boot refuses. Pair it with :func:`audio_probe_model` so the ``model`` matches too."""
     return _multipart({"model": model, "response_format": "json"}, "probe.wav", _probe_wav())
 
 
@@ -224,7 +247,7 @@ def _http_probe(spec: dict, env: Mapping[str, str], timeout: float) -> dict:
     body = b""
     content_type = None
     if (spec.get("payload") or "") == "audio":
-        content_type, body = audio_probe_body(spec.get("payload_model") or "whisper-1")
+        content_type, body = audio_probe_body(audio_probe_model(env, spec.get("payload_model") or ""))
     req = urllib.request.Request(url, data=body, method=(spec.get("method") or "POST"))
     if content_type:
         req.add_header("Content-Type", content_type)

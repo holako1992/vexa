@@ -103,9 +103,11 @@ export class TranscriptionClient {
   private minSilenceDurationMs: number | undefined;
   private model: string;
   constructor(config: TranscriptionClientConfig) {
-    // Ensure serviceUrl ends with the transcriptions endpoint
+    // Ensure serviceUrl ends with the transcriptions endpoint. A provider namespaces the version
+    // prefix its own way (OpenAI /v1/audio/transcriptions, DeepInfra /v1/openai/audio/transcriptions),
+    // so a URL already naming the RESOURCE is the endpoint — appending to it double-paths a 404.
     this.serviceUrl = config.serviceUrl.replace(/\/+$/, '');
-    if (!this.serviceUrl.endsWith('/v1/audio/transcriptions')) {
+    if (!/\/audio\/transcriptions$/.test(this.serviceUrl)) {
       this.serviceUrl += '/v1/audio/transcriptions';
     }
     this.apiToken = config.apiToken;

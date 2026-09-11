@@ -170,7 +170,17 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
                        meeting_model)
     if (config.get("mode") or "").strip() != "custom":
         return
-    base_url = (config.get("base_url") or "").strip()
+    raw_url = (config.get("base_url") or "").strip()
+    # Strip any endpoint suffix the operator might include — accepts both the bare base
+    # (``https://api.deepinfra.com/v1/openai``) and the full endpoint URL
+    # (``https://api.deepinfra.com/v1/openai/chat/completions``); openai_compat appends
+    # ``/chat/completions`` itself, so the stored value must be the bare base.
+    _stripped = raw_url.rstrip("/")
+    for _suffix in ("/messages", "/chat/completions"):
+        if _stripped.endswith(_suffix):
+            _stripped = _stripped[: -len(_suffix)]
+            break
+    base_url = _stripped
     api_key = (config.get("api_key") or "").strip()
     if not base_url:
         return  # custom mode without an endpoint is inert — deployment credentials still apply

@@ -101,28 +101,44 @@ def test_custom_endpoint(base_url: str, api_key: str, model: str = "",
                          post: HttpPost = _post) -> dict:
     """A REAL 1-token completion against the configured endpoint. Anthropic-style first
     (``/v1/messages``), OpenAI-compat fallback (``/v1/chat/completions``) on 404/405 — the two
-    dialects the dispatch overlay brokers (ANTHROPIC_* vs VEXA_LLM_*)."""
-    base = base_url.rstrip("/")
-    if not base:
+    dialects the dispatch overlay brokers (ANTHROPIC_* vs VEXA_LLM_*).
+
+    Accepts both a bare base URL (``https://api.deepinfra.com/v1/openai``) and a full endpoint
+    URL (``https://api.deepinfra.com/v1/openai/chat/completions``): if the URL already carries the
+    endpoint path it is used directly so the operator does not need to know which shape the field
+    expects and neither shape double-paths. Same principle as ``probe_url`` on the STT side."""
+    raw = (base_url or "").strip().rstrip("/")
+    if not raw:
         return _result(False, "Custom mode but no Base URL set.")
     model = model or "claude-haiku-4-5-20251001"
     auth = {"x-api-key": api_key, "Authorization": f"Bearer {api_key}",
             "anthropic-version": "2023-06-01"}
+    # Build the two candidate endpoint URLs from whatever shape the operator supplied.
+    if raw.endswith("/chat/completions"):
+        openai_url = raw
+        anthropic_url = raw[: -len("/chat/completions")] + "/messages"
+    elif raw.endswith("/messages"):
+        anthropic_url = raw
+        openai_url = raw[: -len("/messages")] + "/chat/completions"
+    else:
+        # Bare base — append both standard paths.
+        anthropic_url = f"{raw}/v1/messages"
+        openai_url = f"{raw}/v1/chat/completions"
     try:
-        status, body = post(f"{base}/v1/messages",
+        status, body = post(anthropic_url,
                             {"model": model, "max_tokens": 1,
                              "messages": [{"role": "user", "content": "ping"}]}, auth)
         if status in (404, 405):  # not an anthropic dialect — try openai-compat
-            status, body = post(f"{base}/v1/chat/completions",
+            status, body = post(openai_url,
                                 {"model": model, "max_tokens": 1,
                                  "messages": [{"role": "user", "content": "ping"}]}, auth)
     except Exception as exc:  # DNS, refused, TLS, timeout — the endpoint itself is the problem
         return _result(False, f"Endpoint unreachable: {exc}")
     if status in (401, 403):
-        return _result(False, f"Authentication FAILED at {base} (HTTP {status}) — bad or "
+        return _result(False, f"Authentication FAILED at {raw} (HTTP {status}) — bad or "
                               "expired API key.", status=status)
     if 200 <= status < 300:
-        return _result(True, f"Live completion OK against {base} (model {model}).",
+        return _result(True, f"Live completion OK against {raw} (model {model}).",
                        status=status)
     detail = body[:200] if body else ""
     return _result(False, f"Endpoint answered HTTP {status}: {detail}", status=status)
@@ -152,16 +168,16 @@ def run_models_test(config: dict, env: Optional[dict] = None,
 
 # ── transcription ─────────────────────────────────────────────────────────────────────────────
 
-# The OpenAI-compatible transcriptions path every consumer agrees on. Appended only when the
-# configured URL does not already carry it — the one rule shared with the config.v1 probe
-# (deploy/contracts/config.v1/preflight.py:probe_url), the bot's client, and the dictation route.
+# The OpenAI-compatible transcriptions path every consumer agrees on. The join itself is
+# config.v1's ``probe_url`` — the ONE rule, shared with the boot probe, the bot's client, and the
+# dictation route, so the wizard can never green a URL shape the deployment refuses (or vice versa).
 _STT_PATH = "/v1/audio/transcriptions"
 
 def _transcribe_probe(endpoint: str, token: str) -> tuple:
     """POST the shared audio probe body — the same request the boot preflight makes."""
-    from control_plane.config_preflight import audio_probe_body
+    from control_plane.config_preflight import audio_probe_body, audio_probe_model
 
-    content_type, body = audio_probe_body()
+    content_type, body = audio_probe_body(audio_probe_model())
     req = urllib.request.Request(
         endpoint, data=body, method="POST",
         headers={"Content-Type": content_type, "Authorization": f"Bearer {token}"})
@@ -184,7 +200,9 @@ def _verify_transcribes(base: str, token: str, source: str, probe: TranscribePro
     account reports 0.0 minutes and transcribes perfectly, so a balance threshold condemns the
     working credential and clears nothing. Sending audio makes the verdict independent of whose
     token it is, so no account identity is named anywhere in this codebase."""
-    endpoint = base if base.endswith(_STT_PATH) else base + _STT_PATH
+    from control_plane.config_preflight import probe_url
+
+    endpoint = probe_url(base, _STT_PATH)
     who = f" ({account})" if account else ""
     try:
         status, body = probe(endpoint, token)

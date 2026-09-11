@@ -259,6 +259,18 @@ def test_probe_url_accepts_both_declared_url_shapes():
     assert cp.probe_url(full + "/", _STT_PATH) == full
 
 
+def test_probe_url_accepts_a_provider_namespaced_endpoint():
+    """A provider namespaces the version prefix its own way — DeepInfra serves
+    /v1/openai/audio/transcriptions. No prefix rewrite of TRANSCRIPTION_SERVICE_URL reproduces that
+    path, so a URL already naming the RESOURCE is the endpoint and must not be double-pathed."""
+    deepinfra = "https://api.deepinfra.com/v1/openai/audio/transcriptions"
+    assert cp.probe_url(deepinfra, _STT_PATH) == deepinfra
+    assert cp.probe_url(deepinfra + "/", _STT_PATH) == deepinfra
+    # a bare base is still appended to — including one carrying a self-hosted path prefix
+    assert (cp.probe_url("https://internal.example/stt", _STT_PATH)
+            == f"https://internal.example/stt{_STT_PATH}")
+
+
 def test_probe_404_is_misconfigured_not_ok():
     """C1 (A1): a URL whose transcriptions path answers 404 is the WRONG address — it must not
     probe green. A real OpenAI-compatible endpoint answers 400/401 to an empty body, never 404."""
