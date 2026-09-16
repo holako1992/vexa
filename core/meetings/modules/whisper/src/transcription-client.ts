@@ -102,6 +102,7 @@ export class TranscriptionClient {
   private maxSpeechDurationSec: number | undefined;
   private minSilenceDurationMs: number | undefined;
   private model: string;
+  private responseFormat: 'verbose_json' | 'json' = 'verbose_json';
   constructor(config: TranscriptionClientConfig) {
     // Ensure serviceUrl ends with the transcriptions endpoint. A provider namespaces the version
     // prefix its own way (OpenAI /v1/audio/transcriptions, DeepInfra /v1/openai/audio/transcriptions),
@@ -138,6 +139,12 @@ export class TranscriptionClient {
         const fault: TranscriptionError = err instanceof TranscriptionError
           ? err
           : new TranscriptionError(err?.name === 'AbortError' ? 'timeout' : 'unavailable', undefined, err?.message, true);
+        if (fault.kind === 'bad_request' && this.responseFormat === 'verbose_json' && /verbose_json/i.test(fault.detail ?? '')) {
+          log('[TranscriptionClient] backend rejected verbose_json; falling back to json for this and later requests');
+          this.responseFormat = 'json';
+          attempt--; // Capability negotiation does not consume a configured retry.
+          continue;
+        }
         const isLastAttempt = attempt === this.maxRetries;
 
         if (fault.retryable && !isLastAttempt) {
@@ -186,7 +193,7 @@ export class TranscriptionClient {
     parts.push(Buffer.from(
       `--${boundary}\r\n` +
       `Content-Disposition: form-data; name="response_format"\r\n\r\n` +
-      `verbose_json\r\n`
+      `${this.responseFormat}\r\n`
     ));
 
     // Language part (if specified)
