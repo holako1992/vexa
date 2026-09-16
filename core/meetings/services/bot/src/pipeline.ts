@@ -272,6 +272,7 @@ function createTeamsBotPipeline(
   const reportError = onError ?? ((error: unknown) => console.error(`[bot] pipeline(teams-csrc): ${String(error)}`));
 
   const transcriber = createTranscriber({
+    buffer: { logger: (message) => console.log(`[bot] pipeline(teams-csrc): ${message}`) },
     transcribe: (pcm, prompt) => transcribe(pcm, prompt),
     selfName,
     onSegment: (segment) => {

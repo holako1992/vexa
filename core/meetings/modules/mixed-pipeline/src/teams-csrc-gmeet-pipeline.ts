@@ -185,6 +185,10 @@ export class TeamsCsrcGmeetPipeline {
       onNamed: (trackId) => this.repaintTrack(trackId),
     });
     this.manager = new GmeetCompatibleBuffer({
+      // Mixed Teams audio (AGC + jitter) makes a 2-pass agreement over a 2 s first window commit an
+      // unsettled prefix and strand the rest of a short utterance. Callers may still override.
+      confirmThreshold: 3,
+      minAudioDuration: 4,
       ...options.buffer,
       // Teams' wall-clock witness proved that GMeet's confirmed-prefix early-return can otherwise
       // suppress a Whisper-available trailing draft for > 4 seconds. The shared module's default
