@@ -1,0 +1,43 @@
+{
+  "name": "@vexa/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vexa Dashboard — a simple, modern meetings + transcripts web client on the Vexa core. Runs alongside the Terminal on its own port; same auth contract, narrower surface.",
+  "scripts": {
+    "dev": "next dev --port ${PORT:-3001}",
+    "build": "next build",
+    "start": "next start --port ${PORT:-3001}",
+    "lint": "next lint",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.556.0",
+    "next": "15.5.21",
+    "next-auth": "^4.24.15",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.9"
+  },
+  "_overrides_comment": "Advisory floors for transitive deps of the SHIPPED dashboard image, which is built with `npm ci` from package-lock.json (see Dockerfile) and therefore does not see pnpm-workspace.yaml's overrides. Keep this list in sync with clients/terminal/package.json for any package present in both trees.",
+  "overrides": {
+    "postcss": ">=8.5.23",
+    "nanoid": "^3.3.18",
+    "sharp": ">=0.35.0",
+    "undici": "^7.29.0"
+  }
+}

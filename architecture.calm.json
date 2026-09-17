@@ -758,6 +758,32 @@
    }
   },
   {
+   "unique-id": "dashboard-next",
+   "node-type": "webclient",
+   "name": "dashboard-next",
+   "description": "dashboard — client: the v0.12 meetings + transcripts read surface, built from this tree and running alongside the terminal on its own port. Distinct from the deprecated 0.10 `dashboard` node, which is an external pinned image.",
+   "metadata": [
+    {
+     "path": "clients/dashboard"
+    }
+   ],
+   "controls": {
+    "render-only": {
+     "description": "A reader must not re-derive a producer's data. The dashboard renders the transcript the producer emitted; it must NOT contain a transcript-shaping transform (e.g. clustering).",
+     "requirements": [
+      {
+       "requirement-url": "vexa/controls/render-only",
+       "config": {
+        "forbidden-symbols": [
+         "buildMeetingNotes"
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
    "unique-id": "segments-stream",
    "node-type": "data-asset",
    "name": "transcription_segments (stream)",
@@ -2301,6 +2327,22 @@
     }
    },
    "description": "all REST via gateway",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "dash-next-gw-rest",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "dashboard-next"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-rest"
+     }
+    }
+   },
+   "description": "all REST via gateway — a closed read allowlist (meetings, transcripts), carrying the signed-in user's key",
    "protocol": "HTTPS"
   },
   {

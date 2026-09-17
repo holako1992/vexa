@@ -41,6 +41,7 @@ flowchart LR
   extension["extension"]
   claude_plugin["claude-plugin"]
   terminal["terminal"]
+  dashboard_next["dashboard-next"]
   dashboard["dashboard (deprecated)"]
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
@@ -58,6 +59,7 @@ flowchart LR
   gateway -->|"HTTPS"| admin_api
   admin_api -->|"JDBC"| postgres
   terminal -->|"HTTPS"| gateway
+  dashboard_next -->|"HTTPS"| gateway
   terminal -->|"WebSocket"| gateway
   dashboard -->|""| gateway
   dashboard -->|""| gateway

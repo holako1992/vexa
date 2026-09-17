@@ -1,0 +1,10 @@
+# Build + tooling output. Mirrors clients/terminal/.gitignore — the image builds these itself
+# (see Dockerfile), so nothing here belongs in the tree.
+/.next
+/out
+/node_modules
+next-env.d.ts
+*.tsbuildinfo
+.env
+.env.*
+!.env.example

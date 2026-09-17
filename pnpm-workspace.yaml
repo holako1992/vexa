@@ -1,7 +1,8 @@
 # Workspace packages. Globs match dirs that have a package.json; empty dirs are ignored
 # (so this is green-on-empty and fills in as domains are populated, contract-first).
-# Open-core scope: core/ services + modules, packages/, and the terminal client. (The full
-# product's integrations/, sdks/, tools/, and dashboard clients are not part of this repo.)
+# Open-core scope: core/ services + modules, packages/, and the two web clients — the terminal
+# workbench and the dashboard read surface. (The full product's integrations/, sdks/ and tools/ are
+# not part of this repo, and neither is the retired 0.10 dashboard image.)
 packages:
   - "core/runtime"
   - "core/gateway"
@@ -12,6 +13,7 @@ packages:
   - "core/identity/services/*"
   - "core/identity/modules/*"
   - "clients/terminal"
+  - "clients/dashboard"
 # Build scripts pnpm may run (pnpm ≥10 blocks postinstall by default). esbuild
 # ships the native binary our TS test runner (tsx) needs; onnxruntime-node (+ its
 # transitive sharp/protobufjs, via @huggingface/transformers in @vexa/mixed-pipeline)

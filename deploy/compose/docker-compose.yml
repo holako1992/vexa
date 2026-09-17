@@ -947,6 +947,67 @@ services:
         condition: service_healthy
     networks: [vexa]
     restart: unless-stopped
+  # The v0.12 dashboard (clients/dashboard) — the simple meetings + transcripts web client, running
+  # ALONGSIDE the terminal on its own port. Different shape, same core: the terminal is the workbench,
+  # this is the read surface. It shares the terminal's session contract (the httpOnly vexa-token +
+  # vexa-user-info cookies), so behind one domain the two are a single sign-in.
+  #
+  # NOT the `dashboard` service below — that one is the retired 0.10 image, kept on a profile. This is
+  # built from this tree and is on by default.
+  dashboard-next:
+    build:
+      context: ../../clients/dashboard
+      dockerfile: Dockerfile
+    image: vexaai/v012-dashboard:${IMAGE_TAG:-dev}
+    ports:
+      - "127.0.0.1:${DASHBOARD_NEXT_PORT:-13002}:3001"
+    environment:
+      - NODE_ENV=production
+      # The single backend edge. The dashboard's proxy forwards a closed allowlist of read paths here
+      # with the signed-in user's own key; it never reaches meeting-api or agent-api directly.
+      - GATEWAY_URL=http://gateway:8000
+      # admin-api, for find-or-create + token mint at sign-in. Unset → sign-in answers 503 and says why.
+      - VEXA_ADMIN_API_URL=http://admin-api:8001
+      - VEXA_ADMIN_API_KEY=${ADMIN_TOKEN:-}
+      # The identity oracle (/internal/validate). Set → the signed-in identity is VERIFIED on every page
+      # render; unset → it degrades to "a session token is present" and /api/auth/me reports
+      # verified:false. NO PLACEHOLDER FALLBACK (A19) — unset is unset.
+      - VEXA_INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-dev-nextauth-secret}
+      # Public origin when self-hosting behind a domain/reverse-proxy. An https:// value also flips the
+      # session cookies to Secure and turns on HSTS.
+      - NEXTAUTH_URL=${DASHBOARD_NEXT_URL:-}
+      - DASHBOARD_URL=${DASHBOARD_NEXT_URL:-}
+      # OAuth sign-in (NextAuth). Each provider self-gates on its credentials: set BOTH the id and the
+      # secret to expose that button. Register the redirect URI in the provider console:
+      #   Google    → ${DASHBOARD_NEXT_URL}/api/auth/callback/google
+      #   Microsoft → ${DASHBOARD_NEXT_URL}/api/auth/callback/microsoft
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID:-}
+      - MICROSOFT_CLIENT_SECRET=${MICROSOFT_CLIENT_SECRET:-}
+      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-common}
+      # The password-less email door. DEVELOPMENT ONLY — it proves no ownership of the address, so it is
+      # closed unless this is explicitly "true", and then only for addresses matching the pattern.
+      - DASHBOARD_ALLOW_EMAIL_LOGIN=${DASHBOARD_NEXT_ALLOW_EMAIL_LOGIN:-false}
+      - DASHBOARD_EMAIL_LOGIN_PATTERN=${DASHBOARD_NEXT_EMAIL_LOGIN_PATTERN:-}
+      # Behind a reverse proxy? Then X-Forwarded-For is trustworthy and login rate limiting reads it.
+      # Off by default — that header is client-settable, and a wrong "true" under-throttles.
+      - DASHBOARD_TRUST_PROXY=${DASHBOARD_NEXT_TRUST_PROXY:-false}
+    healthcheck:
+      # / redirects to /login for an anonymous caller (307) — a <500 answer is the liveness signal.
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    init: true
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks: [vexa]
+    restart: unless-stopped
+
   # DEPRECATED — the 0.10 dashboard, kept as an OFF-BY-DEFAULT profile while it is still
   # load-bearing (#813). It is the multi-user web UI hosted production runs against the 0.12 core
   # (the wiring below is the hosted-proven one), and some flows (authenticated-session lifecycle,

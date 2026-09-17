@@ -140,6 +140,7 @@ edges:
   admin-api -write-> identity-db
   admin-api -write-> postgres
   terminal -req-> gateway  # all REST via gateway
+  dashboard-next -req-> gateway  # all REST via gateway — a closed read allowlist (meetings, transcripts), carrying the signed-in user's key
   terminal -req-> gateway  # live WS via gateway
   dashboard -req-> gateway  # dashboard → gateway REST (hosted-compat aliases; the hosted-proven wiring)
   dashboard -req-> gateway  # dashboard → gateway /ws (live transcript view)
