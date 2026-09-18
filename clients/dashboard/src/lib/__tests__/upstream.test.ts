@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
 import { filterQuery, resolveUpstream, resolveWriteUpstream } from "../upstream";
 
 describe("resolveUpstream", () => {
-  it("admits the three read paths the product has", () => {
+  it("admits the four read paths the product has", () => {
     expect(resolveUpstream(["meetings"])).toEqual({ path: "/meetings" });
+    expect(resolveUpstream(["meetings", "42"])).toEqual({ path: "/meetings/42" });
     expect(resolveUpstream(["transcripts", "by-id", "42"])).toEqual({ path: "/transcripts/by-id/42" });
     expect(resolveUpstream(["transcripts", "google_meet", "abc-defg-hij"])).toEqual({
       path: "/transcripts/google_meet/abc-defg-hij",
@@ -13,9 +14,25 @@ describe("resolveUpstream", () => {
   });
 
   it("refuses every other gateway edge", () => {
-    for (const path of [["bots"], ["agent", "chat"], ["admin", "users"], ["meetings", "42"], []]) {
+    for (const path of [["bots"], ["agent", "chat"], ["admin", "users"], []]) {
       expect(resolveUpstream(path)).toBeNull();
     }
+  });
+
+  it("resolves GET meetings/<id> to the single-row route, refusing non-numeric shapes", () => {
+    expect(resolveUpstream(["meetings", "1"])).toEqual({ path: "/meetings/1" });
+    expect(resolveUpstream(["meetings", "42abc"])).toBeNull();
+    expect(resolveUpstream(["meetings", "../../admin"])).toBeNull();
+    expect(resolveUpstream(["meetings", "1/2"])).toBeNull();
+    expect(resolveUpstream(["meetings", "x".repeat(21)])).toBeNull();
+    expect(resolveUpstream(["meetings", ""])).toBeNull();
+    expect(resolveUpstream(["meetings"])).toEqual({ path: "/meetings" }); // no id: unaffected
+  });
+
+  it("does not shadow, or get shadowed by, transcripts/by-id/<id>", () => {
+    expect(resolveUpstream(["meetings", "42"])).toEqual({ path: "/meetings/42" });
+    expect(resolveUpstream(["transcripts", "by-id", "42"])).toEqual({ path: "/transcripts/by-id/42" });
+    expect(resolveUpstream(["meetings", "by-id"])).toBeNull(); // "by-id" is not a numeric row id
   });
 
   it("refuses an unknown platform rather than building a URL from it", () => {

@@ -24,7 +24,7 @@ import {
   toTranscript,
   transcriptToText,
 } from "@/lib/meetings";
-import { getJson, presentError } from "@/lib/api";
+import { ApiError, getJson, presentError } from "@/lib/api";
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
 
@@ -51,28 +51,37 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const isLive = useRef(false);
 
   const load = useCallback(async () => {
+    let row: MeetingRowDTO;
     try {
-      // The row carries the heading facts; meeting-api has no single-row read, so the list is the
-      // source and the id selects from it. An id that is not in the list is genuinely not yours.
-      const list = await getJson<{ meetings?: MeetingRowDTO[] }>("/api/vexa/meetings");
-      const row = (list.meetings ?? []).find((r) => String(r.id) === meetingId);
-      const mapped = row ? toMeeting(row) : null;
-      setMeeting(mapped);
-      isLive.current = mapped?.phase === "live";
-
-      if (!mapped) {
+      row = await getJson<MeetingRowDTO>(`/api/vexa/meetings/${encodeURIComponent(meetingId)}`);
+    } catch (e) {
+      // A 404 is an answer: this row is not yours or does not exist. Anything else — a 5xx, a
+      // network failure — is "we could not ask", which is a different answer and must not be
+      // rendered as though the meeting were absent.
+      if (e instanceof ApiError && e.status === 404) {
+        setMeeting(null);
         setLines([]);
         setError(null);
+        isLive.current = false;
         return;
       }
+      console.warn("meeting load failed", e);
+      setError(presentError(e));
+      return;
+    }
 
+    const mapped = toMeeting(row);
+    setMeeting(mapped);
+    setError(null);
+    isLive.current = mapped.phase === "live";
+
+    try {
       const body = await getJson<{ segments?: SegmentDTO[] }>(
         `/api/vexa/transcripts/by-id/${encodeURIComponent(meetingId)}`,
       );
       setLines(toTranscript(body.segments));
-      setError(null);
     } catch (e) {
-      console.warn("meeting load failed", e);
+      console.warn("transcript load failed", e);
       setError(presentError(e));
     }
   }, [meetingId]);

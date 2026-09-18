@@ -26,6 +26,7 @@ const SAFE_SEGMENT = /^[^/?#\s]{1,256}$/;
  *
  *  Recognised:
  *    meetings                        → /meetings                      (the caller's meeting rows)
+ *    meetings/<meetingId>            → /meetings/<meetingId>          (owner-scoped, row-keyed)
  *    transcripts/by-id/<meetingId>   → /transcripts/by-id/<meetingId> (owner-scoped, row-keyed)
  *    transcripts/<platform>/<native> → /transcripts/<platform>/<native>
  *
@@ -34,6 +35,13 @@ const SAFE_SEGMENT = /^[^/?#\s]{1,256}$/;
  */
 export function resolveUpstream(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 1 && segments[0] === "meetings") return { path: "/meetings" };
+
+  if (segments.length === 2 && segments[0] === "meetings") {
+    // A meeting row id is numeric — the same shape the `transcripts/by-id/<id>` branch checks.
+    const [, id] = segments as [string, string];
+    if (!/^\d{1,20}$/.test(id)) return null;
+    return { path: `/meetings/${encodeURIComponent(id)}` };
+  }
 
   const extra = resolveReadExtras(segments);
   if (extra) return extra;
