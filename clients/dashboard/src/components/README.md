@@ -6,6 +6,11 @@ Client components. They receive identity as props (resolved on the server) and f
 - `Shell` — the frame: left rail, identity, sign-out, mobile rail toggle.
 - `MeetingsView` — the list: search, phase tabs, polling.
 - `MeetingDetail` — one meeting: header facts, transcript, in-transcript search, copy, download.
+  It reads its own row by id; the collection is not a source for a single meeting.
+- `SendBotDialog` — the dispatch door: paste a meeting link and send a bot, or manage the ICS
+  calendar connections that arm an unattended join. It parses the link in the browser only to
+  decide what to send and what to disable; the platform and id it derives are re-checked at the
+  proxy's write allowlist, which is the boundary that actually refuses.
 - `LoginForm` — the sign-in card. The `next` parameter passes through `safeNext()` from
   `lib/security.ts`, which is why it cannot become an open redirect.
 - `MeetingDetail`'s speaker chips mix one hue into transparent rather than using a frozen pastel,
