@@ -96,6 +96,7 @@ CASES = [
     ("PUT", "/user/models", "/user/models"),
     ("GET", "/user/transcription", "/user/transcription"),
     ("PUT", "/user/transcription", "/user/transcription"),
+    ("GET", "/user/entitlements", "/user/entitlements"),
 
     ("POST", "/agent/chat", "/agent/chat"),
     ("GET", "/agent/meeting/stream", "/agent/meeting/stream"),

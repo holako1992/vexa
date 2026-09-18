@@ -793,6 +793,12 @@ def create_app(
     async def get_user_transcription(request: Request):
         return await _forward("GET", _admin("/user/transcription"), request)
 
+    # The resolved plan + its limits + spend so far. Read-only here: the tier is written by the
+    # billing webhook against admin-api, never by the person whose plan it is.
+    @app.get("/user/entitlements")
+    async def get_user_entitlements(request: Request):
+        return await _forward("GET", _admin("/user/entitlements"), request)
+
     # ---- the AGENT domain (P20·Stage 2): the gateway fronts agent-api under the canonical /agent/*
     # prefix so the SAME edge resolves key → user and injects X-User-Id; agent-api derives `subject`
     # from it (never the client). The terminal therefore talks ONLY to the gateway (one authenticated
