@@ -9,7 +9,7 @@ is the read surface — a list of your meetings, and the transcript of any one o
 | Shape | workbench (tabs, chat, canvas, agent) | list + detail |
 | Dev port | 3000 | **3001** |
 | Compose host port | 13000 | **13002** |
-| Backend surface | the gateway's meetings **and** agent domains | three read paths (below) |
+| Backend surface | the gateway's meetings **and** agent domains | a closed read + write allowlist (below) |
 | Live updates | websocket proxy (`/ws`) | polling |
 
 Both hold the same session contract — the httpOnly `vexa-token` + `vexa-user-info` cookies — so a
@@ -32,10 +32,20 @@ DASHBOARD_ALLOW_EMAIL_LOGIN=true \
 npm run dev
 ```
 
-In the compose stack itself it is a profile, off by default:
+In the compose stack itself, `dashboard-next` is on by default — no profile flag needed — and
+publishes on the loopback interface only, `127.0.0.1:${DASHBOARD_NEXT_PORT:-13002}`, so it isn't
+reachable off-host without a reverse proxy in front of it:
 
 ```bash
-docker compose --profile dashboard-next up -d    # http://localhost:13002
+docker compose up -d dashboard-next    # http://localhost:13002
+```
+
+For hot reload against the checked-out source instead of a rebuilt image, layer the hot overlay
+(needs the image built with `DASHBOARD_NEXT_RUNTIME_DEPS=dev` in `.env` — the default image ships
+pruned production `node_modules` that can't run `next dev`):
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.hot.yml up -d dashboard-next
 ```
 
 ## Configuration
@@ -70,9 +80,24 @@ Stated plainly, because "it has auth" is not a description.
   fell back to one deployment-wide key would serve one identity's meetings to whoever was at the
   keyboard. No cookie means 401.
 - **One door, closed by default.** `/api/vexa/*` matches a closed allowlist
-  (`src/lib/upstream.ts`): `meetings`, `transcripts/by-id/<id>`, `transcripts/<platform>/<native>`.
-  GET only. Anything else is a 404 here, not a forwarded probe. Query parameters are filtered to a
-  paging allowlist. Ids are shape-checked before they are interpolated.
+  (`src/lib/upstream.ts`), separately for reads and writes. Anything else is a 404 here, not a
+  forwarded probe. Query parameters on reads are filtered to a paging allowlist. Ids are
+  shape-checked before they are interpolated into an upstream URL.
+
+  Reads (GET): `meetings` · `transcripts/by-id/<id>` · `transcripts/<platform>/<native>` — the
+  meeting list and its transcripts, scoped to the caller by the gateway. Plus two small reads that
+  feed the write flow below: `user/calendars` (the caller's connected ICS calendars) and
+  `meeting/jitsi-hosts` (the deployment's declared Jitsi hostnames, so the URL parser can
+  recognise a self-hosted Jitsi link).
+
+  Writes (POST / PATCH / DELETE): `POST bots` dispatches a bot to a live meeting from a pasted
+  URL — the "Add Bot" action in the Meetings view. `POST user/calendars`, `PATCH
+  user/calendars/<id>`, `DELETE user/calendars/<id>`, and `POST user/calendars/<id>/sync` connect,
+  update, disconnect, and manually sync an ICS calendar for auto-join. Each write is a mechanism
+  the dashboard's own UI drives — dispatching a bot and managing calendar connections are read
+  surfaces' natural counterpart once a user can *act* on what they see, not a widening for its own
+  sake. There is still no agent/chat, recordings playback, admin panel, or token management path;
+  those stay out of scope below.
 - **Least privilege on the minted token.** Sign-in mints `bot,tx` — not the `browser` scope the
   terminal needs. Login tokens are named `dashboard-login` and capped, so a sign-in loop cannot
   mint without bound; self-serve and terminal tokens are never touched.
@@ -88,9 +113,10 @@ Stated plainly, because "it has auth" is not a description.
 
 ## What it deliberately does not do
 
-No bot dispatch, no recordings playback, no agent/chat, no admin panel, no token management. Those
-live in the Terminal, and adding them here would mean widening the allowlist above. The scope is
-the guarantee.
+Bot dispatch and ICS calendar management are in scope (above) because they are what a person
+looking at their own meetings needs to do next. Recordings playback, agent/chat, an admin panel,
+and token management stay out: those live in the Terminal, and adding them here would mean
+widening the allowlist beyond what this client's own UI drives. The scope is the guarantee.
 
 ## Layout
 

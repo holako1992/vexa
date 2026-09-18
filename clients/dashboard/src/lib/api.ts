@@ -27,6 +27,32 @@ export function presentError(e: unknown): string {
   return "Something went wrong — details are in the browser console.";
 }
 
+export async function mutateJson<T>(method: string, url: string, body?: unknown): Promise<T> {
+  let r: Response;
+  const init: RequestInit = {
+    method,
+    cache: "no-store",
+    headers: body != null ? { "Content-Type": "application/json" } : {},
+    ...(body != null ? { body: JSON.stringify(body) } : {}),
+  };
+  try {
+    r = await fetch(url, init);
+  } catch (e) {
+    throw new ApiError(0, e instanceof Error ? e.message : "network error", url);
+  }
+  if (!r.ok) {
+    let detail = "";
+    try {
+      const b = (await r.json()) as { detail?: unknown; error?: unknown };
+      const d = b?.detail ?? b?.error;
+      detail = typeof d === "string" ? d : d != null ? JSON.stringify(d).slice(0, 200) : "";
+    } catch { /* not JSON */ }
+    throw new ApiError(r.status, detail, url);
+  }
+  if (r.status === 204) return undefined as T;
+  return (await r.json()) as T;
+}
+
 export async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   let r: Response;
   try {

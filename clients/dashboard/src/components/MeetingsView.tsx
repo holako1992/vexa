@@ -8,12 +8,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Search, Users, Video } from "lucide-react";
+import { Bot, Search, Users, Video } from "lucide-react";
 import clsx from "clsx";
 import { getJson, presentError } from "@/lib/api";
 import { type Meeting, type MeetingRowDTO, filterMeetings, formatClock, sortMeetings, toMeeting } from "@/lib/meetings";
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
+import { SendBotDialog } from "./SendBotDialog";
 
 const TABS = [
   { id: "all", label: "All" },
@@ -48,6 +49,7 @@ export function MeetingsView() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<TabId>("all");
+  const [dialogOpen, setDialogOpen] = useState(false);
   // Kept in a ref so the poll effect does not restart on every refresh.
   const hasLive = useRef(false);
 
@@ -94,10 +96,27 @@ export function MeetingsView() {
   }, [meetings]);
 
   return (
+    <>
+    {dialogOpen && (
+      <SendBotDialog
+        onClose={() => setDialogOpen(false)}
+        onBotSent={() => { void load(); setDialogOpen(false); }}
+      />
+    )}
     <div className="mx-auto w-full max-w-5xl px-4 py-8 md:px-8 md:py-10">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Meetings</h1>
-        <p className="mt-1 text-sm text-ink-2">Everything Vexa has captured for you.</p>
+      <header className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Meetings</h1>
+          <p className="mt-1 text-sm text-ink-2">Everything Vexa has captured for you.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setDialogOpen(true)}
+          className="flex shrink-0 items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink shadow-sm transition-opacity hover:opacity-90"
+        >
+          <Bot size={15} aria-hidden />
+          Add Bot
+        </button>
       </header>
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -181,5 +200,6 @@ export function MeetingsView() {
         </ul>
       )}
     </div>
+    </>
   );
 }
