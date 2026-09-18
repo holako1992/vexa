@@ -20,7 +20,7 @@ exercises:
 import hmac
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response, Security, status
@@ -36,6 +36,7 @@ from ..token_scope import VALID_SCOPES, generate_prefixed_token
 from .db import get_db
 from . import events as events_mod
 from . import person_settings as person_settings_mod
+from .billing.entitlements import resolve_entitlements
 
 ADMIN_KEY_HEADER = APIKeyHeader(name="X-Admin-API-Key", auto_error=False)
 USER_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -868,6 +869,38 @@ def create_app() -> FastAPI:
             "url": prefs.get("url"),
             "token_set": bool(prefs.get("token")),
             "token": _mask_secret(prefs.get("token")),
+        }
+
+    # --- user tier: resolved billing entitlements (DB-70) — read-only, same auth as
+    #     /user/webhook and /user/transcription. DB-71 (usage meter) and DB-72 (spawn-time quota
+    #     enforcement) both read the SAME resolve_entitlements() this calls; nothing here writes
+    #     billing fields — those come from Stripe webhooks (DB-73), not from a GET.
+    @app.get("/user/entitlements")
+    async def get_user_entitlements(user: User = Depends(get_current_user)):
+        data = user.data if isinstance(user.data, dict) else {}
+        resolved = await resolve_entitlements(data, datetime.now(timezone.utc), user.id)
+        plan = resolved.plan
+        return {
+            "plan_id": plan.plan_id,
+            "catalog_version": plan.catalog_version,
+            "status": plan.status,
+            "will_renew": plan.will_renew,
+            "grace_until": plan.grace_until.isoformat() if plan.grace_until else None,
+            "period": {
+                "start": plan.period_start.isoformat(),
+                "end": plan.period_end.isoformat(),
+            },
+            "limits": {
+                "meetings_per_month": plan.limits.meetings_per_month,
+                "max_minutes_per_meeting": plan.limits.max_minutes_per_meeting,
+                "concurrent_bots": plan.limits.concurrent_bots,
+                "recording_retention_days": plan.limits.recording_retention_days,
+                "ai_summaries_per_month": plan.limits.ai_summaries_per_month,
+            },
+            "usage": {
+                "meetings_used": resolved.usage.meetings_used,
+                "minutes_used": resolved.usage.minutes_used,
+            },
         }
 
     # --- internal tier: the gateway's authz oracle (FAIL-CLOSED) ---
