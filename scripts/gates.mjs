@@ -1415,7 +1415,38 @@ function gateLiteMakefile() {
   return true;
 }
 
-const GATES = { readme: gateReadme, "lite-makefile": gateLiteMakefile, "docs-version": gateDocsVersion, dataflow: gateDataflow, isolation: gateIsolation, "isolation-py": gateIsolationPy, exports: gateExports, graph: gateGraph, "graph-py": gateGraphPy, schema: gateSchema, "contract-version": gateContractVersion, "config-contract": gateConfigContract, "db-schema": gateDbSchema, "db-budget": gateDbBudget, python: gatePython, stack: gateStack, node: gateNode, health: gateHealth, access: gateAccess, tracing: gateTracing, replay: gateReplay, telemetry: gateTelemetry, eval: gateEval, licenses: gateLicenses, "image-licenses": gateImageLicenses, "runtime-parity": gateRuntimeParity, compose: gateCompose, "execution-env": gateExecutionEnv, "test-isolation": gateTestIsolation, "arch-report": gateArchReport, parity: gateParity, "compose-stress": gateComposeStress, "compose-chaos": gateComposeChaos, "eval-baseline": gateEvalBaseline, "contract-conformance": gateContractConformance };
+// gate:dashboard-e2e (DB-02) — the dashboard's Playwright specs (clients/dashboard/e2e), the
+// browser loop layered on top of its vitest unit tests: a real `next dev`, talking to a real
+// (stubbed) gateway + admin-api over actual HTTP — nothing mocked at the `fetch` layer, unlike
+// every other dashboard test. Green-on-empty before the harness exists. GREEN-OR-SKIP, not
+// fail, when the prerequisites this host may not have are missing: `clients/dashboard/e2e`
+// needs `npm install` (node_modules) same as `gate:node` does, and it needs a downloaded
+// Chromium binary (`npx playwright install chromium` in clients/dashboard) that a fresh host —
+// or one where that download is blocked — will not have. A gate that hard-fails on a missing
+// browser binary is a gate people learn to ignore; this one says exactly what to run instead.
+function gateDashboardE2e() {
+  const dir = join(ROOT, "clients", "dashboard", "e2e");
+  if (!existsSync(dir)) { console.log("  ✓ gate:dashboard-e2e — no clients/dashboard/e2e yet (green-on-empty)"); return true; }
+  const dashboardRoot = join(ROOT, "clients", "dashboard");
+  if (!existsSync(join(dashboardRoot, "node_modules"))) {
+    console.log("  ✓ gate:dashboard-e2e — clients/dashboard/node_modules missing (`npm install` in clients/dashboard) → skip (green-or-skip)");
+    return true;
+  }
+  try {
+    execSync("npm run test:e2e", { cwd: dashboardRoot, stdio: "pipe" });
+  } catch (e) {
+    const text = errText(e);
+    if (/Executable doesn't exist|browserType\.launch/i.test(text)) {
+      console.log("  ✓ gate:dashboard-e2e — Chromium not installed (`npx playwright install chromium` in clients/dashboard) → skip (green-or-skip)");
+      return true;
+    }
+    return fail([`dashboard e2e specs:\n${text.slice(-3000)}`]);
+  }
+  console.log("  ✓ gate:dashboard-e2e — dashboard browser specs green (stub gateway + admin-api, real next dev, real Chromium)");
+  return true;
+}
+
+const GATES = { readme: gateReadme, "lite-makefile": gateLiteMakefile, "docs-version": gateDocsVersion, dataflow: gateDataflow, isolation: gateIsolation, "isolation-py": gateIsolationPy, exports: gateExports, graph: gateGraph, "graph-py": gateGraphPy, schema: gateSchema, "contract-version": gateContractVersion, "config-contract": gateConfigContract, "db-schema": gateDbSchema, "db-budget": gateDbBudget, python: gatePython, stack: gateStack, node: gateNode, health: gateHealth, access: gateAccess, tracing: gateTracing, replay: gateReplay, telemetry: gateTelemetry, eval: gateEval, licenses: gateLicenses, "image-licenses": gateImageLicenses, "runtime-parity": gateRuntimeParity, compose: gateCompose, "execution-env": gateExecutionEnv, "test-isolation": gateTestIsolation, "arch-report": gateArchReport, parity: gateParity, "compose-stress": gateComposeStress, "compose-chaos": gateComposeChaos, "eval-baseline": gateEvalBaseline, "contract-conformance": gateContractConformance, "dashboard-e2e": gateDashboardE2e };
 const which = process.argv[2] || "all";
 
 // `seal` (not a gate) — (re)freeze the current published contracts into contracts.seal.json.
