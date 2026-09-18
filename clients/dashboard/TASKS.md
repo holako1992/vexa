@@ -363,3 +363,40 @@ re-sealed whenever a module or data flow is added (DB-30, DB-32, DB-60, DB-71, D
 Rules for anyone taking a task: read `AGENTS.md`; quotas and usage are enforced in the core (point of introduction),
 the dashboard only presents them; every new proxy path is an allowlist entry with a shape check and a test; new
 dependencies are Category A or listed in `license-exceptions.json`; no per-PR edits to `docs/docs/changelog.mdx`.
+
+---
+
+## DB-02a · Four e2e specs fail in sequence but pass alone — S/M
+
+The harness (DB-02, commit `4112c0e9`) runs 14 checks. **10 pass. 4 fail**, and the four are not
+a feature being broken:
+
+| Spec | |
+|---|---|
+| `04-detail` | opens one meeting, requests only `/meetings/<id>` |
+| `04-detail` | a foreign id is a 404, not a list scan |
+| `05-send-bot` | paste a Meet URL, gateway receives `POST /bots` |
+| `06-calendar` | connect an ICS calendar, toggle auto-join |
+
+**They pass when run alone.** `npx playwright test e2e/specs/04-detail.spec.ts` is green, twice
+over. So this is order dependence, not a defect in the feature each one covers. Two leads, in
+order of promise:
+
+1. **The dashboard server throws `SyntaxError: Unexpected end of JSON input`** during the run,
+   visible in Playwright's `[WebServer]` output. Something parses a body that is empty. The
+   likeliest site is `src/lib/adminApi.ts`'s `adminRequest`, which special-cases `204` and then
+   calls `res.json()` — any other empty-bodied response reaches `JSON.parse("")`. If that is it,
+   **it is a product bug, not a harness bug**, and it is the one thing here worth fixing at the
+   point of introduction.
+2. State leaking between specs despite `resetStub` in `beforeEach`. The run is already
+   `workers: 1, fullyParallel: false`, so this would be state the reset does not clear — most
+   likely in the dashboard process (a warm module-level cache, the in-process rate limiter in
+   `src/lib/rateLimit.ts`) rather than in the stub.
+
+Start by reproducing lead 1 directly: drive `adminRequest` against a 200 with an empty body.
+Do not change a spec to make it pass until the cause is known.
+
+Already fixed while finding this, in `4112c0e9`: the stub served requests as floating promises,
+so one rejected handler terminated the process under Node 22 and surfaced as eight later specs
+failing on a refused connection. Each request now carries its own rejection catch. That repair
+took the suite from 6 passing to 10.
