@@ -9,6 +9,15 @@
 #
 # Build context: clients/dashboard (self-contained npm project; no @vexa/* workspace deps).
 
+# RUNTIME_DEPS selects the node_modules the runtime stage ships (see the deps-* stages below):
+#   prod (default) — pruned production deps; the lean image every release build uses.
+#   dev            — the FULL npm ci tree from the build stage. Required for hot/dev-mode runs
+#                    (compose hot overlay runs `next dev` under NODE_ENV=development): dev-mode
+#                    Next needs @types/node, @types/react and the tailwind/postcss toolchain at
+#                    runtime, and when they are missing it npm-installs them AT BOOT over the
+#                    network. Shipping the deps makes dev boot instant and offline-safe.
+ARG RUNTIME_DEPS=prod
+
 FROM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -16,15 +25,21 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# deps: pruned production deps. typescript must ALSO be present — Next loads the TypeScript
+# deps-prod: pruned production deps. typescript must ALSO be present — Next loads the TypeScript
 # next.config.ts at runtime and npm-installs its own at BOOT when it is absent. `npm i typescript`
 # here CANNOT provide it: NODE_ENV=production makes npm silently omit anything matching a
 # devDependency. So it is COPIED from the build stage — the exact compiler `next build` ran with.
-FROM node:22-slim AS deps
+FROM node:22-slim AS deps-prod
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/node_modules/typescript ./node_modules/typescript
+
+# deps-dev: the build stage already holds the full npm ci tree.
+FROM build AS deps-dev
+
+# ARG-selected alias (COPY --from does not expand variables; FROM does).
+FROM deps-${RUNTIME_DEPS} AS deps
 
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production \
@@ -38,6 +53,7 @@ COPY --from=build /app/.next ./.next
 # stage rather than the build context, where a clean clone does not have it.
 COPY --from=build /app/next-env.d.ts ./
 COPY next.config.ts tsconfig.json ./
+COPY src ./src
 # Run as the image's unprivileged user. A web client has no reason to be root, and a container
 # escape starts from whatever the process already is. `.next` is read-only at runtime.
 RUN chown -R node:node /app

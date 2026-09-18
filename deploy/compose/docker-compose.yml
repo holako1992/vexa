@@ -958,6 +958,12 @@ services:
     build:
       context: ../../clients/dashboard
       dockerfile: Dockerfile
+      args:
+        # Runtime node_modules flavor (clients/dashboard/Dockerfile): prod (default, pruned) or
+        # dev (full tree). Set DASHBOARD_NEXT_RUNTIME_DEPS=dev in .env on hosts that run this
+        # service under the hot overlay (`next dev` needs the dev toolchain at runtime and
+        # otherwise npm-installs it AT BOOT, slow and network-dependent).
+        RUNTIME_DEPS: ${DASHBOARD_NEXT_RUNTIME_DEPS:-prod}
     image: vexaai/v012-dashboard:${IMAGE_TAG:-dev}
     ports:
       - "127.0.0.1:${DASHBOARD_NEXT_PORT:-13002}:3001"

@@ -41,3 +41,21 @@ services:
       - ../../clients/terminal/public:/app/public
       - ../../clients/terminal/next.config.ts:/app/next.config.ts
       - ../../clients/terminal/tsconfig.json:/app/tsconfig.json
+
+  # The dashboard has no custom server (next start / next dev are the whole story), so hot reload
+  # is `next dev` itself rather than a --reload flag on a hand-rolled process. Its Dockerfile ships
+  # PRUNED PRODUCTION deps (RUNTIME_DEPS=prod default) — `next dev` needs the dev toolchain
+  # (@types/*, tailwind/postcss) at runtime, so a host running this overlay must build the image
+  # with RUNTIME_DEPS=dev (DASHBOARD_NEXT_RUNTIME_DEPS=dev in .env) or `next dev` boots empty-handed
+  # and npm-installs the missing deps over the network at request time.
+  dashboard-next:
+    command: ["npx","next","dev","--port","3001","--hostname","0.0.0.0"]
+    environment:
+      - NODE_ENV=development
+      # Inherit the public origin from .env; fall back to this overlay's own compose port
+      # (13002) rather than the terminal's, since a hardcoded wrong origin breaks NextAuth sign-in.
+      - NEXTAUTH_URL=${DASHBOARD_NEXT_URL:-http://localhost:13002}
+    volumes:
+      - ../../clients/dashboard/src:/app/src
+      - ../../clients/dashboard/next.config.ts:/app/next.config.ts
+      - ../../clients/dashboard/tsconfig.json:/app/tsconfig.json
