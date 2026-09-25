@@ -116,3 +116,36 @@ function bulletsOf(text: string): string[] {
     .map((l) => l.replace(/^[-*]\s+/, "").trim())
     .filter(Boolean);
 }
+
+/** One run of a section's text: either plain, or wrapped in the producer's `**strong**` /
+ *  `_emphasis_` markdown. */
+export interface InlineSegment {
+  text: string;
+  emphasis: "none" | "em" | "strong";
+}
+
+/** Parse `**strong**` and `_emphasis_` inline markdown into safe segments — never HTML, never
+ *  `dangerouslySetInnerHTML`. The producer writes these two forms into the note's prose (e.g. the
+ *  `_none recorded in this meeting._` placeholder in Overview/Decisions/Open questions), and
+ *  `SummaryPanel` renders each segment as plain React (`<strong>`/`<em>`/text), so this module
+ *  stays data-only like the rest of the parser above.
+ *
+ *  An underscore is an emphasis delimiter only at a WORD BOUNDARY — never between two word
+ *  characters. Without that rule, an identifier like `snake_case_name` would render its middle
+ *  underscore-bounded run as italic, which is not what anyone writing that name meant. `**bold**`
+ *  has no such ambiguity (`*` is never a legal identifier character), so it needs no boundary
+ *  check. */
+export function parseInlineEmphasis(text: string): InlineSegment[] {
+  const segments: InlineSegment[] = [];
+  const re = /\*\*([^*\n]+?)\*\*|(?<![\w*])_([^_\n]+?)_(?![\w*])/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) segments.push({ text: text.slice(last, m.index), emphasis: "none" });
+    if (m[1] !== undefined) segments.push({ text: m[1], emphasis: "strong" });
+    else segments.push({ text: m[2]!, emphasis: "em" });
+    last = re.lastIndex;
+  }
+  if (last < text.length) segments.push({ text: text.slice(last), emphasis: "none" });
+  return segments;
+}

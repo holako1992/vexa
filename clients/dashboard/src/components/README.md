@@ -25,7 +25,14 @@ Client components. They receive identity as props (resolved on the server) and f
   states (not-ended, shared-owner-only, pending/polling, skipped, complete) — never a single
   generic "no summary". No markdown library and no `dangerouslySetInnerHTML`: the note's shape is
   small and fixed, so turning it into JSX directly is both simpler and incapable of weakening the
-  nonce-based CSP.
+  nonce-based CSP. Inline `**strong**`/`_emphasis_` in the note's prose (e.g. the producer's own
+  `_none recorded in this meeting._` placeholder) renders as `<strong>`/`<em>` through its local
+  `Inline` component, wired to `lib/summary.ts`'s `parseInlineEmphasis` — never as literal
+  underscores, and never through raw HTML.
+- `BillingView` — DB-74's read-only billing page (`/billing`): plan, usage meters, reset date,
+  and any past-due / cancel-at-period-end note, from `GET /api/vexa/user/entitlements`
+  (`lib/entitlements.ts`'s formatters). No checkout or portal buttons — see the file's own header
+  comment for why; a later task fills that slot once DB-73's Stripe endpoints are final.
 - `BotControls` — DB-41: the bot's live status (from `GET /bots/status`) and a **Stop recording**
   button behind `ui/Dialog`'s confirm. A join-failure `reason`, when the producer recorded one, is
   shown verbatim — never reworded.
@@ -43,7 +50,12 @@ Client components. They receive identity as props (resolved on the server) and f
   `ui/Toggle`. Every mutation (send bot, connect/update/sync/remove a calendar) confirms or fails
   through `ui/Toast`'s `useToast()`, in addition to the inline "Bot is joining the meeting."
   confirmation `SendBotDialog` already showed (DB-02a fixed that inline confirmation; DB-04 did not
-  touch it, only added the toast alongside it).
+  touch it, only added the toast alongside it). DB-75's paywall: a read-only remaining-allowance
+  line under Send (`lib/entitlements.ts`'s `formatRemainingAllowance`, informational only — it
+  never disables sending, because a stale client read must not refuse a legitimate one), and a
+  quota-exceeded send branches on the `POST /bots` response body's `error: "quota_exceeded"`
+  field, never on the 402 status alone, showing the reset date and a link to `upgrade_url` (or
+  `/billing` when the producer sent none).
 - `LoginForm` — the sign-in card. The `next` parameter passes through `safeNext()` from
   `lib/security.ts`, which is why it cannot become an open redirect.
 - `MeetingDetail`'s speaker chips mix one hue into transparent rather than using a frozen pastel,

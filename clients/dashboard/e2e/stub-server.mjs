@@ -26,7 +26,16 @@ import {
   GATEWAY_PORT,
   INTERNAL_API_SECRET,
 } from "./ports.mjs";
-import { freshCalendars, freshMeetings, transcriptFor, summaryFor, participantsFor, JITSI_HOSTS } from "./fixtures.mjs";
+import {
+  freshCalendars,
+  freshMeetings,
+  transcriptFor,
+  summaryFor,
+  participantsFor,
+  JITSI_HOSTS,
+  freeEntitlements,
+  QUOTA_EXCEEDED_BODY,
+} from "./fixtures.mjs";
 
 const RUNNING_STATUSES = new Set(["requested", "joining", "awaiting_admission", "needs_help", "active", "stopping"]);
 const SUPPORTED_STOP_PLATFORMS = new Set(["google_meet", "teams", "zoom", "jitsi"]);
@@ -39,8 +48,14 @@ let nextCalendarId = 1;
 const bots = []; // every POST /bots body, in arrival order
 const gatewayLog = [];
 const adminLog = [];
-/** Forced response overrides, keyed by a short name a spec asks for. Cleared on reset. */
-let force = { meetings: null, meetingDetail: null };
+/** Forced response overrides, keyed by a short name a spec asks for. Cleared on reset.
+ *  `botsQuota: true` makes `POST /bots` answer DB-72's unwrapped 402 `quota_exceeded` body
+ *  instead of dispatching — spec 14's paywall proof. */
+let force = { meetings: null, meetingDetail: null, botsQuota: false };
+/** `GET /user/entitlements`'s current answer (DB-74/DB-75) — swapped per spec via
+ *  `/__control/entitlements` (`helpers.ts`'s `setEntitlements`), reset to the free-plan default
+ *  on every `/__control/reset`. */
+let entitlements = freeEntitlements();
 
 let users = new Map(); // email -> { id, email, name }
 let nextUserId = 1;
@@ -54,7 +69,8 @@ function resetAll() {
   bots.length = 0;
   gatewayLog.length = 0;
   adminLog.length = 0;
-  force = { meetings: null, meetingDetail: null };
+  force = { meetings: null, meetingDetail: null, botsQuota: false };
+  entitlements = freeEntitlements();
   users = new Map();
   nextUserId = 1;
   tokens.clear();
@@ -109,6 +125,10 @@ async function handleGateway(req, res) {
     force = { ...force, ...body };
     return sendJson(res, 200, { ok: true, force });
   }
+  if (url.pathname === "/__control/entitlements" && req.method === "POST") {
+    entitlements = await readJsonBody(req);
+    return sendJson(res, 200, { ok: true, entitlements });
+  }
 
   logRequest(gatewayLog, req);
 
@@ -151,6 +171,11 @@ async function handleGateway(req, res) {
   if (req.method === "GET" && parts.length === 2 && parts[0] === "bots" && parts[1] === "status") {
     const running = meetings.filter((m) => RUNNING_STATUSES.has(m.status));
     return sendJson(res, 200, { running, running_bots: running, count: running.length });
+  }
+
+  // GET /user/entitlements — the resolved plan/limits/usage (DB-70/DB-74/DB-75).
+  if (req.method === "GET" && parts.length === 2 && parts[0] === "user" && parts[1] === "entitlements") {
+    return sendJson(res, 200, entitlements);
   }
 
   // DELETE /bots/<platform>/<native> — Stop recording (DB-41). Mirrors meeting-api's own shape
@@ -223,6 +248,10 @@ async function handleGateway(req, res) {
 
   // POST /bots
   if (req.method === "POST" && parts.length === 1 && parts[0] === "bots") {
+    // DB-72/DB-75: `force.botsQuota` mirrors meeting-api's monthly-quota refusal — an unwrapped
+    // 402, no `{"detail": ...}` envelope. The dashboard's paywall must branch on the `error`
+    // field this body carries, never on the 402 status alone (see SendBotDialog.tsx).
+    if (force.botsQuota) return sendJson(res, 402, QUOTA_EXCEEDED_BODY);
     const body = await readJsonBody(req);
     bots.push(body);
     return sendJson(res, 200, { id: 900 + bots.length, status: "requested", ...body });

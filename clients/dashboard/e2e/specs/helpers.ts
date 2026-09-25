@@ -53,6 +53,20 @@ export async function forceMeetingDetail(request: APIRequestContext, status: num
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { meetingDetail: status } });
 }
 
+/** Swap the stub's `GET /user/entitlements` answer (DB-74/DB-75) — see `../fixtures.mjs` for the
+ *  named states (`freeEntitlements`, `proUnlimitedEntitlements`, `pastDueEntitlements`,
+ *  `unknownUsageEntitlements`). Persists until the next `resetStub`. */
+export async function setEntitlements(request: APIRequestContext, data: unknown): Promise<void> {
+  const res = await request.post(`${GATEWAY_URL}/__control/entitlements`, { data });
+  if (!res.ok()) throw new Error(`stub set-entitlements failed: ${res.status()}`);
+}
+
+/** Make the stub's `POST /bots` answer DB-72's unwrapped 402 `quota_exceeded` body
+ *  (`../fixtures.mjs`'s `QUOTA_EXCEEDED_BODY`) instead of dispatching — spec 14's paywall proof. */
+export async function forceBotsQuotaExceeded(request: APIRequestContext, on = true): Promise<void> {
+  await request.post(`${GATEWAY_URL}/__control/force`, { data: { botsQuota: on } });
+}
+
 /** One counter for the whole run — each call gets its own fake source IP, so the login route's
  *  rate limiter (5 attempts / 10 minutes per client, `lib/rateLimit.ts`) sees every spec's
  *  sign-in as a different client instead of exhausting one shared "direct" bucket. Requires

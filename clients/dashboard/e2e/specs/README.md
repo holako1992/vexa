@@ -8,7 +8,9 @@ spec's body is only the property, not the plumbing.
 - `helpers.ts` — not a spec. `resetStub()` (call in every `beforeEach`), `signIn()` (drives the
   real email-login form), `testEmail()` (one address per spec so users/tokens don't collide), and
   thin readers over the stub's `/__control/*` remote control (`gatewayRequests`, `adminRequests`,
-  `dispatchedBots`) plus the two forced-failure setters used by `09-failure-states.spec.ts`.
+  `dispatchedBots`) plus the forced-failure setters used by `09-failure-states.spec.ts` and, for
+  DB-75, `setEntitlements()` (swap the stub's `GET /user/entitlements` answer) and
+  `forceBotsQuotaExceeded()` (make `POST /bots` answer the unwrapped 402 `quota_exceeded` body).
 - `01-gate.spec.ts` — an anonymous page request redirects to `/login`; an anonymous
   `/api/vexa/*` request is a 401, not a redirect (a fetch caller can't follow one).
 - `02-signin.spec.ts` — the email door lands on the meetings list and sets both session cookies.
@@ -51,6 +53,12 @@ spec's body is only the property, not the plumbing.
   `PATCH`), delete (confirm dialog names what is lost → `DELETE /meetings/<id>` → back on the list
   with a toast), the participants roster rendering in the header, and a shared meeting showing
   none of rename/delete/stop.
+- `14-billing-paywall.spec.ts` (DB-74, DB-75) — the billing page (`/billing`) in each entitlements
+  state (free with room left, free exhausted, pro unlimited, usage unknown never rendering as
+  `0`); the Send-Bot dialog's remaining-allowance line; a refused send (`POST /bots` → DB-72's
+  unwrapped 402 `quota_exceeded`) showing the paywall message with a link to `upgrade_url` (or
+  `/billing` when the producer sent none); and the summary panel's emphasis fix — `_none recorded
+  in this meeting._` rendering as italic, not literal underscores.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

@@ -98,6 +98,12 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 2 && segments[0] === "bots" && segments[1] === "status") {
     return { path: "/bots/status" };
   }
+  // GET /user/entitlements — the resolved plan, limits and usage (DB-74/DB-75's billing page and
+  // the Send-Bot dialog's paywall copy). Read-only, owner-scoped by the gateway like every other
+  // route here.
+  if (segments.length === 2 && segments[0] === "user" && segments[1] === "entitlements") {
+    return { path: "/user/entitlements" };
+  }
   return null;
 }
 

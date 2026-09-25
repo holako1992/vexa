@@ -2,7 +2,7 @@
  *  cannot parse must render as its own distinct state (`SummaryPanel`'s `malformed` branch),
  *  never silently as "skipped" or an empty complete note. */
 import { describe, expect, it } from "vitest";
-import { parseSummaryDoc } from "../summary";
+import { parseInlineEmphasis, parseSummaryDoc } from "../summary";
 
 const COMPLETE = `---
 type: meeting-summary
@@ -141,5 +141,49 @@ No sections at all, just prose.
       kind: "malformed",
       detail: "missing or invalid status 'pending'",
     });
+  });
+});
+
+describe("parseInlineEmphasis", () => {
+  it("renders the producer's own placeholder as emphasis, not literal underscores", () => {
+    expect(parseInlineEmphasis("_none recorded in this meeting._")).toEqual([
+      { text: "none recorded in this meeting.", emphasis: "em" },
+    ]);
+  });
+
+  it("renders **strong** as a strong segment", () => {
+    expect(parseInlineEmphasis("Ship the **export feature** first.")).toEqual([
+      { text: "Ship the ", emphasis: "none" },
+      { text: "export feature", emphasis: "strong" },
+      { text: " first.", emphasis: "none" },
+    ]);
+  });
+
+  it("leaves word-internal underscores alone — snake_case_name is not emphasis", () => {
+    expect(parseInlineEmphasis("Rename snake_case_name to camelCase.")).toEqual([
+      { text: "Rename snake_case_name to camelCase.", emphasis: "none" },
+    ]);
+  });
+
+  it("plain text with no markdown round-trips as one segment", () => {
+    expect(parseInlineEmphasis("No markdown here.")).toEqual([{ text: "No markdown here.", emphasis: "none" }]);
+  });
+
+  it("handles multiple emphasis runs and mixed strong/em in one string", () => {
+    expect(parseInlineEmphasis("_first_ and **second** and _third_")).toEqual([
+      { text: "first", emphasis: "em" },
+      { text: " and ", emphasis: "none" },
+      { text: "second", emphasis: "strong" },
+      { text: " and ", emphasis: "none" },
+      { text: "third", emphasis: "em" },
+    ]);
+  });
+
+  it("does not treat an underscore glued to a word on one side as a delimiter", () => {
+    // "file_name.txt" has no emphasis-worthy pair (both underscore neighbours are word chars),
+    // and a trailing "_ok" has a word char right after its underscore, so it stays literal too.
+    expect(parseInlineEmphasis("see file_name.txt or a_ok")).toEqual([
+      { text: "see file_name.txt or a_ok", emphasis: "none" },
+    ]);
   });
 });

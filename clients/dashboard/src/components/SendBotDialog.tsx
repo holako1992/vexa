@@ -17,6 +17,13 @@ import { Bot, Calendar, Check, ChevronDown, ChevronUp, Link2, Plus, RefreshCw, T
 import clsx from "clsx";
 import { getJson, mutateJson, presentError, ApiError } from "@/lib/api";
 import { parseMeetingInput, type ParsedMeeting } from "@/lib/meetingId";
+import {
+  formatRemainingAllowance,
+  formatResetDate,
+  isQuotaExceeded,
+  type Entitlements,
+  type QuotaExceededBody,
+} from "@/lib/entitlements";
 import { Button, Dialog, Input, Toggle, useToast } from "./ui";
 
 // ─── types ───────────────────────────────────────────────────────────────────
@@ -75,17 +82,41 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 
 // ─── Meeting-link tab ─────────────────────────────────────────────────────────
 
+/** DB-75's paywall message for a refused send: what happened, when the allowance resets, and a
+ *  link — to the producer's own `upgrade_url` when it sent one, else to the dashboard's own
+ *  billing page. */
+interface QuotaResult {
+  ok: false;
+  msg: string;
+  link: { href: string; label: string };
+}
+
+function quotaResultFrom(body: QuotaExceededBody): QuotaResult {
+  const reset = formatResetDate(body.resets_at);
+  const limitPart = body.limit != null ? ` your ${body.limit} meeting${body.limit === 1 ? "" : "s"}` : " your meeting allowance";
+  const msg = `You've used${limitPart} for this billing period.${reset ? ` ${reset}.` : ""}`;
+  return body.upgrade_url
+    ? { ok: false, msg, link: { href: body.upgrade_url, label: "Upgrade" } }
+    : { ok: false, msg, link: { href: "/billing", label: "See billing" } };
+}
+
 function MeetingLinkTab({ onSent }: { onSent: () => void }) {
   const [url, setUrl] = useState("");
   const [parsed, setParsed] = useState<ParsedMeeting | null>(null);
   const [jitsiHosts, setJitsiHosts] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [result, setResult] = useState<{ ok: true; msg: string } | { ok: false; msg: string; link?: { href: string; label: string } } | null>(null);
+  const [entitlements, setEntitlements] = useState<Entitlements | null>(null);
   const toast = useToast();
 
   useEffect(() => {
     getJson<{ hosts?: string[] }>("/api/vexa/meeting/jitsi-hosts")
       .then((d) => setJitsiHosts(Array.isArray(d.hosts) ? d.hosts : []))
+      .catch(() => {});
+    // Informational only — the remaining-allowance line below. The server is the authority on
+    // whether a send is admitted, so a stale or failed read here never disables the button.
+    getJson<Entitlements>("/api/vexa/user/entitlements")
+      .then(setEntitlements)
       .catch(() => {});
   }, []);
 
@@ -109,13 +140,24 @@ function MeetingLinkTab({ onSent }: { onSent: () => void }) {
       setUrl("");
       onSent();
     } catch (e) {
-      const msg = presentError(e);
-      setResult({ ok: false, msg });
-      toast.push({ tone: "error", title: "Couldn't send the bot", description: msg });
+      // DB-75: branch on the RESPONSE BODY's `error` field, never on the 402 status alone — a
+      // 402 with a different body is a different failure, and presentError's generic 402 text
+      // would lose the reset date and upgrade link this shape carries.
+      if (e instanceof ApiError && isQuotaExceeded(e.body)) {
+        const quota = quotaResultFrom(e.body as QuotaExceededBody);
+        setResult(quota);
+        toast.push({ tone: "error", title: "Meeting quota reached", description: quota.msg });
+      } else {
+        const msg = presentError(e);
+        setResult({ ok: false, msg });
+        toast.push({ tone: "error", title: "Couldn't send the bot", description: msg });
+      }
     } finally {
       setSending(false);
     }
   }, [parsed, url, onSent, toast]);
+
+  const remaining = entitlements ? formatRemainingAllowance(entitlements) : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -154,6 +196,14 @@ function MeetingLinkTab({ onSent }: { onSent: () => void }) {
           )}
         >
           {result.msg}
+          {!result.ok && result.link && (
+            <>
+              {" "}
+              <a href={result.link.href} className="font-medium underline underline-offset-2">
+                {result.link.label}
+              </a>
+            </>
+          )}
         </div>
       )}
 
@@ -167,6 +217,9 @@ function MeetingLinkTab({ onSent }: { onSent: () => void }) {
       >
         {sending ? "Sending…" : "Send Bot"}
       </Button>
+
+      {/* DB-75: informational only, never a disable condition — see the effect above. */}
+      {remaining && <p className="text-center text-xs text-ink-3">{remaining}</p>}
 
       <p className="text-center text-xs text-ink-3">
         The bot will join the meeting and begin transcribing. It appears in the meeting as "Vexa".

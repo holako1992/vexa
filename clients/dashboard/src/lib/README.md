@@ -16,8 +16,18 @@
 - **`meetings.ts`** — the shapes the UI renders and the mapping onto them. Presentation only: it
   picks a title, buckets a status, formats a time. It never reshapes a transcript.
 - **`api.ts`** — the browser fetch helper. Fails loud, so a failure never degrades into an empty
-  list.
+  list. `ApiError` carries the parsed response body (`.body`), not just a squashed `.detail`
+  string, so a caller can branch on a specific error shape (DB-72's unwrapped `quota_exceeded`
+  402) instead of losing it to the generic status-keyed sentence.
 - **`summary.ts`** — parses the `summary.v1` note DB-60 writes (front matter + four `##`
   sections) into data `SummaryPanel.tsx` renders. Dependency-free, like `upstream.ts`; malformed
   input (missing front matter, an unknown version, a missing section) is its own `{kind:
-  "malformed"}` value, never silently coerced into "skipped" or an empty complete note.
+  "malformed"}` value, never silently coerced into "skipped" or an empty complete note. Also
+  parses the note's inline `**strong**` / `_emphasis_` markdown into safe segments
+  (`parseInlineEmphasis`) — an underscore is a delimiter only at a word boundary, so
+  `snake_case_name` stays literal.
+- **`entitlements.ts`** — shapes and pure formatters for `GET /user/entitlements` (DB-74's billing
+  page, DB-75's paywall): usage meters that never render unknown (`null`) as `0`, an unlimited
+  plan's limit (`null`) that never renders as a number, the reset date in words, and
+  `isQuotaExceeded`, which recognizes DB-72's unwrapped `402 {"error": "quota_exceeded", ...}`
+  body — the shape `POST /bots` actually sends, with no `{"detail": ...}` envelope.

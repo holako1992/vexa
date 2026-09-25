@@ -74,6 +74,26 @@ describe("resolveUpstream — read extras", () => {
   });
 });
 
+describe("resolveUpstream — entitlements (DB-75)", () => {
+  it("admits GET user/entitlements", () => {
+    expect(resolveUpstream(["user", "entitlements"])).toEqual({ path: "/user/entitlements" });
+  });
+
+  it("refuses near-misses and writes to the same path", () => {
+    for (const path of [
+      ["user", "entitlement"],
+      ["users", "entitlements"],
+      ["user", "entitlements", "extra"],
+      ["entitlements"],
+    ]) {
+      expect(resolveUpstream(path)).toBeNull();
+    }
+    expect(resolveWriteUpstream("POST", ["user", "entitlements"])).toBeNull();
+    expect(resolveWriteUpstream("PATCH", ["user", "entitlements"])).toBeNull();
+    expect(resolveWriteUpstream("DELETE", ["user", "entitlements"])).toBeNull();
+  });
+});
+
 describe("resolveWriteUpstream", () => {
   it("admits POST /bots", () => {
     expect(resolveWriteUpstream("POST", ["bots"])).toEqual({ path: "/bots" });

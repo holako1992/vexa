@@ -3,6 +3,7 @@
 - `layout.tsx` · `globals.css` — the document shell and the design tokens.
 - `page.tsx` — home: the meetings list inside the app shell.
 - `meetings/[meetingId]/page.tsx` — one meeting and its transcript.
+- `billing/page.tsx` — DB-74's read-only billing page: plan, usage, reset date.
 - `login/page.tsx` — the sign-in page. It computes on the SERVER which providers exist, so no OAuth
   identifier is ever sent to the browser.
 - `api/` — the handlers.

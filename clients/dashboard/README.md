@@ -91,10 +91,13 @@ Stated plainly, because "it has auth" is not a description.
   the post-meeting AI note (DB-60), never a general workspace-file proxy; a caller's own `?path=`
   query is always dropped, never forwarded. `meetings/<platform>/<native>/participants` reads the
   invite + speaker roster for one meeting. `bots/status` reads the caller's currently-running
-  bots (the live status badge DB-41's Stop control checks against). Plus two small reads that feed
-  the write flow below: `user/calendars` (the caller's connected ICS calendars) and
-  `meeting/jitsi-hosts` (the deployment's declared Jitsi hostnames, so the URL parser can
-  recognise a self-hosted Jitsi link).
+  bots (the live status badge DB-41's Stop control checks against). `user/entitlements` reads the
+  caller's resolved plan, limits and usage (DB-70) — the billing page (`/billing`, DB-74) and the
+  Send-Bot dialog's paywall copy (DB-75) both read it; it is informational only, never a
+  client-side send gate — the server refuses an exhausted quota at `POST /bots`, the client only
+  shows the number. Plus two small reads that feed the write flow below: `user/calendars` (the
+  caller's connected ICS calendars) and `meeting/jitsi-hosts` (the deployment's declared Jitsi
+  hostnames, so the URL parser can recognise a self-hosted Jitsi link).
 
   Writes (POST / PATCH / DELETE): `POST bots` dispatches a bot to a live meeting from a pasted
   URL — the "Add Bot" action in the Meetings view. `POST user/calendars`, `PATCH

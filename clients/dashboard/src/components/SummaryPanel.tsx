@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock, ListChecks, RefreshCw, SkipForward, Sparkles } from "lucide-react";
 import { ApiError, getJson, presentError } from "@/lib/api";
-import { parseSummaryDoc, type SummaryDoc } from "@/lib/summary";
+import { parseInlineEmphasis, parseSummaryDoc, type SummaryDoc } from "@/lib/summary";
 import type { Meeting } from "@/lib/meetings";
 import { Button } from "./ui";
 
@@ -61,14 +61,40 @@ function paragraphs(text: string): string[] {
     .filter(Boolean);
 }
 
+const NONE_RECORDED = "_none recorded in this meeting._";
+
+/** Render one run of prose with its inline `**strong**` / `_emphasis_` markdown honored — plain
+ *  React elements, never `dangerouslySetInnerHTML` (`lib/summary.ts`'s `parseInlineEmphasis`). */
+function Inline({ text }: { text: string }) {
+  return (
+    <>
+      {parseInlineEmphasis(text).map((seg, i) =>
+        seg.emphasis === "strong" ? (
+          <strong key={i}>{seg.text}</strong>
+        ) : seg.emphasis === "em" ? (
+          <em key={i}>{seg.text}</em>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 function SectionText({ text }: { text: string }) {
   const parts = paragraphs(text);
-  if (!parts.length) return <p className="text-sm text-ink-3">_none recorded in this meeting._</p>;
+  if (!parts.length) {
+    return (
+      <p className="text-sm text-ink-3">
+        <Inline text={NONE_RECORDED} />
+      </p>
+    );
+  }
   return (
     <>
       {parts.map((p, i) => (
         <p key={i} className="text-[15px] leading-relaxed text-ink-2">
-          {p}
+          <Inline text={p} />
         </p>
       ))}
     </>
@@ -196,7 +222,9 @@ export function SummaryPanel({ meetingId, meeting }: { meetingId: string; meetin
     return (
       <Card>
         <CardHeader icon={<SkipForward size={16} className="text-ink-3" aria-hidden />} title="Summary" />
-        <p className="text-sm text-ink-2">{doc.reason}</p>
+        <p className="text-sm text-ink-2">
+          <Inline text={doc.reason} />
+        </p>
       </Card>
     );
   }
@@ -221,11 +249,15 @@ export function SummaryPanel({ meetingId, meeting }: { meetingId: string; meetin
           {doc.actionItems.length > 0 ? (
             <ul className="list-disc space-y-1 pl-5 text-[15px] leading-relaxed text-ink-2">
               {doc.actionItems.map((item, i) => (
-                <li key={i}>{item}</li>
+                <li key={i}>
+                  <Inline text={item} />
+                </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-ink-3">{doc.actionItemsNote || "_none recorded in this meeting._"}</p>
+            <p className="text-sm text-ink-3">
+              <Inline text={doc.actionItemsNote || NONE_RECORDED} />
+            </p>
           )}
         </div>
         <div>

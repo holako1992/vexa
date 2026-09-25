@@ -183,3 +183,87 @@ export function freshCalendars() {
 }
 
 export const JITSI_HOSTS = ["meet.e2e.test"];
+
+// ── DB-74/DB-75: GET /user/entitlements fixtures ────────────────────────────────────────────────
+//
+// One shape per state a spec needs to prove distinct: a finite plan with room left, the same plan
+// exhausted, an unlimited plan, and usage the meter hasn't reported yet (`null` — never `0`, see
+// `billing/ports.py`'s `UsageSnapshot`). `freshEntitlements()` is the default the stub answers
+// with after every reset; specs that need a different state call `/__control/entitlements`
+// (`helpers.ts`'s `setEntitlements`) to swap it before navigating.
+
+const PERIOD = { start: "2026-09-01T00:00:00+00:00", end: "2026-10-01T00:00:00+00:00" };
+
+export function freeEntitlements({ used = 0 } = {}) {
+  return {
+    plan_id: "free",
+    catalog_version: "2026-09-18",
+    status: null,
+    will_renew: true,
+    grace_until: null,
+    period: PERIOD,
+    limits: {
+      meetings_per_month: 1,
+      max_minutes_per_meeting: 60,
+      concurrent_bots: 1,
+      recording_retention_days: 7,
+      ai_summaries_per_month: 1,
+    },
+    usage: { meetings_used: used, minutes_used: used * 22 },
+  };
+}
+
+export function proUnlimitedEntitlements() {
+  return {
+    plan_id: "pro",
+    catalog_version: "2026-09-18",
+    status: "active",
+    will_renew: true,
+    grace_until: null,
+    period: PERIOD,
+    limits: {
+      meetings_per_month: null,
+      max_minutes_per_meeting: 240,
+      concurrent_bots: 2,
+      recording_retention_days: 365,
+      ai_summaries_per_month: null,
+    },
+    usage: { meetings_used: 14, minutes_used: 612 },
+  };
+}
+
+export function pastDueEntitlements() {
+  return {
+    plan_id: "pro",
+    catalog_version: "2026-09-18",
+    status: "past_due",
+    will_renew: false,
+    grace_until: "2026-10-08T00:00:00+00:00",
+    period: PERIOD,
+    limits: {
+      meetings_per_month: null,
+      max_minutes_per_meeting: 240,
+      concurrent_bots: 2,
+      recording_retention_days: 365,
+      ai_summaries_per_month: null,
+    },
+    usage: { meetings_used: 3, minutes_used: 90 },
+  };
+}
+
+export function unknownUsageEntitlements() {
+  const e = freeEntitlements();
+  e.usage = { meetings_used: null, minutes_used: null };
+  return e;
+}
+
+/** The unwrapped 402 body DB-72's quota enforcement sends (`meeting_api/bot_spawn/router.py`) —
+ *  no `{"detail": ...}` envelope, so a spec proving the paywall message must see this exact shape
+ *  reach the dashboard, not a generic 402. */
+export const QUOTA_EXCEEDED_BODY = {
+  error: "quota_exceeded",
+  limit: 1,
+  used: 1,
+  resets_at: "2026-10-01T00:00:00Z",
+  upgrade_url: null,
+};
