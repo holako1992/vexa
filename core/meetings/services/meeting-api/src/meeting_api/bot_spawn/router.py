@@ -7,7 +7,8 @@ HTTP status the gateway forwards verbatim:
 
   * 201 + ``api.v1`` MeetingResponse on success,
   * 409 when the user already has an active meeting for (platform, native_id),
-  * 429 when the runtime kernel rejects the spawn for owner quota,
+  * 429 when the per-user concurrent-bot cap or the runtime kernel's owner quota rejects the spawn,
+  * 402 when DB-72's monthly meeting quota is exhausted (``{"error": "quota_exceeded", ...}``),
   * 502 when the kernel could not start the workload.
 """
 from __future__ import annotations
@@ -30,6 +31,7 @@ from .ports import (
     AuthSessionBusy,
     AuthSessionNotConfigured,
     MaxBotsExceeded,
+    MeetingQuotaExceeded,
     MeetingRepo,
     MeetingStopped,
     QuotaExceeded,
@@ -525,6 +527,25 @@ def build_router(
             raise HTTPException(status_code=409, detail=str(e))
         except (MaxBotsExceeded, QuotaExceeded) as e:
             raise HTTPException(status_code=429, detail=str(e) or "Bot concurrency limit reached")
+        except MeetingQuotaExceeded as e:
+            # DB-72's monthly meeting quota — a DIFFERENT axis from the 429s above (bots running
+            # right now vs. meetings started this calendar period), so its own status and its own
+            # UNWRAPPED body: the dashboard (DB-75) branches on `error`, not on HTTPException's
+            # `{"detail": ...}` envelope, so this is a direct JSONResponse rather than an
+            # HTTPException. 402 Payment Required — the request is well-formed and the caller is
+            # who they say they are (401/403 do not fit); it is not a burst-rate problem the caller
+            # can just retry (429 does not fit either); it is that the plan's allowance for this
+            # billing period is spent, which is exactly what 402 names.
+            return JSONResponse(
+                status_code=402,
+                content={
+                    "error": "quota_exceeded",
+                    "limit": e.limit,
+                    "used": e.used,
+                    "resets_at": e.resets_at,
+                    "upgrade_url": e.upgrade_url,
+                },
+            )
         except SpawnFailed as e:
             raise HTTPException(status_code=502, detail=str(e) or "Failed to start bot workload")
 

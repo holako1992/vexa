@@ -343,6 +343,37 @@ class TranscriptionNotConfigured(Exception):
     """transcribe_enabled=true but no transcription backend resolved (Settings nor env)."""
 
 
+class MeetingQuotaExceeded(Exception):
+    """The caller's MONTHLY meeting quota (DB-72) is exhausted — HTTP 402.
+
+    Raised in ``service.request_bot`` BEFORE any DB write, from the ``quota`` block admin-api's
+    ``/internal/users/{id}/bot-context`` reports (the SAME best-effort fetch the spawn flow already
+    makes for transcription/capture/bot-name — no second call). Present only when the caller's
+    resolved plan has a FINITE ``meetings_per_month`` (an unlimited Pro/Team plan omits ``quota``
+    entirely, so this is never raised for one). Distinct from both ``MaxBotsExceeded`` (the
+    concurrency pre-check) and ``QuotaExceeded`` (the runtime kernel's owner-quota backstop) — a
+    different axis (meetings per calendar month, not bots running right now), with its own response
+    shape: ``{"error": "quota_exceeded", "limit", "used", "resets_at", "upgrade_url"}``. The
+    dashboard branches on the ``error`` field, never the HTTP status.
+
+    ``used=None`` means admin-api could not determine usage (its own query failed) — the caller
+    raises this rather than admitting: a finite plan with UNKNOWN usage fails CLOSED, because
+    admitting on an unmeterable usage figure would let a user who is actually over quota spawn for
+    free every time that query happens to be down (never silently treated as ``used=0``, the same
+    UNKNOWN-vs-zero distinction ``billing.ports.UsageSnapshot`` states)."""
+
+    def __init__(self, *, limit: int, used: Optional[int], resets_at: Optional[str],
+                 upgrade_url: Optional[str]):
+        self.limit = limit
+        self.used = used
+        self.resets_at = resets_at
+        self.upgrade_url = upgrade_url
+        super().__init__(
+            f"monthly meeting quota exceeded "
+            f"({'unknown' if used is None else used} of {limit} used this period)"
+        )
+
+
 
 # ── shared row-shaping helpers (here, not in adapters, so the in-memory fakes reuse the
 #    EXACT same code without importing the SQLAlchemy adapters module) ─────────────────

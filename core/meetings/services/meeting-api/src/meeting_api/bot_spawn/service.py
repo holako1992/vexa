@@ -44,6 +44,7 @@ from .ports import (
     AuthSessionNotConfigured,
     DuplicateMeeting,
     MaxBotsExceeded,
+    MeetingQuotaExceeded,
     MeetingRepo,
     MeetingStopped,
     QuotaExceeded,
@@ -434,8 +435,8 @@ async def request_bot(
 ) -> dict:
     """Run the spawn flow and return a MeetingResponse-shaped dict.
 
-    Raises ``DuplicateMeeting`` (409), ``MaxBotsExceeded`` / ``QuotaExceeded`` (429), or
-    ``SpawnFailed`` (502/failed).
+    Raises ``DuplicateMeeting`` (409), ``MaxBotsExceeded`` / ``QuotaExceeded`` (429),
+    ``MeetingQuotaExceeded`` (402, DB-72's monthly meeting quota), or ``SpawnFailed`` (502/failed).
 
     ``continue_meeting`` (P3c): if the prior meeting for (platform, native_id) is TERMINAL, reuse
     that row + add a new session instead of creating a fresh meeting. ``max_concurrent`` (P3e): the
@@ -524,6 +525,37 @@ async def request_bot(
                 f"fix TRANSCRIPTION_SERVICE_URL / TRANSCRIPTION_SERVICE_TOKEN; this re-tests within "
                 f"{int(_STT_VERDICT_MAX_AGE_S)}s, or call /health?force=1 to re-probe now"
             )
+
+    # 1d. Monthly meeting quota (DB-72) — admin-api resolves the caller's plan + this calendar
+    #     period's usage ONCE per spawn attempt, off the SAME best-effort `bot_context` fetch above
+    #     (no second call). This runs for BOTH admission paths (a manual POST /bots and an
+    #     auto-join dispatch both call `request_bot`), BEFORE any DB write — same property as the
+    #     transcription gate above: a refused spawn must never leave an orphaned `requested` row.
+    #
+    #     `quota` is absent when billing is not configured (no ADMIN_API_URL/INTERNAL_API_SECRET →
+    #     `bot_context` is `{}`) or when the resolved plan is unlimited (admin-api omits the key
+    #     entirely for a `None` `meetings_per_month`) — either way, no pre-check: a deployment with
+    #     no billing wired behaves exactly as before DB-72.
+    #
+    #     `used is None` means admin-api's own usage query failed (UNKNOWN, never coerced to 0 —
+    #     see billing/meetings_usage.py). A FINITE limit with UNKNOWN usage fails CLOSED here: we
+    #     cannot prove the caller is under quota, and admitting on an unmeterable figure would let
+    #     someone actually over quota spawn for free every time that query happens to be down.
+    quota = bot_context.get("quota") if isinstance(bot_context, dict) else None
+    if isinstance(quota, dict):
+        quota_limit = quota.get("meetings_per_month")
+        if quota_limit is not None:
+            quota_used = quota.get("meetings_used")
+            if quota_used is None or quota_used >= quota_limit:
+                log_event(
+                    "bot_spawn_monthly_quota_exceeded", audience="user", level="warning",
+                    span="bots.create", user_id=user_id,
+                    fields={"limit": quota_limit, "used": quota_used},
+                )
+                raise MeetingQuotaExceeded(
+                    limit=quota_limit, used=quota_used,
+                    resets_at=quota.get("resets_at"), upgrade_url=quota.get("upgrade_url"),
+                )
 
     # 1c. Authenticated-bot mode (#724, deployment-scoped knob — Q1-A): when BOT_AUTHENTICATED is
     #     set, EVERY spawn carries the sealed invocation.v1 auth block, so the bot restores the

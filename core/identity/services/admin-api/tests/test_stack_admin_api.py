@@ -115,7 +115,12 @@ def test_golden_identity_flow(client):
     v = r.json()
     assert v["user_id"] == user_id
     assert set(v["scopes"]) == {"bot", "tx"}
-    assert v["max_concurrent"] == 5
+    # DB-72: this account has no subscription (Free plan). `max_concurrent_bots=5` at creation is
+    # NOT the untouched default (3), so it is a deliberate ceiling
+    # (billing.catalog.effective_concurrent_cap) — combined with the Free plan's `concurrent_bots`
+    # (1), the LOWER of the two wins: 1, not the raw stored 5. See test_billing_catalog.py for the
+    # combination rule on its own and test_billing_quota_admission.py for this at the wire.
+    assert v["max_concurrent"] == 1
     assert v["email"] == "bob@vexa.ai"
     assert v["webhook_url"] == "https://example.com/hook"
     assert v["webhook_secret"] == "shh"
@@ -131,7 +136,13 @@ def test_golden_identity_flow(client):
 
 def test_new_user_defaults_to_3_bots(client):
     """A user created without an explicit limit gets the product default of 3
-    (raised from 1 — see schema/MIGRATION-0003). /internal/validate surfaces it."""
+    (raised from 1 — see schema/MIGRATION-0003) STORED on the `users.max_concurrent_bots` column —
+    that write is unchanged by DB-72.
+
+    /internal/validate's `max_concurrent`, however, is no longer a passthrough of that column: a
+    STILL-UNTOUCHED default (3) means "no admin override yet", so the Free plan (no subscription
+    set) decides alone — 1, not 3 (`billing.catalog.effective_concurrent_cap`, DB-72's stated
+    product change for every existing Free user)."""
     r = client.post("/admin/users", headers=_admin(), json={"email": "default-limit@vexa.ai"})
     assert r.status_code in (200, 201), r.text
     assert r.json()["max_concurrent_bots"] == 3
@@ -139,7 +150,7 @@ def test_new_user_defaults_to_3_bots(client):
                         headers=_admin()).json()["token"]
     v = client.post("/internal/validate", headers={"X-Internal-Secret": INTERNAL_SECRET},
                     json={"token": token}).json()
-    assert v["max_concurrent"] == 3
+    assert v["max_concurrent"] == 1
 
 
 def test_admin_get_user_by_id_is_exact_side_effect_free_and_authenticated(client):
@@ -257,7 +268,11 @@ def test_admin_patch_user_merges_entitlement_without_erasing_private_data(client
         json={"token": token},
     )
     assert validated.status_code == 200, validated.text
-    assert validated.json()["max_concurrent"] == 25
+    # DB-72: "commitment_25" is not a `billing.catalog.PLANS` entry — `resolve_plan` resolves an
+    # unrecognized `subscription_tier` to Free rather than guess (logged, never silently coerced).
+    # The stored `max_concurrent_bots=25` is then an explicit ceiling, which only ever NARROWS the
+    # resolved plan (never raises a user above it — that is DB-77's job): min(Free's 1, 25) = 1.
+    assert validated.json()["max_concurrent"] == 1
     assert validated.json()["webhook_secret"] == "private-hook-secret"
 
     for headers, body, expected in (

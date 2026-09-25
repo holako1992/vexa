@@ -36,7 +36,8 @@ from ..token_scope import VALID_SCOPES, generate_prefixed_token
 from .db import get_db
 from . import events as events_mod
 from . import person_settings as person_settings_mod
-from .billing.entitlements import resolve_entitlements
+from .billing.catalog import effective_concurrent_cap
+from .billing.entitlements import resolve_entitlements, resolve_plan
 from .billing.meetings_usage import MeetingsUsagePort
 
 ADMIN_KEY_HEADER = APIKeyHeader(name="X-Admin-API-Key", auto_error=False)
@@ -73,6 +74,15 @@ def normalise_email(email: str) -> str:
 
 def _dev_mode() -> bool:
     return os.getenv("DEV_MODE", "false").lower() == "true"
+
+
+def _billing_upgrade_url() -> Optional[str]:
+    """The dashboard's upgrade/pricing page, for DB-72's `quota_exceeded` refusal body.
+
+    A deployment that has not configured billing (DB-73 not wired, or self-hosted with no plans
+    sold) names no such page — `null`, never a hardcoded vexa.ai URL a self-host response would
+    otherwise leak."""
+    return os.getenv("BILLING_UPGRADE_URL") or None
 
 
 async def verify_admin_token(admin_api_key: str = Security(ADMIN_KEY_HEADER)):
@@ -941,16 +951,25 @@ def create_app() -> FastAPI:
         await db.commit()
 
         scopes = list(api_token.scopes) if api_token.scopes else ["legacy"]
+        # DB-72: the concurrent-bot cap the gateway forwards as `x-user-limits` is the resolved
+        # PLAN's `concurrent_bots` combined with the pre-billing `max_concurrent_bots` column
+        # (`billing.catalog.effective_concurrent_cap` — see its docstring for the combination rule
+        # and the stated product change for existing Free users). `resolve_plan` is synchronous and
+        # does no I/O (billing/entitlements.py), so this adds no query to the gateway's per-request
+        # hot path — the SAME `user` row already loaded above supplies both inputs.
+        data_blob = user.data if isinstance(user.data, dict) else {}
+        resolved_plan = resolve_plan(data_blob, datetime.now(timezone.utc))
         resp = {
             "user_id": user.id,
             "scopes": scopes,
-            "max_concurrent": user.max_concurrent_bots,
+            "max_concurrent": effective_concurrent_cap(
+                resolved_plan.limits.concurrent_bots, user.max_concurrent_bots,
+            ),
             "email": user.email,
             # DB-backed admin role (bootstrap-claimed on a fresh instance) — the terminal's
             # admin gate reads THIS, with its VEXA_ADMIN_EMAILS allowlist kept as an override.
             "is_admin": (user.data or {}).get("is_admin") is True if isinstance(user.data, dict) else False,
         }
-        data_blob = user.data if isinstance(user.data, dict) else {}
         if data_blob.get("webhook_url"):
             resp["webhook_url"] = data_blob["webhook_url"]
             if data_blob.get("webhook_secret"):
@@ -1271,13 +1290,42 @@ def create_app() -> FastAPI:
 
     @app.get("/internal/users/{user_id}/bot-context", include_in_schema=False)
     async def get_bot_context(user_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+        """DB-72 addition: this door is `meeting_api.bot_spawn.service.request_bot`'s ONE best-effort
+        fetch per spawn attempt — every `POST /bots` AND every auto-join dispatch calls it already
+        (for transcription/capture/bot-name), never the gateway's per-request `/internal/validate`
+        hot path. That makes it the right place to meter the MONTHLY meeting quota: a real usage
+        query (`MeetingsUsagePort`, backed by `billing.meetings_usage`, the one authoritative
+        statement of "which meetings count") runs here, ONCE per admission attempt, never once per
+        request. `quota` is present only when the resolved plan has a FINITE `meetings_per_month`
+        (Pro/Team's `None` omits it — meeting-api then does no check at all, matching "unlimited").
+        """
         _check_internal(request)
         user = await _load_user(user_id, db)
         data = user.data if isinstance(user.data, dict) else {}
+        resolved = await resolve_entitlements(
+            data, datetime.now(timezone.utc), user.id, usage_port=MeetingsUsagePort(db),
+        )
+        plan = resolved.plan
         resp: dict = {
-            "max_concurrent": user.max_concurrent_bots,
+            # Same combination rule as /internal/validate (billing.catalog.effective_concurrent_cap)
+            # — auto-join's per-user cap (`ctx.get("max_concurrent")` in bot_spawn/auto_join.py) must
+            # read the SAME number a manual POST /bots gets via x-user-limits, or the two admission
+            # paths enforce two different caps for one user.
+            "max_concurrent": effective_concurrent_cap(
+                plan.limits.concurrent_bots, user.max_concurrent_bots,
+            ),
             "bot_name": data.get("calendar_bot_name") or "Vexa",
         }
+        if plan.limits.meetings_per_month is not None:
+            resp["quota"] = {
+                "meetings_per_month": plan.limits.meetings_per_month,
+                # None = usage UNKNOWN (the meetings query failed) — see billing/meetings_usage.py.
+                # meeting-api's spawn-time check (service.request_bot) fails CLOSED on this, never
+                # silently reads it as 0 used.
+                "meetings_used": resolved.usage.meetings_used,
+                "resets_at": plan.period_end.isoformat(),
+                "upgrade_url": _billing_upgrade_url(),
+            }
         # Fixture collection (O-TEL-1): whether this spawn tapes its raw captured-signal stream.
         # ALWAYS present in the response — a missing key downstream is indistinguishable from an
         # unreachable identity, and bot_spawn must default ON in BOTH cases, so it is stated here

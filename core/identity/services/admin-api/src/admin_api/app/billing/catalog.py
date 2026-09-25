@@ -87,3 +87,46 @@ def get_plan(plan_id: Optional[str]) -> PlanLimits:
     if plan_id is None:
         return PLANS[DEFAULT_PLAN_ID]
     return PLANS.get(plan_id, PLANS[DEFAULT_PLAN_ID])
+
+
+#: `users.max_concurrent_bots`' column default (`schema.sql`) — the value every user carries until
+#: an operator explicitly sets a different one via `PATCH /admin/users/{id}`. DB-72
+#: (`effective_concurrent_cap` below) treats a stored value still AT this default as "no admin
+#: override yet", never as a deliberate 3-bot ceiling.
+LEGACY_MAX_CONCURRENT_BOTS_DEFAULT = 3
+
+
+def effective_concurrent_cap(
+    plan_concurrent_bots: int, stored_max_concurrent_bots: Optional[int]
+) -> int:
+    """Combine the resolved plan's `concurrent_bots` with the pre-billing
+    `users.max_concurrent_bots` column into the ONE number `/internal/validate` returns as
+    `max_concurrent` — the number the gateway injects as `x-user-limits` and
+    `meeting_api.bot_spawn.router._resolve_max_concurrent` enforces (DB-72).
+
+    The stored column PREDATES billing: every user carries it, defaulted to
+    `LEGACY_MAX_CONCURRENT_BOTS_DEFAULT`, and until DB-77 ships it is the ONLY per-user cap that
+    exists. DB-77 gives support a real comp/override (`plan_override`, `quota_bonus`); this
+    function does NOT build that — until DB-77 lands, the stored column keeps its pre-billing
+    meaning, an operator-settable HARD CEILING, never a way to raise a user above their plan:
+
+      * stored value is `None` or still the untouched default → the PLAN decides alone (a paying
+        Pro/Team user nobody has ever touched with `PATCH /admin/users/{id}` gets their plan's
+        2/5, not clamped down to the legacy default of 3);
+      * stored value has been explicitly set to something ELSE → the LOWER of the two wins (an
+        operator's explicit value always narrows the cap, it never widens a user past their plan
+        — raising someone above their plan is DB-77's job, not this column's).
+
+    PRODUCT CHANGE, stated once here rather than left implicit in a diff: every existing Free
+    user's column reads the untouched default of 3 (nobody has been through `PATCH
+    /admin/users/{id}` for this reason yet), so before this function existed a Free user could run
+    up to 3 concurrent bots. The Free plan's `concurrent_bots` is 1, so `effective_concurrent_cap`
+    takes every untouched Free user from 3 down to 1 the moment DB-72 ships. That IS the product's
+    free tier, not a bug — DB-72's report states it plainly for the same reason this comment does.
+    """
+    if (
+        stored_max_concurrent_bots is None
+        or stored_max_concurrent_bots == LEGACY_MAX_CONCURRENT_BOTS_DEFAULT
+    ):
+        return plan_concurrent_bots
+    return min(plan_concurrent_bots, stored_max_concurrent_bots)

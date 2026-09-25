@@ -52,7 +52,7 @@ from ..service_authority import (
     ServiceAuthorityUnavailable,
 )
 from .env_flags import resolve_spawn_flag
-from .ports import MaxBotsExceeded, MeetingStopped, QuotaExceeded, SpawnFailed
+from .ports import MaxBotsExceeded, MeetingQuotaExceeded, MeetingStopped, QuotaExceeded, SpawnFailed
 from .service import DuplicateMeeting, request_bot
 
 # Sweep cadence/window env vocabulary (config.v1: all optional, sane defaults).
@@ -346,6 +346,20 @@ async def auto_join_tick(
             continue
         except (MaxBotsExceeded, QuotaExceeded) as e:
             await _stamp_error(row, str(e) or "bot concurrency limit reached")
+            continue
+        except MeetingQuotaExceeded as e:
+            # DB-72: the monthly meeting quota is spent — SKIP with a recorded reason rather than
+            # join (the task's explicit rule: a bot must never join and charge a meeting the quota
+            # already refused). Same `_stamp_error` path as the concurrency/runtime rejections above,
+            # so the reason surfaces on `data.auto_join_error` and the dashboard's Upcoming banner
+            # (DB-75) the same way every other auto-join skip does.
+            await _stamp_error(
+                row,
+                f"monthly meeting quota exceeded "
+                f"({'unknown' if e.used is None else e.used} of {e.limit} used, "
+                f"resets {e.resets_at}) — auto-join skipped",
+                event="auto_join_quota_exceeded",
+            )
             continue
         except ServiceAuthorityDenied as e:
             await _stamp_error(
