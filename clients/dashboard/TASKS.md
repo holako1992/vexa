@@ -400,3 +400,87 @@ Already fixed while finding this, in `4112c0e9`: the stub served requests as flo
 so one rejected handler terminated the process under Node 22 and surfaced as eight later specs
 failing on a refused connection. Each request now carries its own rejection catch. That repair
 took the suite from 6 passing to 10.
+
+---
+
+## Status at 2026-09-25 — paused, resume next week
+
+Work is done by Sonnet agents, one task per agent, verified by a coordinator that re-runs every
+claimed test before pushing. **Every agent reads [`AGENT-RULES.md`](AGENT-RULES.md) first.** It holds
+the rules for sharing one checkout, the route rule, how to run each suite on this Windows host, and
+the known environmental traps.
+
+### Done, verified and pushed to `origin/claude/dashboard-service-modern-xoiy2c`
+
+| Task | Commit(s) | What the user sees |
+|---|---|---|
+| DB-01 | `7358d0b6` | Add Bot dialog: paste a link, or connect an ICS calendar |
+| DB-02, DB-02a | `4112c0e9`, `4e8a2977` | Browser test harness; fixed the send-bot confirmation erasing itself |
+| DB-03 | `6c801b0f` | Compose hot-reload overlay for the dashboard |
+| DB-04 | `34cf1e18` | App shell, account menu, mobile drawer, shared UI primitives |
+| DB-05 | `b92d8de1` | Meeting page reads one row, not the whole history |
+| DB-30 | `0217476d` | Google Calendar OAuth, core only (no button yet, see DB-31) |
+| DB-41, DB-42, DB-60 UI | `5da2c948` | Summary panel, stop recording, rename, delete, participants |
+| DB-44, DB-48 | `d21f62d4` | Global search (Ctrl+K), paginated meetings list |
+| DB-60, DB-60b | `503ff83c`, `43b24d67`, `e26590fb` | A summary is written for every completed meeting, dashboard bots included |
+| DB-70 | `688ffcf9`, `9251ee39` | Plan catalog and `GET /user/entitlements` |
+| DB-71 | `3a4c4f9a` | Real usage: only meetings the bot actually joined count |
+| DB-72 | `1404bf23` | Free plan enforced: 1 meeting per month, 1 concurrent bot, 402 when exhausted |
+| DB-73 | `45763c17` | Stripe checkout, portal and webhook handler (ingress pending, see below) |
+| DB-74 (read-only), DB-75 | `7e4b3aeb` | Billing page, remaining-allowance line, paywall message |
+| DB-80 | `31e3e89f`, `1ca636f8` | "Your meeting is ready" email to the owner, with a dashboard link |
+
+### Decisions waiting on the user
+
+1. **Stripe webhook ingress.** The handler exists on admin-api (`POST /billing/webhook`, signature
+   verified) but nothing public reaches it. The gateway rejects every request without an API key,
+   and every service binds 127.0.0.1. The options are: (1) a reverse-proxy rule forwarding exactly
+   `/billing/webhook` to admin-api; (2) a new signature-gated route class in the gateway; (3) a small
+   ingress service. The coordinator recommends (1). See `docs/docs/how-to/billing.mdx`.
+2. **Calendar token encryption.** `admin_api/app/token_cipher.py` is a sound but hand-built
+   HMAC-CTR plus encrypt-then-MAC. Either harden it (enforce a minimum key length; bind the user id
+   and calendar id as associated data) or replace it with AES-GCM from `cryptography`, which is
+   Category A but a new compiled dependency. **Do this before DB-31 ships.** Until DB-31 exists,
+   nobody can store a Google token.
+
+### Next, in order
+
+1. **DB-30a:** token-cipher decision above, then implement it.
+2. **DB-31, DB-33, DB-34:** the Google "Connect" button and callback page (routes:
+   `GET /user/calendars/google/authorize` → `{authorize_url, state}`;
+   `POST /user/calendars/google/exchange {code, state}` → masked connection), the Upcoming page with
+   per-meeting join overrides and auto-join skip reasons (`data.auto_join_error`), and calendar
+   health including `reconnect_needed`.
+3. **DB-74b:** Upgrade and Manage buttons on `/billing`. `POST /billing/checkout {plan, interval}` →
+   `{url}`; `POST /billing/portal` → `{url}`, or 409 when there is no customer yet.
+4. **DB-72b:** per-plan minute cap. meeting-api's `_resolve_automatic_leave` accepts `max_bot_time`
+   but drops it, and the bot only honours the deployment-wide `BOT_MAX_ACTIVE_MS`.
+5. **Core:** `GET /meetings` discards the store's `has_more` (`collector/app.py`). Forward it so
+   the list can show real counts instead of "N loaded".
+6. DB-32 Microsoft Graph · DB-50/51/52 recordings · DB-45 export · DB-46/47/43 sharing, tags,
+   speakers · DB-40/61/62 live transcript, chat, auto-title · DB-10 magic link · DB-11/20/21/12 ·
+   DB-81/82/83 settings · DB-76/77/78 · DB-92/93/95 · DB-90/91 · DB-94 security review last.
+7. **DB-96 plus a wording sweep:** comments added this week carry ticket ids ("DB-72:") and some
+   history narration. AGENTS.md wants the designed present. Remove them in one pass.
+
+### Product changes already live in the code
+
+- Existing free users drop from 3 concurrent bots to 1.
+- Accounts carrying a tier outside the catalog (for example `commitment_25`) resolve to Free.
+- Unknown usage refuses a free user's send instead of allowing it.
+
+### What the user must supply before these work live
+
+Stripe secret key, webhook secret and price ids · Google Cloud OAuth client for calendar plus
+`CALENDAR_TOKEN_ENCRYPTION_KEY` · an Azure app for DB-32 · mail settings for DB-10 · real legal
+text for DB-93 · `DASHBOARD_NEXT_URL` for email links.
+
+To run it locally, rebuild `dashboard-next`, `gateway`, `admin-api`, `meeting-api` and `flows-worker`.
+
+### Not verified anywhere
+
+- No live leg against real Stripe or Google. Everything is mocked or stubbed.
+- `admin-api/tests/test_stack_admin_api.py` and `test_stack_redis.py` hang on this host.
+- These gates are red here for environmental reasons that predate this work: `node`, `graph`,
+  `schema`, `config-contract` (no root `node_modules`, and `npx` cannot be spawned on Windows),
+  `compose` (no `uv`), and `contract-version` (`core.autocrlf=true` changes every hash).
