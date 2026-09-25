@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Check, Copy, Download, Search } from "lucide-react";
 import {
   type Meeting,
@@ -50,12 +50,45 @@ const POLL_LIVE_MS = 5_000;
 
 export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [lines, setLines] = useState<TranscriptLine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState(false);
   const isLive = useRef(false);
+  const lineRefs = useRef<Array<HTMLLIElement | null>>([]);
+
+  // DB-44: a link from a global-search result carries `?t=<seconds>` — the matched segment's
+  // start offset. Scroll to, and highlight, the transcript line closest to it once the transcript
+  // has loaded. `null` when the param is absent or not a finite number, so an ordinary visit to
+  // the meeting page (no `t`) never highlights anything.
+  const highlightAt = useMemo(() => {
+    const raw = searchParams.get("t");
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }, [searchParams]);
+
+  const highlightIndex = useMemo(() => {
+    if (highlightAt == null || !lines || lines.length === 0) return null;
+    let best = 0;
+    let bestDiff = Infinity;
+    lines.forEach((l, i) => {
+      if (l.at == null) return;
+      const diff = Math.abs(l.at - highlightAt);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = i;
+      }
+    });
+    return best;
+  }, [lines, highlightAt]);
+
+  useEffect(() => {
+    if (highlightIndex == null) return;
+    lineRefs.current[highlightIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightIndex]);
 
   const load = useCallback(async () => {
     let row: MeetingRowDTO;
@@ -233,9 +266,20 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
         <ol className="space-y-4">
           {lines.map((line, i) => {
             const dim = matches !== null && !matches.has(i);
+            const isHighlighted = i === highlightIndex;
 
             return (
-              <li key={`${i}-${line.at ?? "x"}`} className={dim ? "opacity-35 transition-opacity" : "transition-opacity"}>
+              <li
+                key={`${i}-${line.at ?? "x"}`}
+                ref={(el) => {
+                  lineRefs.current[i] = el;
+                }}
+                className={
+                  (dim ? "opacity-35 " : "") +
+                  "transition-opacity " +
+                  (isHighlighted ? "-mx-2 rounded-lg bg-accent-soft px-2 py-1 ring-2 ring-accent" : "")
+                }
+              >
                 <div className="flex gap-3">
                   <span
                     style={speakerChipStyle(line.speaker)}

@@ -10,16 +10,42 @@ Client components. They receive identity as props (resolved on the server) and f
 - `Shell` — the frame: skip-to-content link, a left rail that collapses to a drawer below `md`
   (responsive down to 375px), a top bar with the account menu (name, email, sign out). Renders on
   every page except `/login`, which is designed to sit outside it (see `app/login/page.tsx`).
-  Navigation comes from `nav.ts` — see "Adding a nav entry" below.
+  Navigation comes from `nav.ts` — see "Adding a nav entry" below. DB-44 adds the global search
+  box to the top bar itself rather than a nav-rail entry — the file's own header comment justifies
+  that choice. `Ctrl+K`/`Cmd+K` focuses it from anywhere; Enter navigates to `/search?q=`. Below
+  `sm`, the inline box is replaced by a plain icon link to `/search` (labelled "Open search",
+  deliberately distinct from the box's own accessible name so the two never collide in an
+  accessibility-tree query that matches by substring).
 - `nav.ts` — the single declared navigation list. `Shell` renders only its `VISIBLE_NAV_ITEMS`
   (items with `implemented: true`), so this file is the one place that decides what the sidebar
   links to; nothing else in the tree references a nav destination.
-- `MeetingsView` — the list: search, phase tabs (`ui/Tabs`), polling, the "Add Bot" action that
-  opens `SendBotDialog`.
+- `MeetingsView` — the list: phase tabs (`ui/Tabs`), polling, the "Add Bot" action that opens
+  `SendBotDialog`. DB-48 adds pagination: `GET /meetings` is fetched `limit`/`offset` (meeting-api
+  reports no total, so a "Load more" button — a real `<button>`, keyboard-operable by
+  construction, never a scroll-triggered auto-load — is shown whenever the last page came back
+  full; see `lib/meetings.ts`'s `pageMayContinue`). The phase-aware poll re-fetches the FULL
+  loaded window on every tick (`offset=0, limit=<rows on screen>`), not just page one — the rule
+  that keeps a live row loaded via "Load more" from dropping off; see the file's own header
+  comment and `mergeMeetingsPage`. No per-tab numeric badge is rendered any more (a count built
+  from loaded rows is not a total); one "N loaded" line replaces it. The box that used to be
+  labelled "Search meetings" is now "Filter loaded meetings" — it still narrows the rows already
+  on screen, but Enter now hands the same text to DB-44's `/search`, which asks the server across
+  every meeting and every transcript instead of just what happens to be loaded; see the file's own
+  header comment for why that reconciliation, not two competing boxes, is the right shape.
+- `SearchView` — DB-44's `/search` results: `GET /transcripts/search`, grouped by meeting
+  (`lib/search.ts`'s `groupHitsByMeeting`) with the matched term highlighted as a real `<mark>`
+  (`highlightSnippet` — a pure text-segment split, never `dangerouslySetInnerHTML`). Loading,
+  error and empty-results are three distinct states, same rule as `EmptyState`/`ErrorState`/
+  `LoadingState` everywhere else. Each hit links to `/meetings/<id>?t=<start>`, which
+  `MeetingDetail` reads to scroll to and highlight the matching segment.
 - `MeetingDetail` — one meeting: header facts, transcript, in-transcript search, copy, download.
-  It reads its own row by id; the collection is not a source for a single meeting. Composes the
-  four pieces below, all of which check `meeting.shared` themselves rather than trusting the
-  caller to gate them — a shared meeting (the viewer isn't the owner) renders none of them.
+  It reads its own row by id; the collection is not a source for a single meeting. DB-44 adds
+  `?t=<seconds>` support: when present, the transcript line whose offset is closest is scrolled
+  into view and highlighted (a ring, not a colour swap that would fight the speaker-chip hues) —
+  read once via `useSearchParams`, so the meeting page's own route needs a `Suspense` boundary
+  (see `app/meetings/[meetingId]/page.tsx`). Composes the four pieces below, all of which check
+  `meeting.shared` themselves rather than trusting the caller to gate them — a shared meeting (the
+  viewer isn't the owner) renders none of them.
 - `SummaryPanel` — the post-meeting AI note (DB-60), above the transcript. Reads `GET
   /api/vexa/meetings/<id>/summary`, parses it with `lib/summary.ts`, and renders five distinct
   states (not-ended, shared-owner-only, pending/polling, skipped, complete) — never a single

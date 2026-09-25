@@ -10,27 +10,37 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   stub process, `playwright.config.ts`, and every spec agree without importing each other's
   runtime code — the stub runs as a separate OS process, so it can only share plain data, not
   live references.
-- `fixtures.mjs` — the canned world: six meetings spanning live/scheduled/past (including one
-  user-stopped `completed` row for the derived "stopped" status, one completed row with no
-  `summary.md` yet, and one with a `status: skipped` note), a five-line, two-speaker transcript
-  with offsets, a `summary.v1` note per meeting id (`summaryFor`, DB-60), and an invite/speaker
-  roster for the live meeting (`participantsFor`, DB-42). `freshMeetings()` / `freshCalendars()`
-  return deep clones so the stub's mutations during one spec never leak into the next.
+- `fixtures.mjs` — the canned world: six named meetings spanning live/scheduled/past (including
+  one user-stopped `completed` row for the derived "stopped" status, one completed row with no
+  `summary.md` yet, and one with a `status: skipped` note), plus 19 `ARCHIVED_ROWS` (DB-48) that
+  push the fixture past the dashboard's 20-row page size — 25 total, so pagination has a real
+  second page to load. Two meetings now carry transcripts with offsets (102 and 105, both
+  containing the word "calendar" — DB-44's grouping spec needs a term that hits more than one
+  meeting), a `summary.v1` note per meeting id (`summaryFor`, DB-60), and an invite/speaker roster
+  for the live meeting (`participantsFor`, DB-42). `searchTranscripts()` is a crude substring
+  search over those transcripts, shaped exactly like meeting-api's own `GET /transcripts/search`
+  response. `freshMeetings()` / `freshCalendars()` return deep clones so the stub's mutations
+  during one spec never leak into the next.
 - `stub-server.mjs` — the stub backend itself: plain `node:http`, no dependency, because the
   fixtures are the point, not a framework. Runs two listeners in one process (the gateway and
   admin-api) plus a `/__control/*` remote control the specs use to reset state, inspect exactly
-  which upstream requests were made (with which headers), and force a path to fail. Also answers
-  `GET /agent/workspace/file?path=meetings/<id>/summary.md` (DB-60), `GET /bots/status` and
-  `DELETE /bots/<platform>/<native>` (DB-41), and `GET
-  /meetings/<platform>/<native>/participants`, `POST /meetings/<id>/annotate`, `DELETE
-  /meetings/<id>` (DB-42). See the file's own header comment for the full route table.
+  which upstream requests were made (with which headers), force a path to fail, and (DB-48) flip
+  one fixture meeting's status directly (`/__control/setMeetingStatus`) to prove the poll's
+  re-fetch rule without driving a real bot lifecycle. `GET /meetings` now honours `limit`/`offset`
+  and, like the real handler, returns no total — the dashboard's own "more may exist" inference is
+  what the pagination specs prove. Also answers `GET
+  /agent/workspace/file?path=meetings/<id>/summary.md` (DB-60), `GET /bots/status` and `DELETE
+  /bots/<platform>/<native>` (DB-41), `GET /meetings/<platform>/<native>/participants`, `POST
+  /meetings/<id>/annotate`, `DELETE /meetings/<id>` (DB-42), and `GET /transcripts/search` (DB-44,
+  with a small artificial delay so the loading state is actually observable). See the file's own
+  header comment for the full route table.
 - `playwright.config.ts` — boots BOTH servers via Playwright's `webServer` (the stub, then
   `next dev` pointed at it with the matching env vars) so `npm run test:e2e` runs everything from
   a cold start with no manual setup. Calls `next dev` directly with a literal `--port` rather than
   `npm run dev` (`next dev --port ${PORT:-3001}`) because npm always runs package scripts through
   `cmd.exe` on Windows regardless of the invoking shell, and that bash-style `${VAR:-default}`
   never expands there.
-- `specs/` — the thirteen specs. See `specs/README.md`.
+- `specs/` — the sixteen specs. See `specs/README.md`.
 
 ## Running it
 

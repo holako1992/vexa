@@ -5,7 +5,7 @@ import { filterQuery, resolveUpstream, resolveWriteUpstream } from "../upstream"
 
 describe("resolveUpstream", () => {
   it("admits the four read paths the product has", () => {
-    expect(resolveUpstream(["meetings"])).toEqual({ path: "/meetings" });
+    expect(resolveUpstream(["meetings"])).toEqual({ path: "/meetings", query: expect.any(Object) });
     expect(resolveUpstream(["meetings", "42"])).toEqual({ path: "/meetings/42" });
     expect(resolveUpstream(["transcripts", "by-id", "42"])).toEqual({ path: "/transcripts/by-id/42" });
     expect(resolveUpstream(["transcripts", "google_meet", "abc-defg-hij"])).toEqual({
@@ -26,7 +26,7 @@ describe("resolveUpstream", () => {
     expect(resolveUpstream(["meetings", "1/2"])).toBeNull();
     expect(resolveUpstream(["meetings", "x".repeat(21)])).toBeNull();
     expect(resolveUpstream(["meetings", ""])).toBeNull();
-    expect(resolveUpstream(["meetings"])).toEqual({ path: "/meetings" }); // no id: unaffected
+    expect(resolveUpstream(["meetings"])).toEqual({ path: "/meetings", query: expect.any(Object) }); // no id: unaffected
   });
 
   it("does not shadow, or get shadowed by, transcripts/by-id/<id>", () => {
@@ -265,14 +265,83 @@ describe("resolveWriteUpstream — rename via annotate, and delete (DB-42)", () 
   });
 });
 
-describe("filterQuery", () => {
-  it("keeps the paging parameters and drops everything else", () => {
-    const q = new URLSearchParams("limit=10&offset=5&user_id=7&x=1");
-    expect(filterQuery(q)).toBe("?limit=10&offset=5");
+describe("resolveUpstream — transcripts/search (DB-44)", () => {
+  it("admits GET transcripts/search with its own query shape", () => {
+    expect(resolveUpstream(["transcripts", "search"])).toEqual({
+      path: "/transcripts/search",
+      query: expect.any(Object),
+    });
   });
 
-  it("returns an empty string when nothing survives", () => {
-    expect(filterQuery(new URLSearchParams("user_id=7"))).toBe("");
-    expect(filterQuery(new URLSearchParams(""))).toBe("");
+  it("is not shadowed by, and does not shadow, transcripts/<platform>/<native>", () => {
+    expect(resolveUpstream(["transcripts", "search"])?.path).toBe("/transcripts/search");
+    expect(resolveUpstream(["transcripts", "google_meet", "abc"])).toEqual({
+      path: "/transcripts/google_meet/abc",
+    });
+    // "search" is never treated as a platform slug — PLATFORMS doesn't contain it, but the
+    // explicit branch above must win regardless, since it is checked first.
+    expect(resolveUpstream(["transcripts", "search", "extra"])).toBeNull();
+  });
+});
+
+describe("filterQuery — per-route allowlist (DB-44/DB-48)", () => {
+  it("meetings keeps limit/offset and drops everything else, including q", () => {
+    const route = resolveUpstream(["meetings"])!;
+    const q = new URLSearchParams("limit=10&offset=5&user_id=7&x=1&q=pricing");
+    expect(filterQuery(route, q)).toBe("?limit=10&offset=5");
+  });
+
+  it("transcripts/search keeps q, limit and offset", () => {
+    const route = resolveUpstream(["transcripts", "search"])!;
+    const q = new URLSearchParams("q=pricing&limit=10&offset=5&user_id=7");
+    expect(filterQuery(route, q)).toBe("?q=pricing&limit=10&offset=5");
+  });
+
+  it("q is dropped on a route that does not declare it (meetings)", () => {
+    const route = resolveUpstream(["meetings"])!;
+    expect(filterQuery(route, new URLSearchParams("q=pricing"))).toBe("");
+  });
+
+  it("q is dropped on a route with no query shape at all (meetings/<id>)", () => {
+    const route = resolveUpstream(["meetings", "42"])!;
+    expect(filterQuery(route, new URLSearchParams("q=pricing&limit=10"))).toBe("");
+  });
+
+  it("an over-long q is refused (dropped), not truncated", () => {
+    const route = resolveUpstream(["transcripts", "search"])!;
+    const tooLong = "x".repeat(513); // meeting-api's SEARCH_QUERY_MAX_CHARS is 512
+    const atLimit = "x".repeat(512);
+    expect(filterQuery(route, new URLSearchParams({ q: tooLong }))).toBe("");
+    expect(filterQuery(route, new URLSearchParams({ q: atLimit })).length).toBeGreaterThan(0);
+  });
+
+  it("a blank q is refused", () => {
+    const route = resolveUpstream(["transcripts", "search"])!;
+    expect(filterQuery(route, new URLSearchParams({ q: "" }))).toBe("");
+  });
+
+  it("non-numeric limit is dropped", () => {
+    const route = resolveUpstream(["meetings"])!;
+    for (const bad of ["abc", "1.5", "-1", "1e3", " 1", "1 ", "+1"]) {
+      expect(filterQuery(route, new URLSearchParams({ limit: bad }))).toBe("");
+    }
+  });
+
+  it("limit outside 1–100 is dropped; the boundary values are kept", () => {
+    const route = resolveUpstream(["meetings"])!;
+    expect(filterQuery(route, new URLSearchParams({ limit: "0" }))).toBe("");
+    expect(filterQuery(route, new URLSearchParams({ limit: "101" }))).toBe("");
+    expect(filterQuery(route, new URLSearchParams({ limit: "1" }))).toBe("?limit=1");
+    expect(filterQuery(route, new URLSearchParams({ limit: "100" }))).toBe("?limit=100");
+  });
+
+  it("negative offset is dropped", () => {
+    const route = resolveUpstream(["meetings"])!;
+    expect(filterQuery(route, new URLSearchParams({ offset: "-5" }))).toBe("");
+  });
+
+  it("returns an empty string when nothing survives, or the route takes no query", () => {
+    expect(filterQuery(resolveUpstream(["meetings"])!, new URLSearchParams("user_id=7"))).toBe("");
+    expect(filterQuery(resolveUpstream(["meetings", "42"])!, new URLSearchParams("limit=10"))).toBe("");
   });
 });

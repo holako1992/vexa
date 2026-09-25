@@ -32,6 +32,7 @@ import {
   transcriptFor,
   summaryFor,
   participantsFor,
+  searchTranscripts,
   JITSI_HOSTS,
   freeEntitlements,
   QUOTA_EXCEEDED_BODY,
@@ -51,7 +52,7 @@ const adminLog = [];
 /** Forced response overrides, keyed by a short name a spec asks for. Cleared on reset.
  *  `botsQuota: true` makes `POST /bots` answer DB-72's unwrapped 402 `quota_exceeded` body
  *  instead of dispatching — spec 14's paywall proof. */
-let force = { meetings: null, meetingDetail: null, botsQuota: false };
+let force = { meetings: null, meetingDetail: null, botsQuota: false, search: null };
 /** `GET /user/entitlements`'s current answer (DB-74/DB-75) — swapped per spec via
  *  `/__control/entitlements` (`helpers.ts`'s `setEntitlements`), reset to the free-plan default
  *  on every `/__control/reset`. */
@@ -69,7 +70,7 @@ function resetAll() {
   bots.length = 0;
   gatewayLog.length = 0;
   adminLog.length = 0;
-  force = { meetings: null, meetingDetail: null, botsQuota: false };
+  force = { meetings: null, meetingDetail: null, botsQuota: false, search: null };
   entitlements = freeEntitlements();
   users = new Map();
   nextUserId = 1;
@@ -129,13 +130,46 @@ async function handleGateway(req, res) {
     entitlements = await readJsonBody(req);
     return sendJson(res, 200, { ok: true, entitlements });
   }
+  // DB-48's "a live row on a later page stays visible" spec: flip one fixture meeting's status
+  // without going through a real bot lifecycle, so the spec can prove the POLL's re-fetch window
+  // rule rather than the bot-spawn path (already covered elsewhere).
+  if (url.pathname === "/__control/setMeetingStatus" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const row = meetings.find((m) => String(m.id) === String(body.id));
+    if (!row) return sendJson(res, 404, { error: "not_found" });
+    row.status = body.status;
+    if (body.status === "active") row.end_time = null;
+    return sendJson(res, 200, { ok: true });
+  }
 
   logRequest(gatewayLog, req);
 
-  // GET /meetings
+  // GET /meetings — DB-48: honours `limit`/`offset` exactly like meeting-api's own handler
+  // (`meeting_api/collector/app.py`'s `get_meetings`), and returns NO total and NO `has_more` —
+  // meeting-api's route discards the store's own `has_more` return value, so this stub mirrors
+  // that omission rather than being more helpful than the real backend (`lib/meetings.ts`'s
+  // `pageMayContinue` infers "more" from a full page for exactly this reason).
   if (req.method === "GET" && parts.length === 1 && parts[0] === "meetings") {
     if (force.meetings) return sendJson(res, force.meetings, { error: "forced_failure" });
-    return sendJson(res, 200, { meetings });
+    const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : meetings.length;
+    const offset = url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0;
+    const page = meetings.slice(offset, offset + (Number.isFinite(limit) ? limit : meetings.length));
+    return sendJson(res, 200, { meetings: page });
+  }
+
+  // GET /transcripts/search?q=... — DB-44. Checked before the generic 3-segment transcripts
+  // branch, same ordering rule the real route uses ("search" is not a platform). A small
+  // artificial delay (unlike every other handler here) so the dashboard's "Searching…" loading
+  // state is actually observable in a spec rather than racing an instant local response.
+  if (req.method === "GET" && parts.length === 2 && parts[0] === "transcripts" && parts[1] === "search") {
+    await new Promise((r) => setTimeout(r, 150));
+    if (force.search) return sendJson(res, force.search, { error: "forced_failure" });
+    const q = url.searchParams.get("q") || "";
+    if (!q.trim()) return sendJson(res, 422, { detail: "'q' must not be blank" });
+    const limit = url.searchParams.get("limit") ?? undefined;
+    const offset = url.searchParams.get("offset") ?? undefined;
+    const hits = searchTranscripts(meetings, q, { limit, offset });
+    return sendJson(res, 200, { query: q, hits, count: hits.length });
   }
 
   // GET /meetings/<id>

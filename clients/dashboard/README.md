@@ -81,23 +81,31 @@ Stated plainly, because "it has auth" is not a description.
   keyboard. No cookie means 401.
 - **One door, closed by default.** `/api/vexa/*` matches a closed allowlist
   (`src/lib/upstream.ts`), separately for reads and writes. Anything else is a 404 here, not a
-  forwarded probe. Query parameters on reads are filtered to a paging allowlist. Ids are
-  shape-checked before they are interpolated into an upstream URL.
+  forwarded probe. Query parameters on reads are filtered PER ROUTE — each resolved route declares
+  the exact parameters it takes, each with its own value-shape check (`limit`/`offset` bounded
+  ints, `transcripts/search`'s `q` length-capped) — never one allowlist of names applied blind to
+  every route regardless of whether that route asked for a parameter at all; `filterQuery`'s header
+  comment names the shape of bug this design exists to prevent. Ids are shape-checked before they
+  are interpolated into an upstream URL.
 
-  Reads (GET): `meetings` · `transcripts/by-id/<id>` · `transcripts/<platform>/<native>` — the
-  meeting list and its transcripts, scoped to the caller by the gateway. `meetings/<id>/summary`
-  is a fourth, narrower read: the numeric id is the only thing a caller supplies, and the route
-  itself composes the fixed upstream `/agent/workspace/file?path=meetings/<id>/summary.md` —
-  the post-meeting AI note (DB-60), never a general workspace-file proxy; a caller's own `?path=`
-  query is always dropped, never forwarded. `meetings/<platform>/<native>/participants` reads the
-  invite + speaker roster for one meeting. `bots/status` reads the caller's currently-running
-  bots (the live status badge DB-41's Stop control checks against). `user/entitlements` reads the
-  caller's resolved plan, limits and usage (DB-70) — the billing page (`/billing`, DB-74) and the
-  Send-Bot dialog's paywall copy (DB-75) both read it; it is informational only, never a
-  client-side send gate — the server refuses an exhausted quota at `POST /bots`, the client only
-  shows the number. Plus two small reads that feed the write flow below: `user/calendars` (the
-  caller's connected ICS calendars) and `meeting/jitsi-hosts` (the deployment's declared Jitsi
-  hostnames, so the URL parser can recognise a self-hosted Jitsi link).
+  Reads (GET): `meetings` (DB-48: paginated with `limit`/`offset`; meeting-api reports no total, so
+  the client infers "more may exist" from a full page rather than trusting a number the producer
+  doesn't send) · `transcripts/by-id/<id>` · `transcripts/<platform>/<native>` · `transcripts/search`
+  (DB-44: full-text search across the caller's own transcripts, `q` plus the same `limit`/`offset`
+  shape, owner-scoped by the gateway) — the meeting list and its transcripts, scoped to the caller
+  by the gateway. `meetings/<id>/summary` is a narrower read: the numeric id is the only thing a
+  caller supplies, and the route itself composes the fixed upstream
+  `/agent/workspace/file?path=meetings/<id>/summary.md` — the post-meeting AI note (DB-60), never a
+  general workspace-file proxy; a caller's own `?path=` query is always dropped, never forwarded.
+  `meetings/<platform>/<native>/participants` reads the invite + speaker roster for one meeting.
+  `bots/status` reads the caller's currently-running bots (the live status badge DB-41's Stop
+  control checks against). `user/entitlements` reads the caller's resolved plan, limits and usage
+  (DB-70) — the billing page (`/billing`, DB-74) and the Send-Bot dialog's paywall copy (DB-75) both
+  read it; it is informational only, never a client-side send gate — the server refuses an
+  exhausted quota at `POST /bots`, the client only shows the number. Plus two small reads that feed
+  the write flow below: `user/calendars` (the caller's connected ICS calendars) and
+  `meeting/jitsi-hosts` (the deployment's declared Jitsi hostnames, so the URL parser can recognise
+  a self-hosted Jitsi link).
 
   Writes (POST / PATCH / DELETE): `POST bots` dispatches a bot to a live meeting from a pasted
   URL — the "Add Bot" action in the Meetings view. `POST user/calendars`, `PATCH
@@ -137,10 +145,10 @@ widening the allowlist beyond what this client's own UI drives. The scope is the
 ```
 src/
   middleware.ts     the gate + the security headers — every request passes through
-  app/              routes: /, /login, /meetings/[id], and the api/ handlers
-  components/       the UI: shell, nav, list, detail, login card
+  app/              routes: /, /login, /meetings/[id], /search, and the api/ handlers
+  components/       the UI: shell, nav, list, detail, search results, login card
   components/ui/    the design system: Button, Input, Dialog, Toggle, Tabs, Toast, Skeleton
-  lib/              session · adminApi · upstream allowlist · meeting mapping · security
+  lib/              session · adminApi · upstream allowlist · meeting mapping · search · security
 ```
 
 Every page but `/login` renders inside `Shell` (`components/Shell.tsx`): a skip-to-content link,

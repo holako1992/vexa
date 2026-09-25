@@ -53,6 +53,18 @@ export async function forceMeetingDetail(request: APIRequestContext, status: num
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { meetingDetail: status } });
 }
 
+/** Same, for `GET /transcripts/search` — DB-44's error-state spec. */
+export async function forceSearch(request: APIRequestContext, status: number): Promise<void> {
+  await request.post(`${GATEWAY_URL}/__control/force`, { data: { search: status } });
+}
+
+/** Flip one fixture meeting's status directly (DB-48's "a live row on a later page stays visible"
+ *  spec) — a shortcut around a real bot lifecycle, which is already covered by 05/13's specs. */
+export async function setMeetingStatus(request: APIRequestContext, id: number, status: string): Promise<void> {
+  const res = await request.post(`${GATEWAY_URL}/__control/setMeetingStatus`, { data: { id, status } });
+  if (!res.ok()) throw new Error(`stub set-meeting-status failed: ${res.status()}`);
+}
+
 /** Swap the stub's `GET /user/entitlements` answer (DB-74/DB-75) — see `../fixtures.mjs` for the
  *  named states (`freeEntitlements`, `proUnlimitedEntitlements`, `pastDueEntitlements`,
  *  `unknownUsageEntitlements`). Persists until the next `resetStub`. */

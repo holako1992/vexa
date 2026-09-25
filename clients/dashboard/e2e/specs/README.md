@@ -11,6 +11,9 @@ spec's body is only the property, not the plumbing.
   `dispatchedBots`) plus the forced-failure setters used by `09-failure-states.spec.ts` and, for
   DB-75, `setEntitlements()` (swap the stub's `GET /user/entitlements` answer) and
   `forceBotsQuotaExceeded()` (make `POST /bots` answer the unwrapped 402 `quota_exceeded` body).
+  DB-44/DB-48 add `forceSearch()` (same shape, for `GET /transcripts/search`) and
+  `setMeetingStatus()` (flip one fixture meeting's status directly, so the pagination-poll spec
+  doesn't need a real bot lifecycle to prove a live row stays visible).
 - `01-gate.spec.ts` — an anonymous page request redirects to `/login`; an anonymous
   `/api/vexa/*` request is a 401, not a redirect (a fetch caller can't follow one).
 - `02-signin.spec.ts` — the email door lands on the meetings list and sets both session cookies.
@@ -59,6 +62,22 @@ spec's body is only the property, not the plumbing.
   unwrapped 402 `quota_exceeded`) showing the paywall message with a link to `upgrade_url` (or
   `/billing` when the producer sent none); and the summary panel's emphasis fix — `_none recorded
   in this meeting._` rendering as italic, not literal underscores.
+
+- `15-pagination.spec.ts` (DB-48) — "Load more" appends the fixture's second page (25 rows total,
+  page size 20) and then hides itself once a short page proves there is no third; the button is
+  reachable and activated by the keyboard alone; no tab carries a numeric badge, only the one
+  honest "N loaded" line; a meeting that only becomes live AFTER it was loaded via "Load more"
+  (so it sits beyond page one) is still shown live once the phase-aware poll re-fetches — proving
+  the poll re-fetches the WHOLE loaded window, not just page one; and the poll's own `GET
+  /meetings` request carries `limit=<rows currently loaded>`.
+- `16-search.spec.ts` (DB-44) — `Ctrl+K` focuses the shell's search box from the meetings list and
+  Enter navigates to `/search?q=`; results are grouped by meeting (the fixture's two meetings that
+  both mention "calendar" prove grouping, not flattening) with the matched term wrapped in a real
+  `<mark>`; a hit's link carries `?t=<start>` and clicking it scrolls to and highlights the exact
+  transcript segment on the meeting page; no matches renders the empty state (not a blank page or
+  "no meetings"); a forced failure renders the error state with retry; the loading state is shown
+  while the request is in flight; and a request-log proof that `q` never reaches `GET /meetings`
+  while it does reach `GET /transcripts/search` intact.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

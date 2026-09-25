@@ -2,10 +2,13 @@
  *  honest fallbacks and the ordering rather than any reshaping (there is none to pin). */
 import { describe, expect, it } from "vitest";
 import {
+  type Meeting,
   type MeetingRowDTO,
   filterMeetings,
   formatClock,
   initialsOf,
+  mergeMeetingsPage,
+  pageMayContinue,
   sortMeetings,
   toMeeting,
   toTranscript,
@@ -113,5 +116,61 @@ describe("initialsOf", () => {
     expect(initialsOf("Ada Lovelace")).toBe("AL");
     expect(initialsOf("Ada")).toBe("A");
     expect(initialsOf("  ")).toBe("?");
+  });
+});
+
+describe("pageMayContinue (DB-48)", () => {
+  it("a full page (as long as the requested limit) means more may exist", () => {
+    expect(pageMayContinue(20, 20)).toBe(true);
+  });
+
+  it("a short page means this was the last one", () => {
+    expect(pageMayContinue(3, 20)).toBe(false);
+  });
+
+  it("an empty page never continues, even if limit is 0-ish or odd", () => {
+    expect(pageMayContinue(0, 20)).toBe(false);
+  });
+
+  it("a page longer than the limit (should not happen, but must not hide a real gap) still continues", () => {
+    expect(pageMayContinue(25, 20)).toBe(true);
+  });
+});
+
+describe("mergeMeetingsPage (DB-48 pagination + polling)", () => {
+  const m = (id: string, over: Partial<Meeting> = {}): Meeting =>
+    toMeeting({ id, platform: "google_meet", native_meeting_id: id, status: "completed", ...over } as MeetingRowDTO);
+
+  it("append: adds new rows after what is already loaded, de-duplicating by id", () => {
+    const loaded = [m("1"), m("2")];
+    const page = [m("2"), m("3")]; // "2" repeats — a race between two requests
+    const merged = mergeMeetingsPage(loaded, page, "append");
+    expect(merged.map((x) => x.id).sort()).toEqual(["1", "2", "3"]);
+  });
+
+  it("append: an empty page changes nothing", () => {
+    const loaded = [m("1"), m("2")];
+    expect(mergeMeetingsPage(loaded, [], "append").map((x) => x.id).sort()).toEqual(["1", "2"]);
+  });
+
+  it("replace: a live row loaded via a second page stays visible after the poll re-fetches the WHOLE window", () => {
+    const loaded = [m("1", { status: "completed" }), m("2", { status: "active" })]; // "2" is live, loaded via page 2
+    // The poll re-fetched offset 0, limit=2 — the full loaded window — and "2" is still in it.
+    const freshWindow = [m("1", { status: "completed" }), m("2", { status: "active" })];
+    const merged = mergeMeetingsPage(loaded, freshWindow, "replace");
+    expect(merged.some((x) => x.id === "2" && x.phase === "live")).toBe(true);
+  });
+
+  it("replace: a row missing from the fresh window is dropped, not carried over from the stale poll", () => {
+    const loaded = [m("1"), m("2")];
+    const freshWindow = [m("1")]; // "2" was deleted between polls
+    const merged = mergeMeetingsPage(loaded, freshWindow, "replace");
+    expect(merged.map((x) => x.id)).toEqual(["1"]);
+  });
+
+  it("replace: live rows sort first regardless of the fresh page's own order", () => {
+    const freshWindow = [m("1", { status: "completed" }), m("2", { status: "active" })];
+    const merged = mergeMeetingsPage([], freshWindow, "replace");
+    expect(merged[0]!.id).toBe("2");
   });
 });

@@ -133,6 +133,42 @@ export function sortMeetings(list: Meeting[]): Meeting[] {
   });
 }
 
+/** DB-48: meeting-api's `GET /meetings` returns no total and no `has_more` (read the handler in
+ *  `meeting_api/collector/app.py` — it discards the store's own `has_more` return value). So
+ *  "another page may exist" is inferred the standard way: the page came back exactly as long as
+ *  the limit that was requested. This can be wrong in only one direction — a false "may have more"
+ *  when the true total is an exact multiple of the page size, which costs one extra request that
+ *  comes back empty and clears the flag. It never produces a false "no more", which would hide
+ *  real rows. */
+export function pageMayContinue(pageLength: number, requestedLimit: number): boolean {
+  return pageLength > 0 && pageLength >= requestedLimit;
+}
+
+/** DB-48's merge rule for combining a freshly-fetched page of rows with what is already loaded —
+ *  the one place both callers (the "Load more" button and the phase-aware poll) go through, so the
+ *  rule is defined once.
+ *
+ *   - `"append"` (Load more): `page` is rows the caller had not seen yet. Concatenate after
+ *     de-duplicating by id — a row should never appear on two pages, but a mutation landing
+ *     between two requests could shift offsets enough to repeat one.
+ *   - `"replace"` (the phase-aware poll): the poll always re-fetches the FULL currently-loaded
+ *     window — offset 0, limit = the number of rows already on screen — never just page one. That
+ *     is the rule that keeps a live row visible: a row that only became visible via "Load more"
+ *     is inside that window on every subsequent tick, so it is refetched (and stays) along with
+ *     page one, instead of quietly dropping off because the poll only ever looked at the first
+ *     page. The result REPLACES the loaded set outright: a row missing from the fresh window has
+ *     left it (deleted, or the window shrank), and must not linger from a stale poll. */
+export function mergeMeetingsPage(
+  loaded: readonly Meeting[],
+  page: readonly Meeting[],
+  mode: "append" | "replace",
+): Meeting[] {
+  if (mode === "replace") return sortMeetings([...page]);
+  const seen = new Set(loaded.map((m) => m.id));
+  const added = page.filter((m) => !seen.has(m.id));
+  return sortMeetings([...loaded, ...added]);
+}
+
 /** Free-text filter over the fields a person can actually see on a card. */
 export function filterMeetings(list: Meeting[], query: string): Meeting[] {
   const q = query.trim().toLowerCase();

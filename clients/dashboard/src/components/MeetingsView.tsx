@@ -5,12 +5,29 @@
  *  the list needs to notice a meeting going live within seconds, and a 10s poll does that with no
  *  socket proxy in the server. The interval tightens to 5s while anything is live and relaxes to
  *  30s when nothing is, so an idle tab costs almost nothing.
+ *
+ *  DB-48 — pagination: meeting-api's `GET /meetings` honours `limit`/`offset` and returns no total
+ *  and no `has_more` (see `lib/meetings.ts`'s `pageMayContinue`). "Load more" fetches the next page
+ *  and appends it; the poll instead re-fetches the FULL currently-loaded window on every tick
+ *  (`offset=0, limit=<rows on screen>`), which is the rule that keeps a live row visible even when
+ *  it was only loaded via "Load more" — see `mergeMeetingsPage`'s header comment for why a poll
+ *  that only re-fetched page one would silently drop it. Tab counts are not shown as numbers
+ *  because a count built from loaded rows is not a total — see the "N loaded" line below instead.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Bot, Search, Users, Video } from "lucide-react";
 import { getJson, presentError } from "@/lib/api";
-import { type Meeting, type MeetingRowDTO, filterMeetings, formatClock, sortMeetings, toMeeting } from "@/lib/meetings";
+import {
+  type Meeting,
+  type MeetingRowDTO,
+  filterMeetings,
+  formatClock,
+  mergeMeetingsPage,
+  pageMayContinue,
+  toMeeting,
+} from "@/lib/meetings";
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
 import { SendBotDialog } from "./SendBotDialog";
@@ -27,6 +44,9 @@ type TabId = (typeof TABS)[number]["id"];
 
 const POLL_LIVE_MS = 5_000;
 const POLL_IDLE_MS = 30_000;
+/** The page size "Load more" fetches, and the floor the poll's own re-fetch window never shrinks
+ *  below (so the very first load — before anything is "loaded" yet — still asks for a full page). */
+const PAGE_SIZE = 20;
 
 /** A date a person reads: "Today · 14:05", "Yesterday · 09:12", else "12 Sep · 09:12". */
 function whenLabel(m: Meeting): string {
@@ -45,26 +65,74 @@ function whenLabel(m: Meeting): string {
 }
 
 export function MeetingsView() {
+  const router = useRouter();
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<TabId>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
-  // Kept in a ref so the poll effect does not restart on every refresh.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Kept in refs so the poll effect does not restart on every refresh, and so a concurrent
+  // "Load more" click and poll tick can see each other's in-flight state.
   const hasLive = useRef(false);
+  const loadedCountRef = useRef(0);
 
   const load = useCallback(async () => {
+    // The poll re-fetches the FULL loaded window (never just page one) — see the file header
+    // comment for why that is the rule that keeps a live row on a later page visible.
+    const isInitialLoad = loadedCountRef.current === 0;
+    const limit = Math.max(loadedCountRef.current, PAGE_SIZE);
     try {
-      const body = await getJson<{ meetings?: MeetingRowDTO[] }>("/api/vexa/meetings");
-      const list = sortMeetings((body.meetings ?? []).map(toMeeting));
-      hasLive.current = list.some((m) => m.phase === "live");
-      setMeetings(list);
+      const body = await getJson<{ meetings?: MeetingRowDTO[] }>(
+        `/api/vexa/meetings?limit=${limit}&offset=0`,
+      );
+      const page = (body.meetings ?? []).map(toMeeting);
+      setMeetings((prev) => mergeMeetingsPage(prev ?? [], page, "replace"));
+      loadedCountRef.current = page.length;
+      // `pageMayContinue` answers "does the NEXT page probably have rows" — true only for a fetch
+      // that actually PROBES beyond what was already loaded (the very first load, at PAGE_SIZE;
+      // "Load more", below). A later poll asks for exactly the window already on screen, not
+      // anything beyond it, so a full return here proves only "the window still holds this many
+      // rows", never "there is a row past the edge of it" — treating it as `pageMayContinue`
+      // would (wrongly) flip "Load more" back on forever once the loaded count happens to equal
+      // the true total. A SHORT return, though, is still informative either way: the window
+      // shrank (a row left it — deleted, or moved out of scope), so there is definitely nothing
+      // beyond it now.
+      if (isInitialLoad) {
+        setHasMore(pageMayContinue(page.length, limit));
+      } else if (page.length < limit) {
+        setHasMore(false);
+      }
+      hasLive.current = page.some((m) => m.phase === "live");
       setError(null);
     } catch (e) {
       // A failure replaces the list with an error, it never degrades to an empty list: "we could
       // not ask" and "you have none" are different answers and must look different.
       console.warn("meetings load failed", e);
       setError(presentError(e));
+    }
+  }, []);
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      const offset = loadedCountRef.current;
+      const body = await getJson<{ meetings?: MeetingRowDTO[] }>(
+        `/api/vexa/meetings?limit=${PAGE_SIZE}&offset=${offset}`,
+      );
+      const page = (body.meetings ?? []).map(toMeeting);
+      setMeetings((prev) => {
+        const next = mergeMeetingsPage(prev ?? [], page, "append");
+        loadedCountRef.current = next.length;
+        return next;
+      });
+      setHasMore(pageMayContinue(page.length, PAGE_SIZE));
+    } catch (e) {
+      console.warn("load more failed", e);
+      setError(presentError(e));
+    } finally {
+      setLoadingMore(false);
     }
   }, []);
 
@@ -89,11 +157,17 @@ export function MeetingsView() {
     return filterMeetings(byTab, query);
   }, [meetings, tab, query]);
 
-  const counts = useMemo(() => {
-    const base = { all: meetings?.length ?? 0, live: 0, past: 0, scheduled: 0 };
-    for (const m of meetings ?? []) base[m.phase] += 1;
-    return base;
-  }, [meetings]);
+  /** Reconciling the two searches (DB-44 vs. this box): this input only ever filters the rows
+   *  already loaded into the browser — it cannot see a match sitting on a page nobody has loaded,
+   *  or a match inside a transcript's words rather than a title/attendee. Enter hands the same
+   *  text to `/search`, which asks the server (DB-44's `GET /transcripts/search`) across every
+   *  meeting and every transcript, not just what is on screen. */
+  function onQueryKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    const q = query.trim();
+    if (!q) return;
+    router.push(`/search?q=${encodeURIComponent(q)}`);
+  }
 
   return (
     <>
@@ -114,13 +188,15 @@ export function MeetingsView() {
         </Button>
       </header>
 
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search meetings"
-          aria-label="Search meetings"
+          onKeyDown={onQueryKeyDown}
+          placeholder="Filter loaded meetings"
+          aria-label="Filter loaded meetings"
+          hint="Press Enter to search everything, including transcripts"
           icon={<Search size={16} aria-hidden />}
           containerClassName="flex-1"
           className="bg-card py-2.5"
@@ -129,11 +205,19 @@ export function MeetingsView() {
           {TABS.map((t) => (
             <Tab key={t.id} value={t.id}>
               {t.label}
-              <span className="ml-1.5 text-xs text-ink-3">{counts[t.id]}</span>
             </Tab>
           ))}
         </Tabs>
       </div>
+
+      {/* DB-48: no per-tab numbers here — meeting-api's GET /meetings never reports a total, so a
+          count built from loaded rows would only ever describe what happens to be on screen, not
+          "how many live meetings you have". One honest line instead of four dishonest ones. */}
+      {meetings !== null && (
+        <p className="mb-4 text-xs text-ink-3">
+          {meetings.length} loaded{hasMore ? " · more available" : ""}
+        </p>
+      )}
 
       {error && <ErrorState message={error} onRetry={() => void load()} />}
       {!error && meetings === null && <LoadingState label="Loading meetings…" />}
@@ -182,6 +266,19 @@ export function MeetingsView() {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* Keyboard-accessible by construction: a real <button>, no scroll-triggered auto-load.
+          Fetches the next page and appends it — see mergeMeetingsPage's "append" mode. Shown
+          regardless of the active tab or the loaded-only filter above: more rows widen the pool
+          every tab and the filter draw from, even if the tab you're on doesn't show a new row
+          from this particular page. */}
+      {!error && hasMore && (
+        <div className="mt-4 flex justify-center">
+          <Button variant="secondary" onClick={() => void loadMore()} loading={loadingMore}>
+            Load more
+          </Button>
+        </div>
       )}
     </div>
     </>

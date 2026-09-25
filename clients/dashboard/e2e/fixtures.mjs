@@ -90,6 +90,30 @@ const MEETING_ROWS = [
   },
 ];
 
+/** DB-48: enough ADDITIONAL rows to force `GET /meetings` past one page at the dashboard's own
+ *  page size (20) — `Archived Call 1`..`Archived Call 19`, ids 200..218, oldest-looking first so
+ *  they sort after the six named rows above. 6 + 19 = 25 total: page one (limit 20, offset 0)
+ *  returns 20 rows (all six named ones plus the first 14 archived ones — `pageMayContinue` reads
+ *  that as "more may exist"), page two (offset 20) returns the remaining 5 (a short page — no
+ *  third page). */
+const ARCHIVED_ROWS = Array.from({ length: 19 }, (_, i) => {
+  const n = i + 1;
+  const day = String(20 + (i % 8)).padStart(2, "0"); // spreads across a few August dates
+  return {
+    id: 200 + i,
+    platform: "zoom",
+    native_meeting_id: `archived-${n}`,
+    status: "completed",
+    shared: false,
+    start_time: `2026-08-${day}T09:00:00Z`,
+    end_time: `2026-08-${day}T09:20:00Z`,
+    constructed_meeting_url: `https://zoom.us/j/archived-${n}`,
+    data: { title: `Archived Call ${n}`, attendees: [] },
+  };
+});
+
+const ALL_MEETING_ROWS = [...MEETING_ROWS, ...ARCHIVED_ROWS];
+
 /** `summary.v1` notes, keyed by meeting row id — the raw `content` of `meetings/<id>/summary.md`,
  *  exactly the shape `lib/summary.ts` parses. 101 (live) and 103 (scheduled) intentionally have
  *  none: the dashboard must never fetch a summary for a meeting that hasn't ended. 104 (shared)
@@ -130,8 +154,8 @@ reason: "fewer than 3 transcript segments"
 `,
 };
 
-/** Segments keyed by meeting row id — only the fully-transcribed past meeting (102) has one, to
- *  keep the fixture honest about which rows a real deployment would actually have text for. */
+/** Segments keyed by meeting row id. 102 and 105 both have one — DB-44's search specs need a term
+ *  ("calendar") that hits more than one meeting so grouping has more than one group to prove. */
 const TRANSCRIPTS = {
   102: [
     { start: 0, speaker: "Carla", text: "Let's start with the new onboarding flow." },
@@ -139,6 +163,10 @@ const TRANSCRIPTS = {
     { start: 21, speaker: "Carla", text: "Nice, the empty states read a lot clearer now." },
     { start: 34.2, speaker: "Dev", text: "Agreed. Next up is the calendar connection screen." },
     { start: 50, speaker: "Carla", text: "Let's walk through that one together." },
+  ],
+  105: [
+    { start: 5, speaker: "Sam", text: "Let's also review the calendar sync issue from last week." },
+    { start: 40, speaker: "Priya", text: "It looks like the ICS feed timed out twice." },
   ],
 };
 
@@ -153,7 +181,44 @@ const PARTICIPANTS = {
 };
 
 export function freshMeetings() {
-  return JSON.parse(JSON.stringify(MEETING_ROWS));
+  return JSON.parse(JSON.stringify(ALL_MEETING_ROWS));
+}
+
+/** DB-44: a crude but real substring search over the fixture transcripts above, shaped exactly
+ *  like meeting-api's own response (`meeting_api/collector/app.py`'s `search_transcripts` /
+ *  `fakes.py`'s in-memory stand-in) — `{query, hits, count}`, each hit carrying `meeting_db_id`
+ *  (never `meeting_id`), `platform`, `native_meeting_id`, `start`, `end`, `speaker`, `rank`,
+ *  `snippet`. Reads `meetings` (the stub's current, possibly-mutated working copy) rather than the
+ *  static fixture so a deleted meeting's transcript stops surfacing, same as the real store. */
+export function searchTranscripts(meetings, q, { limit = 20, offset = 0 } = {}) {
+  const needle = (q || "").trim().toLowerCase();
+  if (!needle) return [];
+  const byId = new Map(meetings.map((m) => [m.id, m]));
+  const hits = [];
+  for (const [midStr, segments] of Object.entries(TRANSCRIPTS)) {
+    const mid = Number(midStr);
+    const meeting = byId.get(mid);
+    if (!meeting) continue; // deleted since the fixture was seeded
+    for (const seg of segments) {
+      const low = seg.text.toLowerCase();
+      const i = low.indexOf(needle);
+      if (i < 0) continue;
+      const snippet = seg.text;
+      hits.push({
+        meeting_db_id: mid,
+        platform: meeting.platform,
+        native_meeting_id: meeting.native_meeting_id,
+        start: seg.start,
+        end: seg.start + 2,
+        speaker: seg.speaker,
+        rank: 1,
+        snippet,
+      });
+    }
+  }
+  const lim = Math.max(1, Math.min(Number(limit) || 20, 100));
+  const off = Math.max(0, Number(offset) || 0);
+  return hits.slice(off, off + lim);
 }
 
 export function transcriptFor(id) {

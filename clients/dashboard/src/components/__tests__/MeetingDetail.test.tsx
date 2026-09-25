@@ -8,12 +8,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-// MeetingDetail's delete flow (DB-42) navigates away with `useRouter()` from `next/navigation`,
+// MeetingDetail's delete flow (DB-42) navigates away with `useRouter()`, and DB-44's
+// scroll-to-segment link reads `?t=` with `useSearchParams()` — both from `next/navigation`,
 // which throws outside an actual App Router tree ("invariant expected app router to be
 // mounted"). Every other component under test here renders under plain RTL, not Next's router,
-// so the hook is stubbed the same way `next/link` already resolves fine without one.
+// so both hooks are stubbed the same way `next/link` already resolves fine without one.
+// `useSearchParams` returns an empty params object — no test here exercises the `?t=` highlight,
+// so "no query at all" (the ordinary case) is the right default.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import { MeetingDetail } from "../MeetingDetail";

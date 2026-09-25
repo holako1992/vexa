@@ -6,11 +6,19 @@
  *  It is a client component only because the account menu, the mobile rail toggle and sign-out
  *  hold state; the identity it renders is resolved on the server and handed down as a prop, so
  *  the browser is never the source of who you are.
+ *
+ *  DB-44 — global search: the top bar carries a search box, not a nav-rail entry. `nav.ts`'s items
+ *  are DESTINATIONS you revisit (Meetings, Billing, eventually Upcoming/Calendar); search is an
+ *  ACTION you take from wherever you already are, the way GitHub, Linear and Notion all put it in
+ *  a persistent header bar rather than the sidebar. A rail entry would also cost a click to reach
+ *  a page whose only job is to hand you straight back to a meeting — worse than typing into a box
+ *  that is already on screen. It is reachable from every page because `Shell` renders it, and
+ *  `Ctrl+K`/`Cmd+K` focuses it from anywhere without a pointer.
  */
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { AudioLines, ChevronDown, LogOut, Menu, X } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { AudioLines, ChevronDown, LogOut, Menu, Search, X } from "lucide-react";
 import clsx from "clsx";
 import { VISIBLE_NAV_ITEMS } from "./nav";
 
@@ -28,6 +36,31 @@ function initials(user: ShellUser): string {
 export function Shell({ user, children }: { user: ShellUser; children: React.ReactNode }) {
   const [railOpen, setRailOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [searchValue, setSearchValue] = useState("");
+
+  // Ctrl+K / Cmd+K focuses the search box from anywhere in the app, without stealing the
+  // shortcut while someone is already typing in another field (a second Ctrl+K there should do
+  // whatever that field normally does, not hijack focus mid-edit elsewhere).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  function submitSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const q = searchValue.trim();
+    if (!q) return;
+    router.push(`/search?q=${encodeURIComponent(q)}`);
+  }
 
   async function signOut() {
     // POST, same-origin — the logout route refuses anything else. A hard navigation afterwards
@@ -108,6 +141,38 @@ export function Shell({ user, children }: { user: ShellUser; children: React.Rea
             <Menu size={18} aria-hidden />
           </button>
           <span className="text-[15px] font-semibold tracking-tight md:hidden">Vexa</span>
+          <form onSubmit={submitSearch} role="search" className="ml-2 hidden max-w-sm flex-1 sm:block">
+            <label htmlFor="global-search" className="sr-only">
+              Search meetings and transcripts
+            </label>
+            <div className="relative">
+              <Search size={15} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
+              <input
+                ref={searchRef}
+                id="global-search"
+                type="search"
+                value={searchValue}
+                onChange={(e) => setSearchValue(e.target.value)}
+                placeholder="Search meetings & transcripts"
+                className="w-full rounded-lg border border-line bg-raised py-1.5 pl-8 pr-12 text-sm placeholder:text-ink-3 focus:border-accent focus:outline-none"
+              />
+              <kbd
+                aria-hidden
+                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-line bg-card px-1.5 py-0.5 text-[10px] font-medium text-ink-3"
+              >
+                Ctrl K
+              </kbd>
+            </div>
+          </form>
+          {/* Mobile fallback: the inline box above is hidden below `sm` for space, but search must
+              still be reachable from every page (DB-44) — a plain link to /search, no query. */}
+          <Link
+            href="/search"
+            aria-label="Open search"
+            className="rounded-lg p-2 text-ink-2 hover:bg-raised sm:hidden"
+          >
+            <Search size={18} aria-hidden />
+          </Link>
           <div className="ml-auto">
             <AccountMenu user={user} onSignOut={signOut} />
           </div>
