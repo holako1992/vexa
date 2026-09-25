@@ -220,6 +220,36 @@
    "default": "(unset — checking out Team/yearly then answers a typed 503 naming this key)",
    "description": "the Stripe Price id for the catalog's `team` plan, yearly interval. See STRIPE_PRICE_PRO_MONTHLY.",
    "targets": ["compose"]
+  },
+  {
+   "key": "GOOGLE_CALENDAR_CLIENT_ID",
+   "class": "capability",
+   "capability": "google_calendar",
+   "description": "the OAuth client id (google_oauth.py) DB-30's Google Calendar connect flow presents to Google — a DIFFERENT OAuth client than the dashboard's own sign-in GOOGLE_CLIENT_ID (a different consent: read-only calendar access vs. 'sign in with Google'). ONE Google Cloud OAuth client MAY serve both purposes if both redirect URIs are registered on it (see docs/docs/how-to/calendar-sync.mdx for the exact console steps) — but the two env keys must never be conflated in code, because calendar_readonly consent must never be silently granted by a sign-in flow the user did not see as a calendar request.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "GOOGLE_CALENDAR_CLIENT_SECRET",
+   "class": "capability",
+   "capability": "google_calendar",
+   "secret": true,
+   "description": "the OAuth client secret paired with GOOGLE_CALENDAR_CLIENT_ID. Lives ONLY in admin-api (google_oauth.py's code/refresh-token exchange) — never sent to, or readable by, the dashboard or any other service.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "GOOGLE_CALENDAR_REDIRECT_URI",
+   "class": "capability",
+   "capability": "google_calendar",
+   "description": "the dashboard's public OAuth callback page (DB-31), e.g. https://dashboard.vexa.ai/calendar/google/callback — MUST exactly match a redirect URI registered on the Google Cloud OAuth client (GOOGLE_CALENDAR_CLIENT_ID), or Google refuses the consent screen with redirect_uri_mismatch. Never guessed from another env var: DB-31's callback page relays {code, state} to POST /user/calendars/google/exchange through the dashboard's own proxy, and this is the exact address that page must live at.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "CALENDAR_TOKEN_ENCRYPTION_KEY",
+   "class": "capability",
+   "capability": "google_calendar",
+   "secret": true,
+   "description": "the master key token_cipher.py derives the Google refresh-token encrypt/MAC keys from (HMAC-SHA256-based encrypt-then-MAC — see token_cipher.py's module docstring for the construction). Generate with `openssl rand -hex 32`. Without it the Google OAuth routes answer their capability-gated 503 rather than ever writing a refresh token to users.data unencrypted; rotating it makes every previously-stored Google connection's stored blob undecryptable, surfacing as reconnect_needed on next sync (the same visible state a revoked Google grant produces) rather than a silent failure.",
+   "targets": ["compose"]
   }
  ],
  "capabilities": {
@@ -227,6 +257,11 @@
    "description": "checkout, the billing portal, and the webhook's write path (POST /billing/checkout, POST /billing/portal, POST /billing/webhook)",
    "mode": "all",
    "when_unconfigured": "all three /billing/* routes answer a typed 503 naming the missing key(s); every other admin-api route is unaffected"
+  },
+  "google_calendar": {
+   "description": "DB-30's Google Calendar OAuth connect flow (GET /user/calendars/google/authorize, POST /user/calendars/google/exchange) and the internal access-token edge meeting-api's sync calls (POST /internal/calendars/{id}/google-token)",
+   "mode": "all",
+   "when_unconfigured": "all three routes answer a typed 503 naming the missing key(s); the ICS calendar-connect surface (/user/calendars, /user/calendar) is completely unaffected"
   }
  }
 }

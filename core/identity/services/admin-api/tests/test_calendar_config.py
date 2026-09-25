@@ -16,6 +16,8 @@ from admin_api.app.main import create_app
 from admin_api.schema.models import Base
 from admin_api.schema.sync import ensure_schema_sync
 
+from admin_api.app.billing.catalog import PLANS, effective_concurrent_cap
+
 from conftest import requires_docker
 from test_stack_admin_api import ADMIN_TOKEN, INTERNAL_SECRET, _admin, _dispose_async_engine
 
@@ -229,7 +231,12 @@ def test_internal_bot_context(client):
                    headers={"X-Internal-Secret": INTERNAL_SECRET})
     assert r.status_code == 200, r.text
     ctx = r.json()
-    assert ctx["max_concurrent"] == 4
+    # DB-72 (billing/catalog.py:effective_concurrent_cap, commit 1404bf23): a user with no
+    # subscription is on the free plan, and the effective cap is the LOWER of the plan's
+    # concurrent_bots and the stored column — never the stored column alone. Expressed via the
+    # same function /internal/validate itself calls, so this asserts the RULE, not a re-derived
+    # magic number: free plan concurrent_bots=1, stored max_bots=4 → min(1, 4) == 1.
+    assert ctx["max_concurrent"] == effective_concurrent_cap(PLANS["free"].concurrent_bots, 4)
     assert ctx["webhook_url"] == "https://example.com/hook"
     assert ctx["webhook_secret"] == "shh"
 

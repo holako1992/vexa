@@ -394,6 +394,23 @@ def test_plural_calendar_routes_forward_to_owning_services():
     assert downstream.last["headers"]["x-user-id"] == "7"
 
 
+def test_google_calendar_oauth_routes_forward_to_admin_api():
+    """DB-30: both the consent-URL mint and the code/state exchange are identity's (admin-api
+    owns the client secret and the encrypted refresh token) — never meeting-api's."""
+    client, downstream = _client()
+    r = client.get("/user/calendars/google/authorize", headers=AUTH)
+    assert r.status_code == 200
+    assert downstream.last["method"] == "GET"
+    assert downstream.last["url"] == "http://admin-api/user/calendars/google/authorize"
+    assert downstream.last["headers"]["x-user-id"] == "7"
+
+    r = client.post("/user/calendars/google/exchange", headers=AUTH,
+                    json={"code": "abc", "state": "xyz"})
+    assert r.status_code == 200
+    assert downstream.last["method"] == "POST"
+    assert downstream.last["url"] == "http://admin-api/user/calendars/google/exchange"
+
+
 def test_calendar_id_is_re_encoded_into_one_downstream_segment():
     """Starlette hands the handler a DECODED param, so a raw interpolation would let the caller
     graft a query string onto the downstream hop: `x%3Fdebug%3D1` must stay one literal segment."""

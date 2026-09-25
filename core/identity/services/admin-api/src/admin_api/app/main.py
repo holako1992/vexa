@@ -107,6 +107,32 @@ def _stripe_client() -> StripeClient:
     return StripeClient(secret_key=os.environ.get("STRIPE_SECRET_KEY", ""))
 
 
+def _google_calendar_env() -> dict:
+    return {
+        "client_id": os.environ.get("GOOGLE_CALENDAR_CLIENT_ID", ""),
+        "client_secret": os.environ.get("GOOGLE_CALENDAR_CLIENT_SECRET", ""),
+        "redirect_uri": os.environ.get("GOOGLE_CALENDAR_REDIRECT_URI", ""),
+    }
+
+
+def _require_google_calendar() -> dict:
+    """Fail loud with a typed 503 — never a 500 — when DB-30's Google OAuth config is incomplete.
+    Every Google-calendar route calls this FIRST (mirrors ``_require_stripe_billing``), so an
+    unconfigured deployment's three routes are uniformly unavailable while ``/user/calendars``
+    (ICS) is completely unaffected. Returns the env dict on success so callers need not re-read it."""
+    state = config_preflight.capability_state("google_calendar")
+    if state != config_preflight.CONFIGURED:
+        missing = config_preflight.missing_capability_keys("google_calendar")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Google Calendar is not configured on this deployment"
+                + (f" — missing: {', '.join(missing)}" if missing else f" ({state})")
+            ),
+        )
+    return _google_calendar_env()
+
+
 def _require_stripe_billing() -> None:
     """Fail loud with a typed, actionable 503 — never a 500 — when DB-73's config is incomplete.
     Every one of checkout/portal/webhook calls this FIRST, so an unconfigured deployment's
@@ -310,6 +336,21 @@ class CalendarCreate(BaseModel):
     auto_join: bool = True
     bot_name: Optional[str] = None
 
+    model_config = {"extra": "forbid"}
+
+
+class GoogleExchangeRequest(BaseModel):
+    """DB-31's callback page relays exactly these two fields from Google's redirect."""
+    code: str
+    state: str
+
+    model_config = {"extra": "forbid"}
+
+
+class GoogleTokenRequest(BaseModel):
+    """The internal google-token edge's body — names which user's connection to mint a token
+    for (the caller supplies both this and the ``calendar_id`` path param)."""
+    user_id: int
     model_config = {"extra": "forbid"}
 
 
@@ -819,6 +860,127 @@ def create_app() -> FastAPI:
         target["deleted"] = True
         await _save_calendar_connections(user, db, connections)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # --- user tier: Google Calendar OAuth connect (DB-30) — two routes, scopes bot,tx (see
+    #     core/identity/routes.v1.json), fronted by the gateway exactly like /user/calendars.
+    #     The client secret and the encrypted refresh token both live ONLY in this service; the
+    #     dashboard (DB-31) only ever sees the consent URL and relays {code, state} back here. ---
+    from . import google_oauth, token_cipher
+    from .calendars import new_google_connection
+
+    _NONCE_PRUNE_AGE_S = google_oauth.STATE_TTL_S * 3
+
+    def _consume_oauth_nonce(data: dict, nonce: str, *, now: float) -> bool:
+        """Record ``nonce`` as spent on THIS user's row, pruning entries older than the state TTL
+        could ever still be valid for. Returns False (refuse) when the nonce was already recorded
+        — the single-use half of the state's CSRF protection; signature+expiry+ownership is
+        ``google_oauth.verify_state``'s half."""
+        seen = data.get("google_oauth_nonces")
+        entries = [e for e in seen if isinstance(e, dict) and e.get("nonce")] if isinstance(seen, list) else []
+        entries = [e for e in entries if now - float(e.get("at", 0)) < _NONCE_PRUNE_AGE_S]
+        if any(e["nonce"] == nonce for e in entries):
+            return False
+        entries.append({"nonce": nonce, "at": now})
+        data["google_oauth_nonces"] = entries
+        return True
+
+    @app.get("/user/calendars/google/authorize")
+    async def google_calendar_authorize(user: User = Depends(get_current_user)):
+        """The Google consent-screen URL, carrying a fresh signed state bound to the caller. DB-31
+        redirects the browser here (or opens it directly, having fetched this JSON first)."""
+        env = _require_google_calendar()
+        state = google_oauth.sign_state(user.id)
+        url = google_oauth.build_authorize_url(
+            client_id=env["client_id"], redirect_uri=env["redirect_uri"], state=state,
+        )
+        return {"authorize_url": url, "state": state}
+
+    @app.post("/user/calendars/google/exchange", status_code=status.HTTP_201_CREATED)
+    async def google_calendar_exchange(body: GoogleExchangeRequest,
+                                       user: User = Depends(get_current_user_for_update),
+                                       db: AsyncSession = Depends(get_db)):
+        """DB-31's callback page relays Google's ``code``+``state`` here. Verifies the state
+        (signature, TTL, bound to THIS caller, single-use), exchanges the code at Google's token
+        endpoint, encrypts the refresh token at rest, stores (or re-connects) the connection, and
+        returns its masked shape — same response contract as ``POST /user/calendars``."""
+        env = _require_google_calendar()
+        try:
+            nonce = google_oauth.verify_state(body.state, expected_user_id=user.id)
+        except google_oauth.OAuthStateError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"invalid state: {e}") from e
+
+        data = dict(user.data or {})
+        import time as _time
+        if not _consume_oauth_nonce(data, nonce, now=_time.time()):
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail="this authorization has already been used")
+
+        try:
+            tokens = await google_oauth.exchange_code(
+                code=body.code, client_id=env["client_id"], client_secret=env["client_secret"],
+                redirect_uri=env["redirect_uri"],
+            )
+        except google_oauth.GoogleOAuthError as e:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                                detail=f"Google rejected the authorization code: {e.reason}") from e
+
+        refresh_token = tokens.get("refresh_token")
+        access_token = tokens.get("access_token")
+        if not access_token:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                                detail="Google's token response carried no access_token")
+        try:
+            userinfo = await google_oauth.fetch_userinfo(access_token=access_token)
+        except google_oauth.GoogleOAuthError as e:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                                detail=f"could not read the Google account's email: {e.reason}") from e
+        google_email = (userinfo.get("email") or "").strip()
+        if not google_email:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                                detail="Google did not return an account email")
+
+        connections = connections_from_data(data, user.id, include_deleted=True)
+        live = [c for c in connections if not c.get("deleted")]
+        existing = next((c for c in live if (c.get("kind") or "ics") == "google"
+                         and c.get("google_email") == google_email), None)
+
+        if not refresh_token and existing is None:
+            # prompt=consent should always grant one on a FIRST connection; if Google still
+            # withheld it there is nothing durable to store — fail loud rather than create a
+            # connection that can never sync past its first access token's expiry.
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail=("Google did not grant a refresh token — revoke Vexa's access at "
+                        "https://myaccount.google.com/permissions and reconnect"),
+            )
+
+        if len(live) >= MAX_CALENDAR_CONNECTIONS and existing is None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"at most {MAX_CALENDAR_CONNECTIONS} calendars can be connected")
+
+        if existing is not None:
+            # Re-consent for an already-connected Google account: refresh the stored credential
+            # (Google may omit refresh_token on a repeat consent — keep the one already stored)
+            # and clear any reconnect_needed the previous grant's revocation had set.
+            if refresh_token:
+                existing["google_refresh_token_enc"] = token_cipher.encrypt(refresh_token)
+            existing["reconnect_needed"] = False
+            created = existing  # mutated in place; already a member of `connections`
+        else:
+            created = new_google_connection(
+                name=f"Google — {google_email}",
+                google_email=google_email,
+                refresh_token_enc=token_cipher.encrypt(refresh_token),
+                bot_name=data.get("calendar_bot_name") or "Vexa",
+            )
+            connections.append(created)
+
+        # `data` carries the consumed-nonce write; `_save_calendar_connections` reads it back via
+        # `user.data` and layers `calendar_connections` on top (store_connections merges, not
+        # replaces), so the nonce record and the new/updated connection commit together.
+        user.data = data
+        await _save_calendar_connections(user, db, connections)
+        return masked_connection(created)
 
     @app.put("/user/calendar")
     async def set_user_calendar(calendar_update: CalendarUpdate,
@@ -1386,6 +1548,71 @@ def create_app() -> FastAPI:
             data = u.data if isinstance(u.data, dict) else {}
             configs.extend(internal_connections(data, u.id))
         return {"configs": configs}
+
+    # --- internal tier: Google access-token mint (DB-30) — meeting-api's sync calls this instead
+    #     of ever reading identity's tables or an encrypted blob directly (P-book: the core owns
+    #     its contracts). Body names the calendar because two internal-tier callers can share the
+    #     X-Internal-Secret but must never share a connection's stored credential without saying
+    #     which one; uses ``_check_internal_no_dev_bypass`` like the other id-scoped internal
+    #     reads, since the caller supplies both user_id and calendar_id. ---
+    @app.post("/internal/calendars/{calendar_id}/google-token", include_in_schema=False)
+    async def internal_google_access_token(calendar_id: str, body: GoogleTokenRequest,
+                                           request: Request, db: AsyncSession = Depends(get_db)):
+        _check_internal_no_dev_bypass(request)
+        from . import google_oauth, token_cipher
+        from .calendars import connections_from_data, set_reconnect_needed
+
+        env = _google_calendar_env()
+        if not all(env.values()):
+            missing = config_preflight.missing_capability_keys("google_calendar")
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail=f"Google Calendar is not configured — missing: {', '.join(missing)}")
+
+        user = (await db.execute(
+            select(User).where(User.id == body.user_id).with_for_update()
+        )).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="user not found")
+        data = dict(user.data or {})
+        connections = connections_from_data(data, user.id, include_deleted=True)
+        target = next((c for c in connections if c.get("id") == calendar_id
+                       and (c.get("kind") or "ics") == "google" and not c.get("deleted")), None)
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="google calendar connection not found")
+        encrypted = target.get("google_refresh_token_enc")
+        if not encrypted:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail="connection carries no stored refresh token")
+        try:
+            refresh_token = token_cipher.decrypt(encrypted)
+        except token_cipher.TokenCipherError as e:
+            # A key rotation or a corrupted blob is indistinguishable from a revoked grant to the
+            # SYNC side — both mean "this connection cannot get a token right now" — so it gets
+            # the same visible reconnect_needed state rather than a bare 500 (DB-30 acceptance).
+            connections = set_reconnect_needed(connections, calendar_id, True)
+            await _save_calendar_connections(user, db, connections)
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"reconnect_needed: stored credential unreadable ({e})") from e
+
+        try:
+            tokens = await google_oauth.refresh_access_token(
+                refresh_token=refresh_token, client_id=env["client_id"],
+                client_secret=env["client_secret"],
+            )
+        except google_oauth.GoogleOAuthError as e:
+            if e.invalid_grant:
+                connections = set_reconnect_needed(connections, calendar_id, True)
+                await _save_calendar_connections(user, db, connections)
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    detail=f"reconnect_needed: {e.reason}") from e
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=e.reason) from e
+        finally:
+            refresh_token = None  # the plaintext credential goes out of scope the instant it is used
+
+        if target.get("reconnect_needed"):
+            connections = set_reconnect_needed(connections, calendar_id, False)
+            await _save_calendar_connections(user, db, connections)
+
+        return {"access_token": tokens.get("access_token"), "expires_in": tokens.get("expires_in")}
 
     # --- internal tier: per-user spawn context — the auto-join sweep's stand-in for the headers
     #     the gateway injects on POST /bots (X-User-Limits + webhook config from /internal/validate).

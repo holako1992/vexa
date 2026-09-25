@@ -80,6 +80,9 @@ system service-authority-system  # optional operator-owned admission and active-
 system system-webhook-system  # optional operator-owned terminal-event consumer; absent in stock OSS and never selected from customer or meeting data
   service system-webhook
 
+system google-calendar-system  # DB-30: external, optional — a deployment with no GOOGLE_CALENDAR_CLIENT_ID/SECRET configured never calls it and the ICS calendar-connect surface is unaffected (config.v1 capability google_calendar)
+  service google-calendar-api
+
 system platform  # shared infra backing the services
   service redis
   database postgres
@@ -121,6 +124,9 @@ edges:
   meeting-api -write-> minio
   meeting-api -req-> runtime  # POST /workloads spawn bot
   meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated calendar connections for sync and disconnect cleanup
+  meeting-api -req-> admin-api  # DB-30: POST /internal/calendars/{id}/google-token mints a short-lived Google access token for a google-kind connection's sync; meeting-api never reads identity's tables or the encrypted refresh token directly (the core owns its contracts)
+  meeting-api -req-> google-calendar-api  # DB-30: GET calendar/v3/calendars/{id}/events (singleEvents=true, paginated) with the access token minted above — the Google adapter beside the ICS one, producing identical planned-meeting rows for an equivalent event (parity)
+  admin-api -req-> google-calendar-api  # DB-30: OAuth code/refresh-token exchange (oauth2.googleapis.com/token) and account-email lookup (oauth2/v3/userinfo) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard
   meeting-api -req-> service-authority  # optional signed service-authority.v1 admit/continue decision; unset is explicit OSS allow-all, configured failure is closed
   meeting-api -req-> system-webhook  # optional signed terminal webhook.v1 delivery to a boot-frozen operator destination; customer webhook SSRF policy remains separate
   agent-api -read-> segments-stream  # XREADGROUP agent_copilot (proactive watcher)

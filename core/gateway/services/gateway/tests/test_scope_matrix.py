@@ -88,6 +88,8 @@ CASES = [
     ("DELETE", "/user/calendars/work-1", "/user/calendars/{calendar_id}"),
     ("GET", "/user/calendars/work-1/sync", "/user/calendars/{calendar_id}/sync"),
     ("POST", "/user/calendars/work-1/sync", "/user/calendars/{calendar_id}/sync"),
+    ("GET", "/user/calendars/google/authorize", "/user/calendars/google/authorize"),
+    ("POST", "/user/calendars/google/exchange", "/user/calendars/google/exchange"),
 
     ("GET", "/user/webhook", "/user/webhook"),
     ("PUT", "/user/webhook", "/user/webhook"),

@@ -67,7 +67,8 @@ async def fetch_ics(url: str, *, timeout_s: float = 15.0,
 async def fetch_configs(admin_api_url: str, internal_secret: str,
                         *, timeout_s: float = 10.0) -> Optional[list[dict]]:
     """``[{user_id, ics_url, auto_join}]`` from admin-api's internal calendar-configs edge, or
-    ``None`` when identity is unreachable (the sweep skips the tick — fail-closed, not fail-silent)."""
+    ``None`` when identity is unreachable (the sweep skips the tick — fail-closed, not fail-silent).
+    A Google-kind config (``kind: "google"``) carries no credential — see ``fetch_google_access_token``."""
     import httpx
 
     try:
@@ -83,3 +84,97 @@ async def fetch_configs(admin_api_url: str, internal_secret: str,
         return configs if isinstance(configs, list) else None
     except Exception:
         return None
+
+
+GOOGLE_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+MAX_GOOGLE_EVENTS_PAGES = 20  # a personal calendar's 14-day window is a handful of pages; bounded
+
+
+async def fetch_google_access_token(admin_api_url: str, internal_secret: str, *, user_id: int,
+                                    calendar_id: str, timeout_s: float = 10.0
+                                    ) -> tuple[Optional[str], Optional[str]]:
+    """A short-lived Google access token for this connection, via admin-api's internal edge —
+    meeting-api NEVER reads identity's tables or an encrypted refresh token directly (the core
+    owns its contracts; a consumer is handed a capability, not a credential).
+
+    Returns ``(token, None)`` on success, or ``(None, reason)`` on any failure. A 409 from
+    admin-api means the stored grant is revoked/expired (``reconnect_needed`` — admin-api has
+    already flipped that flag on the connection); the reason threads through to the sync stamp's
+    ``last_error`` verbatim so the panel shows the SAME "reconnect" wording either way."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(
+                f"{admin_api_url.rstrip('/')}/internal/calendars/{calendar_id}/google-token",
+                headers={"X-Internal-Secret": internal_secret},
+                json={"user_id": user_id},
+            )
+    except Exception:
+        return None, "couldn't reach identity to refresh the Google access token"
+    if resp.status_code == 409:
+        try:
+            detail = resp.json().get("detail")
+        except Exception:
+            detail = None
+        return None, detail or "reconnect_needed: the Google grant was revoked or expired — reconnect this calendar"
+    if resp.status_code != 200:
+        return None, f"identity's Google token edge answered HTTP {resp.status_code}"
+    try:
+        token = resp.json().get("access_token")
+    except Exception:
+        token = None
+    if not token:
+        return None, "identity's Google token edge returned no access_token"
+    return token, None
+
+
+async def fetch_google_events(access_token: str, calendar_ids: list[str], *,
+                              time_min: str, time_max: str, timeout_s: float = 15.0,
+                              client=None) -> tuple[Optional[list[dict]], Optional[str]]:
+    """``events.list(singleEvents=true)`` across every ``calendar_ids`` entry, following
+    ``nextPageToken`` pagination on each, bounded to a sane time window (the same
+    ``DEFAULT_HORIZON_DAYS``/``DEFAULT_LOOKBACK_S`` window ``parse_google_events`` re-applies —
+    Google's own filtering is the outer bound, the parser's is the authoritative one). Returns
+    ``(events, None)`` on success (the raw item list, unfiltered by calendar) or ``(None, reason)``
+    on the first calendar's failure — a partial multi-calendar result is never silently returned,
+    the same fail-loud rule ``fetch_ics`` follows."""
+    import httpx
+
+    owns_client = client is None
+    if owns_client:
+        client = httpx.AsyncClient(timeout=timeout_s)
+    try:
+        out: list[dict] = []
+        for calendar_id in calendar_ids:
+            page_token = None
+            for _ in range(MAX_GOOGLE_EVENTS_PAGES):
+                params = {
+                    "singleEvents": "true", "timeMin": time_min, "timeMax": time_max,
+                    "maxResults": "250", "orderBy": "startTime",
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+                url = GOOGLE_EVENTS_URL.format(calendar_id=calendar_id)
+                try:
+                    resp = await client.get(
+                        url, params=params,
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                except Exception:
+                    return None, f"couldn't reach Google Calendar for calendar '{calendar_id}'"
+                if resp.status_code == 401:
+                    return None, "Google rejected the access token (unauthorized)"
+                if resp.status_code == 404:
+                    return None, f"calendar '{calendar_id}' was not found (or is no longer shared)"
+                if resp.status_code != 200:
+                    return None, f"Google Calendar answered HTTP {resp.status_code} for calendar '{calendar_id}'"
+                body = resp.json()
+                out.extend(body.get("items") or [])
+                page_token = body.get("nextPageToken")
+                if not page_token:
+                    break
+        return out, None
+    finally:
+        if owns_client:
+            await client.aclose()

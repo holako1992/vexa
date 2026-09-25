@@ -301,6 +301,139 @@ def parse_ics(text: str, *, now: datetime,
     return {"events": events, "cancelled_uids": cancelled}
 
 
+def _google_event_start(ev: dict) -> Optional[datetime]:
+    """A Google Calendar API event's ``start`` → tz-aware UTC datetime. ``dateTime`` for a timed
+    event, ``date`` (all-day, no time component) for one — the same two shapes ``_as_utc`` folds
+    for an ICS DTSTART, so both providers converge on the identical PlannedEvent field."""
+    start = ev.get("start") or {}
+    if start.get("dateTime"):
+        try:
+            dt = datetime.fromisoformat(str(start["dateTime"]).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    if start.get("date"):
+        try:
+            d = date.fromisoformat(str(start["date"]))
+        except ValueError:
+            return None
+        return datetime.combine(d, time(0, 0), tzinfo=timezone.utc)
+    return None
+
+
+def _google_link(ev: dict) -> Optional[tuple[str, str, str]]:
+    """The joinable link for one Google event: ``hangoutLink`` first (Google Meet auto-attached to
+    the event), then a ``conferenceData`` video entry point (Meet/Zoom/Teams add-ons all populate
+    this the same way), then LOCATION, then DESCRIPTION — reusing the SAME ``find_meeting_link``
+    the ICS path uses (parity: an identical link in either provider's text resolves identically)."""
+    candidates: list[str] = []
+    if ev.get("hangoutLink"):
+        candidates.append(str(ev["hangoutLink"]))
+    for entry_point in ((ev.get("conferenceData") or {}).get("entryPoints") or []):
+        if entry_point.get("entryPointType") == "video" and entry_point.get("uri"):
+            candidates.append(str(entry_point["uri"]))
+    if ev.get("location"):
+        candidates.append(str(ev["location"]))
+    if ev.get("description"):
+        candidates.append(str(ev["description"]))
+    for source in candidates:
+        link = find_meeting_link(source)
+        if link:
+            return link
+    return None
+
+
+def _google_attendees(ev: dict) -> list[dict]:
+    """Mirrors ICS ``_attendees``: normalized email, optional display name, participation status.
+    Rooms/resources (``resource: true``) are dropped, same as CUTYPE=RESOURCE|ROOM."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    _STATUS_MAP = {"needsaction": "needs-action"}
+    for a in ev.get("attendees") or []:
+        if not isinstance(a, dict) or a.get("resource"):
+            continue
+        email = str(a.get("email") or "").strip().lower()
+        if "@" not in email or email in seen:
+            continue
+        seen.add(email)
+        entry: dict = {"email": email}
+        name = str(a.get("displayName") or "").strip()
+        if name and name.lower() != email:
+            entry["name"] = name
+        status = str(a.get("responseStatus") or "").strip().lower()
+        if status:
+            entry["partstat"] = _STATUS_MAP.get(status, status)
+        out.append(entry)
+    return out
+
+
+def parse_google_events(events: list[dict], *, now: datetime,
+                        horizon_days: int = DEFAULT_HORIZON_DAYS,
+                        lookback_s: float = DEFAULT_LOOKBACK_S) -> dict:
+    """Google Calendar API ``events.list(singleSevents=true)`` items → the SAME
+    ``{"events": [PlannedEvent], "cancelled_uids": [uid]}`` shape ``parse_ics`` produces, so
+    ``sync_user`` (below) drives BOTH providers through one code path and an equivalent event
+    from either one yields an identical planned-meeting row (the parity DB-30 requires).
+
+    ``singleEvents=true`` already expands a recurring series into one item per occurrence inside
+    the caller's requested window, each carrying ``recurringEventId`` (absent on a one-off event,
+    which uses its own ``id``). Grouping by that id and keeping only the EARLIEST occurrence in
+    the window is what turns "several upcoming instances of a weekly meeting" back into ONE
+    row — the ICS parser's identical "next occurrence only" rule, applied to an already-expanded
+    feed instead of an RRULE it has to expand itself.
+
+    A ``status: "cancelled"`` item retires its uid the same way an ICS ``STATUS:CANCELLED``
+    VEVENT does — UNLESS a live (non-cancelled) instance of the same uid is also present in this
+    same window (a moved occurrence can appear as a cancelled old time plus a fresh instance);
+    the live instance wins and the uid is simply not counted as cancelled.
+    """
+    window_start = now - timedelta(seconds=lookback_s)
+    window_end = now + timedelta(days=horizon_days)
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for ev in events:
+        uid = str(ev.get("recurringEventId") or ev.get("id") or "").strip()
+        if not uid:
+            continue
+        if uid not in groups:
+            groups[uid] = []
+            order.append(uid)
+        groups[uid].append(ev)
+
+    out_events: list[dict] = []
+    cancelled: list[str] = []
+    for uid in order:
+        instances = groups[uid]
+        live = [e for e in instances if str(e.get("status") or "").lower() != "cancelled"]
+        if not live:
+            cancelled.append(uid)
+            continue
+        candidates = [
+            (start, ev) for ev in live
+            if (start := _google_event_start(ev)) is not None and window_start <= start <= window_end
+        ]
+        if not candidates:
+            continue
+        occurrence, ev = min(candidates, key=lambda t: t[0])
+        link = _google_link(ev)
+        platform, native_id, url = link if link else (None, None, None)
+        out_events.append({
+            "uid": uid,
+            "title": str(ev.get("summary") or "").strip() or None,
+            "scheduled_at": occurrence.isoformat(),
+            "platform": platform,
+            "native_meeting_id": native_id,
+            "meeting_url": url,
+            "attendees": _google_attendees(ev),
+            "metadata": {
+                "resolved_start": occurrence.isoformat(),
+                "provider": "google",
+                "event": {k: v for k, v in ev.items() if k not in ("attendees",)},
+            },
+        })
+    return {"events": out_events, "cancelled_uids": cancelled}
+
+
 def _calendar_sources(data: dict) -> list[dict]:
     raw = data.get("calendar_sources")
     return [dict(source) for source in raw if isinstance(source, dict) and source.get("id")] \

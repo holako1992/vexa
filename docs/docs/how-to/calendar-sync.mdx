@@ -1,18 +1,82 @@
 ---
 title: "Calendar sync"
-description: "Connect one or more calendars with secret ICS addresses — upcoming meetings import automatically and retain their source."
+description: "Connect a Google calendar in one consent screen, or any calendar with a secret ICS address — upcoming meetings import automatically and retain their source."
 ---
 
 Connect your calendars once and Vexa keeps your **Upcoming** meetings in sync: every calendar event
 with a Meet/Zoom/Teams link becomes a [planned meeting](/core/meetings#the-lifecycle--one-meeting-one-row),
 and the bot [auto-joins](/core/meetings#auto-join--scheduled-means-the-bot-comes) each one at start
-time. No OAuth, no calendar permissions — it works off the **secret ICS address** your calendar
-already provides.
+time.
 
-You can connect up to **ten** calendars, each with its own auto-join policy and bot name — see the
-[Calendar API](/api/calendar) for the endpoints.
+Two ways to connect a calendar:
 
-## 1. Find your secret ICS address
+- **Google Calendar (recommended)** — one consent screen, read-only, no secret address to find.
+  See [Connect Google Calendar](#connect-google-calendar) below.
+- **Any other calendar (ICS)** — Outlook/Microsoft 365, or a Google account an admin has not
+  enabled OAuth for — off a **secret ICS address** your calendar provides. See
+  [Connect with a secret ICS address](#connect-with-a-secret-ics-address) below.
+
+You can connect up to **ten** calendars total (Google + ICS combined), each with its own auto-join
+policy and bot name — see the [Calendar API](/api/calendar) for the endpoints.
+
+## Connect Google Calendar
+
+On the dashboard's **Calendar** page, click **Connect Google Calendar**. Google shows its own
+consent screen naming exactly one permission — read-only access to your calendar — and returns you
+to Vexa already connected, syncing within seconds. No secret address, no copy-paste.
+
+<Info>
+**What Vexa can see:** the `calendar.readonly` scope (events, and the calendar list so Vexa can
+offer more than your primary calendar later) — never write access, never another person's
+free/busy, never any Google product besides Calendar. Revoke it anytime from
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions); Vexa detects the
+revocation on the next sync and shows **Reconnect needed** instead of failing silently.
+</Info>
+
+### Self-hosting: Google Cloud Console setup
+
+DB-30's OAuth flow needs its own Google Cloud OAuth client — a **different** one from the
+dashboard's own "Sign in with Google" client (a different consent: this one asks for calendar
+access, sign-in asks for none). One Google Cloud OAuth client **may** serve both purposes if both
+redirect URIs are registered on it; most self-hosters find it simpler to keep them separate so a
+calendar-scope change never touches sign-in.
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → **Create
+   credentials → OAuth client ID**.
+2. **Application type: Web application.**
+3. Under **Authorized redirect URIs**, add your dashboard's callback page — exactly the value you
+   will set as `GOOGLE_CALENDAR_REDIRECT_URI` (below), e.g.
+   `https://dashboard.example.com/calendar/google/callback`. Google refuses the consent screen
+   with `redirect_uri_mismatch` if these do not match byte-for-byte.
+4. On the **OAuth consent screen**, add the scope
+   **`https://www.googleapis.com/auth/calendar.readonly`** (Google Calendar API → read-only). If
+   the consent screen is in **Testing** mode, add your own Google account as a test user, or
+   publish the app for a production deployment.
+5. Copy the **Client ID** and **Client secret** into admin-api's environment:
+
+```bash
+GOOGLE_CALENDAR_CLIENT_ID=xxxxxxxxxx.apps.googleusercontent.com
+GOOGLE_CALENDAR_CLIENT_SECRET=xxxxxxxxxx
+GOOGLE_CALENDAR_REDIRECT_URI=https://dashboard.example.com/calendar/google/callback
+CALENDAR_TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)
+```
+
+`CALENDAR_TOKEN_ENCRYPTION_KEY` is unrelated to the Google client — it is the key admin-api
+encrypts every stored Google refresh token with (`token_cipher.py`), at rest, never in the clear.
+Losing or rotating it makes every previously-stored Google connection unreadable, which surfaces
+as the same **Reconnect needed** state a revoked grant produces — never a silent failure.
+
+Unset any of the four keys and the three Google routes
+(`GET /user/calendars/google/authorize`, `POST /user/calendars/google/exchange`, and the internal
+`POST /internal/calendars/{id}/google-token`) answer a typed `503` naming exactly what's missing;
+the ICS calendar surface below is completely unaffected.
+
+## Connect with a secret ICS address
+
+Outlook/Microsoft 365, or any calendar whose provider does not support DB-30's OAuth flow, connects
+off its **secret ICS address** instead — no OAuth, no calendar permissions.
+
+### 1. Find your secret ICS address
 
 <Tabs>
   <Tab title="Google Calendar">
@@ -61,7 +125,7 @@ through the same server-side request guard as webhooks. Revoke it anytime from y
 settings ("Reset" in Google Calendar) — then reconnect with the new address.
 </Warning>
 
-## 2. Connect it — and get an answer immediately
+### 2. Connect it — and get an answer immediately
 
 On hosted Vexa, the dashboard lives at **[dashboard.vexa.ai](https://dashboard.vexa.ai)** — a
 different host from `vexa.ai`, which carries the site and sign-in and has no calendar page. Sign
@@ -139,12 +203,20 @@ curl -X PUT "$API_BASE/user/calendar" \
 
 | Operation | Endpoint | Result |
 |---|---|---|
-| List connections | `GET /user/calendars` | Named connections with masked URLs; secret feed URLs are never returned. |
-| Connect | `POST /user/calendars` | Creates one connection from `name`, `ics_url`, `auto_join`, and optional `bot_name`. |
-| Rename or configure | `PATCH /user/calendars/{calendar_id}` | Updates `name`, `ics_url`, `auto_join`, `bot_name`, or `enabled` for only that connection. |
+| List connections | `GET /user/calendars` | Every connection (ICS and Google), masked: an ICS row never returns its feed URL, a Google row never returns its refresh token. |
+| Connect (ICS) | `POST /user/calendars` | Creates one ICS connection from `name`, `ics_url`, `auto_join`, and optional `bot_name`. |
+| Get Google consent URL | `GET /user/calendars/google/authorize` | Returns `{"authorize_url": "...", "state": "..."}` — redirect the browser to `authorize_url`. |
+| Complete Google connect | `POST /user/calendars/google/exchange` | Body `{"code", "state"}` from Google's redirect (DB-31's callback page relays these). Exchanges the code, stores the connection, returns it masked. |
+| Rename or configure | `PATCH /user/calendars/{calendar_id}` | Updates `name`, `auto_join`, `bot_name`, `enabled` (+ `ics_url` for an ICS connection) for only that connection. |
 | Disconnect | `DELETE /user/calendars/{calendar_id}` | Removes that source without changing other connections. |
 | Read sync state | `GET /user/calendars/{calendar_id}/sync` | Returns that connection's latest sync stamp. |
 | Sync now | `POST /user/calendars/{calendar_id}/sync` | Fetches and reconciles only that connection immediately. |
+
+A masked connection now carries `"kind": "ics"` or `"kind": "google"`. A Google connection's shape
+adds `google_email` (the connected account, not a secret), `google_calendar_ids` (default
+`["primary"]`), and `reconnect_needed` — `true` once Google reports the grant revoked or expired,
+`false` otherwise; the panel shows **Reconnect needed** for that connection instead of a generic
+sync failure, and reconnecting (repeating the consent flow for the same account) clears it.
 
 Imported meeting metadata includes `data.calendar_sources`, an array of source objects with the
 stable connection `id`, display `name`, provider event `uid`, source `auto_join` preference,
@@ -159,6 +231,7 @@ have separate storage responsibilities:
 | Data | Durable home | Notes |
 |---|---|---|
 | Named calendar connections, secret ICS URLs, per-feed auto-join, per-feed bot name | The user's `data` JSON document in Postgres | User-facing reads mask the feed URL. The full URL crosses only the authenticated internal sync edge. |
+| Google connection's refresh token | The same `data` document, **encrypted at rest** (`token_cipher.py`'s encrypt-then-MAC, keyed by `CALENDAR_TOKEN_ENCRYPTION_KEY`) | Never stored in the clear, never returned by any read, never sent to meeting-api — only admin-api decrypts it, to mint a short-lived access token over its own internal edge. |
 | Imported events | Ordinary rows in the Postgres `meetings` table | A future event is a planned meeting with `status: "scheduled"`. |
 | Event and calendar provenance | The meeting's `data` JSON document | Includes scheduling, attendees, calendar source IDs/names, and provider event UIDs. |
 | Latest sync time, error, and created/updated/cancelled counts | Redis | Operational status under the user/connection sync key; this is not the durable event authority. |
@@ -257,6 +330,12 @@ can show:
 | `the URL doesn't return an ICS calendar (no BEGIN:VCALENDAR)` | The server answered, but not with calendar data. | Check you copied the full `.ics` address. |
 | `the feed is too large (over 2 MB)` | Unusually huge feed. | Sync a specific calendar rather than an aggregate. |
 | `couldn't reach the URL (unreachable, timed out, or a blocked/internal address)` | Network failure, or the address points somewhere the server-side guard refuses (internal hosts). | Verify the URL opens from a browser; use the calendar provider's public host. |
+
+A Google connection shows one more, distinct state rather than a generic failure:
+
+| State | What it means | Fix |
+|---|---|---|
+| `reconnect_needed: true` (panel: **Reconnect needed**) | Google reported the grant revoked or expired (`invalid_grant`) — access was removed at [myaccount.google.com/permissions](https://myaccount.google.com/permissions), the OAuth client was deleted, or a very long idle period expired it. | Click **Reconnect** — the same consent flow, which clears the flag on success. |
 
 ## What imports (and what doesn't)
 

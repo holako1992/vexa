@@ -129,6 +129,17 @@ services:
       - STRIPE_PRICE_PRO_YEARLY=${STRIPE_PRICE_PRO_YEARLY:-}
       - STRIPE_PRICE_TEAM_MONTHLY=${STRIPE_PRICE_TEAM_MONTHLY:-}
       - STRIPE_PRICE_TEAM_YEARLY=${STRIPE_PRICE_TEAM_YEARLY:-}
+      # ── DB-30 Google Calendar OAuth (config.v1 capability `google_calendar`) ────────────────
+      # Empty by default — GET/POST /user/calendars/google/{authorize,exchange} and the internal
+      # /internal/calendars/{id}/google-token edge then answer a typed 503 naming what's missing;
+      # the ICS calendar surface (/user/calendars) is completely unaffected. A DIFFERENT OAuth
+      # client than the dashboard's own sign-in GOOGLE_CLIENT_ID — see docs/docs/how-to/calendar-sync.mdx
+      # for the exact Google Cloud Console steps (one client MAY serve both if both redirect URIs
+      # are registered on it).
+      - GOOGLE_CALENDAR_CLIENT_ID=${GOOGLE_CALENDAR_CLIENT_ID:-}
+      - GOOGLE_CALENDAR_CLIENT_SECRET=${GOOGLE_CALENDAR_CLIENT_SECRET:-}
+      - GOOGLE_CALENDAR_REDIRECT_URI=${GOOGLE_CALENDAR_REDIRECT_URI:-}
+      - CALENDAR_TOKEN_ENCRYPTION_KEY=${CALENDAR_TOKEN_ENCRYPTION_KEY:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
       interval: 10s

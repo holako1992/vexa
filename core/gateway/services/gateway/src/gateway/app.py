@@ -761,6 +761,18 @@ def create_app(
             return error
         return await _forward("DELETE", _admin(f"/user/calendars/{segment}"), request)
 
+    # ---- DB-30: Google Calendar OAuth connect. Both routes are identity's (admin-api owns the
+    # client secret and the encrypted refresh token — see core/identity's calendars.py/google_oauth.py);
+    # scoped bot,tx like the model/transcription/entitlements self-serve routes, not bot-only like
+    # the ICS CRUD above, per routes.v1.json. ----
+    @app.get("/user/calendars/google/authorize")
+    async def google_calendar_authorize(request: Request):
+        return await _forward("GET", _admin("/user/calendars/google/authorize"), request)
+
+    @app.post("/user/calendars/google/exchange")
+    async def google_calendar_exchange(request: Request):
+        return await _forward("POST", _admin("/user/calendars/google/exchange"), request)
+
     @app.get("/user/calendars/{calendar_id}/sync")
     async def get_calendar_connection_sync(calendar_id: str, request: Request):
         segment, error = _path_segment(calendar_id)

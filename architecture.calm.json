@@ -88,6 +88,12 @@
    "description": "optional operator-owned terminal-event consumer; absent in stock OSS and never selected from customer or meeting data"
   },
   {
+   "unique-id": "google-calendar-system",
+   "node-type": "system",
+   "name": "Google Calendar",
+   "description": "DB-30: external, optional — a deployment with no GOOGLE_CALENDAR_CLIENT_ID/SECRET configured never calls it and the ICS calendar-connect surface is unaffected (config.v1 capability google_calendar)"
+  },
+  {
    "unique-id": "agent-api",
    "node-type": "service",
    "name": "agent-api",
@@ -245,6 +251,18 @@
    "interfaces": [
     {
      "unique-id": "system-webhook-rest",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "google-calendar-api",
+   "node-type": "service",
+   "name": "Google Calendar API",
+   "description": "external — DB-30's read-only calendar connect: OAuth token/refresh (accounts.google.com, oauth2.googleapis.com) and calendar.readonly events.list (www.googleapis.com/calendar/v3), outside the self-hosted core like the other optional external systems above",
+   "interfaces": [
+    {
+     "unique-id": "google-calendar-api-rest",
      "type": "api"
     }
    ]
@@ -1482,6 +1500,17 @@
    }
   },
   {
+   "unique-id": "google-calendar-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "google-calendar-system",
+     "nodes": [
+      "google-calendar-api"
+     ]
+    }
+   }
+  },
+  {
    "unique-id": "runtime-composed",
    "relationship-type": {
     "composed-of": {
@@ -1993,6 +2022,54 @@
     }
    },
    "description": "GET /internal/calendar-configs discovers secret-gated calendar connections for sync and disconnect cleanup",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "ma-admin-google-token",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "admin-api",
+      "interface": "admin-api-rest"
+     }
+    }
+   },
+   "description": "DB-30: POST /internal/calendars/{id}/google-token mints a short-lived Google access token for a google-kind connection's sync; meeting-api never reads identity's tables or the encrypted refresh token directly (the core owns its contracts)",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "ma-google-calendar-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "google-calendar-api",
+      "interface": "google-calendar-api-rest"
+     }
+    }
+   },
+   "description": "DB-30: GET calendar/v3/calendars/{id}/events (singleEvents=true, paginated) with the access token minted above — the Google adapter beside the ICS one, producing identical planned-meeting rows for an equivalent event (parity)",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "admin-google-calendar-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "admin-api"
+     },
+     "destination": {
+      "node": "google-calendar-api",
+      "interface": "google-calendar-api-rest"
+     }
+    }
+   },
+   "description": "DB-30: OAuth code/refresh-token exchange (oauth2.googleapis.com/token) and account-email lookup (oauth2/v3/userinfo) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard",
    "protocol": "HTTPS"
   },
   {

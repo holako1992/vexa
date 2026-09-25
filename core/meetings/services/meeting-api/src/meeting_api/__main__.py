@@ -67,7 +67,8 @@ CALENDAR_SYNC_CONCURRENCY = 4
 
 
 async def _sync_user_calendars(store, redis_client, user_id: int, configs: list,
-                               *, publish=None, client=None) -> list:
+                               *, publish=None, client=None, admin_api_url=None,
+                               internal_secret=None) -> list:
     """Sync ONE user's calendar connections and return their ACTIVE connections' stamps.
 
     The user's meeting rows are read ONCE here and threaded through every connection —
@@ -84,7 +85,8 @@ async def _sync_user_calendars(store, redis_client, user_id: int, configs: list,
     rows = await store.list_meetings(user_id)
     stamps = []
     for cfg in configs:
-        stamp = await run_user_sync(store, cfg, publish=publish, rows=rows, client=client)
+        stamp = await run_user_sync(store, cfg, publish=publish, rows=rows, client=client,
+                                    admin_api_url=admin_api_url, internal_secret=internal_secret)
         if cfg.get("deleted"):
             continue
         stamp["calendar_id"] = cfg.get("calendar_id")
@@ -213,6 +215,7 @@ def build_production_app():
 
         stamps = await _sync_user_calendars(
             transcript_store, redis_client, user_id, selected, publish=_pub,
+            admin_api_url=admin_api_url, internal_secret=internal_secret,
         )
         if calendar_id is not None:
             return stamps[0]
@@ -633,6 +636,7 @@ def _attach_background_loops(
                         stamps = await _sync_user_calendars(
                             transcript_store, redis_client, user_id, user_configs,
                             publish=_cal_publish, client=client,
+                            admin_api_url=admin_api_url, internal_secret=internal_secret,
                         )
                     except Exception:
                         log.exception("calendar sync failed for user %s", user_id)

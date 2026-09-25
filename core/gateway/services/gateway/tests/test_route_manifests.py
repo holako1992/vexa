@@ -39,13 +39,13 @@ AGENT_ROWS = frozenset({
     ("PATCH", "/agent/{path:path}"),
     ("DELETE", "/agent/{path:path}"),
 })
-#: What shipped. A count, not a copy of the table: a second copy of 71 rows is a second thing to
+#: What shipped. A count, not a copy of the table: a second copy of 73 rows is a second thing to
 #: keep in step, and `test_the_assembled_table_matches_the_app_exactly` is what proves the
 #: CONTENT — against the routes themselves, which is a stronger anchor than a literal.
-FULL_SCOPED, FULL_UNSCOPED = 71, 2
+FULL_SCOPED, FULL_UNSCOPED = 73, 2
 #: What THIS BUILD publishes — the full profile, less the agent rows when the build omits them.
 #: DERIVED, so the count stays exact in either build rather than softening to a range or a
-#: subset check. 71 on the line; 64 in a build with no agent manifest.
+#: subset check. 73 on the line; 66 in a build with no agent manifest.
 CARRIED_SCOPED = FULL_SCOPED - (0 if AGENT_CARRIED else len(AGENT_ROWS))
 
 
@@ -86,10 +86,10 @@ def test_the_assembled_table_matches_the_app_exactly():
 @needs_agent
 def test_every_domain_declares_its_own_and_only_its_own():
     a = routes_manifest.load({"gateway", "meetings", "identity", "mcp", "agent"})
-    # 7+2+15+12+37 = 73 rows, less the edge's own 2 unscoped = 71 = FULL_SCOPED above. Both
+    # 7+2+17+12+37 = 75 rows, less the edge's own 2 unscoped = 73 = FULL_SCOPED above. Both
     # numbers derive from the same manifests and must agree: when a domain gains a route, they
     # move together or this test is what says so.
-    assert a.domains == {"agent": 7, "gateway": 2, "identity": 15, "mcp": 12, "meetings": 37}
+    assert a.domains == {"agent": 7, "gateway": 2, "identity": 17, "mcp": 12, "meetings": 37}
     assert {k for k, d in a.owner_of.items() if d == "agent"} == AGENT_ROWS
     # The EDGE declares two routes and they are its own — /health and /auth/me forward nothing.
     assert {k for k, d in a.owner_of.items() if d == "gateway"} == set(UNSCOPED_ROUTES)
