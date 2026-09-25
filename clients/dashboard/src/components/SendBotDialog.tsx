@@ -82,7 +82,6 @@ function MeetingLinkTab({ onSent }: { onSent: () => void }) {
 
   useEffect(() => {
     setParsed(parseMeetingInput(url, jitsiHosts));
-    setResult(null);
   }, [url, jitsiHosts]);
 
   const send = useCallback(async () => {
@@ -116,7 +115,7 @@ function MeetingLinkTab({ onSent }: { onSent: () => void }) {
           id="meeting-url-input"
           type="url"
           value={url}
-          onChange={(e) => setUrl(e.target.value)}
+          onChange={(e) => { setUrl(e.target.value); setResult(null); }}
           onKeyDown={(e) => { if (e.key === "Enter" && parsed && !sending) void send(); }}
           placeholder="https://meet.google.com/abc-defg-hij"
           autoFocus

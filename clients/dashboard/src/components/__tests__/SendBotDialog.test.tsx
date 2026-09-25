@@ -38,6 +38,9 @@ describe("SendBotDialog", () => {
           ],
         });
       }
+      if (url.includes("/api/vexa/bots")) {
+        return jsonResponse({ id: 901, status: "requested", platform: "google_meet", native_meeting_id: "abc-defg-hij" });
+      }
       return jsonResponse({ error: "unexpected_url", url }, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -81,6 +84,39 @@ describe("SendBotDialog", () => {
     expect(sendButton.disabled).toBe(true);
     expect(screen.queryByText(/paste a google meet, zoom, teams, or jitsi link/i)).not.toBeNull();
     expect(screen.queryByText(/^google meet$/i)).toBeNull();
+  });
+
+  it("shows the confirmation after Send Bot, surviving the URL field's own clear", async () => {
+    // Regression: `send()` sets the success result then clears `url` so another link can be
+    // pasted. The parse effect used to key its `setResult(null)` off `url` itself, so that
+    // programmatic clear fired the very next render and erased the confirmation before anyone
+    // could see it — this test is red without the fix in ../SendBotDialog.tsx.
+    render(<SendBotDialog onClose={() => {}} onBotSent={() => {}} />);
+
+    const input = screen.getByLabelText(/meeting url/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "https://meet.google.com/abc-defg-hij" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: /send bot/i }) as HTMLButtonElement).disabled).toBe(false));
+
+    fireEvent.click(screen.getByRole("button", { name: /send bot/i }));
+
+    expect(await screen.findByText("Bot is joining the meeting.")).not.toBeNull();
+    expect(input.value).toBe("");
+    // Give any stray effect a chance to run before asserting the message is still there.
+    await waitFor(() => expect(screen.getByText("Bot is joining the meeting.")).not.toBeNull());
+  });
+
+  it("clears a prior result as soon as the user edits the URL themselves", async () => {
+    render(<SendBotDialog onClose={() => {}} onBotSent={() => {}} />);
+
+    const input = screen.getByLabelText(/meeting url/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "https://meet.google.com/abc-defg-hij" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: /send bot/i }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: /send bot/i }));
+    await screen.findByText("Bot is joining the meeting.");
+
+    fireEvent.change(input, { target: { value: "https://meet.google.com/another-one" } });
+
+    expect(screen.queryByText("Bot is joining the meeting.")).toBeNull();
   });
 
   it("lists calendar connections from /api/vexa/user/calendars on the Calendar tab", async () => {

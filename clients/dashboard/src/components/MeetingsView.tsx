@@ -100,7 +100,7 @@ export function MeetingsView() {
     {dialogOpen && (
       <SendBotDialog
         onClose={() => setDialogOpen(false)}
-        onBotSent={() => { void load(); setDialogOpen(false); }}
+        onBotSent={() => { void load(); }}
       />
     )}
     <div className="mx-auto w-full max-w-5xl px-4 py-8 md:px-8 md:py-10">
