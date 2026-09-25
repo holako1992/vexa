@@ -40,6 +40,17 @@ spec's body is only the property, not the plumbing.
   `toBeInViewport()`, not `toBeVisible()` — the closed rail is translated off-canvas, not
   unmounted, and a CSS transform doesn't zero out the bounding box Playwright's plain visibility
   check looks at, so `toBeVisible()` would pass even while the drawer sits off-screen.
+- `12-summary.spec.ts` (DB-60, dashboard half) — the summary panel's five states, each against a
+  different fixture meeting (live, shared, completed-but-pending, skipped, complete), plus the
+  security property `upstream.ts`/`route.ts` exist for: a same-origin request carrying an
+  attacker-controlled `?path=` on the summary route still only ever produces the fixed
+  `path=meetings/<id>/summary.md` upstream call — proven by reading the stub's own request log,
+  not just asserting the UI never sends one.
+- `13-meeting-controls.spec.ts` (DB-41, DB-42) — stop recording (confirm dialog → `DELETE
+  /bots/<platform>/<native>`), inline rename (→ `POST /meetings/<id>/annotate`, explicitly NOT
+  `PATCH`), delete (confirm dialog names what is lost → `DELETE /meetings/<id>` → back on the list
+  with a toast), the participants roster rendering in the header, and a shared meeting showing
+  none of rename/delete/stop.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

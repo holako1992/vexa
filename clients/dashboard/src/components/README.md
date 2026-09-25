@@ -17,7 +17,25 @@ Client components. They receive identity as props (resolved on the server) and f
 - `MeetingsView` — the list: search, phase tabs (`ui/Tabs`), polling, the "Add Bot" action that
   opens `SendBotDialog`.
 - `MeetingDetail` — one meeting: header facts, transcript, in-transcript search, copy, download.
-  It reads its own row by id; the collection is not a source for a single meeting.
+  It reads its own row by id; the collection is not a source for a single meeting. Composes the
+  four pieces below, all of which check `meeting.shared` themselves rather than trusting the
+  caller to gate them — a shared meeting (the viewer isn't the owner) renders none of them.
+- `SummaryPanel` — the post-meeting AI note (DB-60), above the transcript. Reads `GET
+  /api/vexa/meetings/<id>/summary`, parses it with `lib/summary.ts`, and renders five distinct
+  states (not-ended, shared-owner-only, pending/polling, skipped, complete) — never a single
+  generic "no summary". No markdown library and no `dangerouslySetInnerHTML`: the note's shape is
+  small and fixed, so turning it into JSX directly is both simpler and incapable of weakening the
+  nonce-based CSP.
+- `BotControls` — DB-41: the bot's live status (from `GET /bots/status`) and a **Stop recording**
+  button behind `ui/Dialog`'s confirm. A join-failure `reason`, when the producer recorded one, is
+  shown verbatim — never reworded.
+- `MeetingActions` — DB-42's inline rename (pencil → `Input` → `POST
+  /meetings/<id>/annotate`, not `PATCH` — see that file's header comment for why) and delete
+  (behind `ui/Dialog`, redirects to the list with a toast on success).
+- `Participants` — DB-42: the invite + speaker roster from `GET
+  /meetings/<platform>/<native>/participants`, shown as chips in the header. Renders nothing when
+  the meeting has no native id or the roster is empty — there is no "0 participants" state to get
+  wrong.
 - `SendBotDialog` — the dispatch door: paste a meeting link and send a bot, or manage the ICS
   calendar connections that arm an unattended join. It parses the link in the browser only to
   decide what to send and what to disable; the platform and id it derives are re-checked at the

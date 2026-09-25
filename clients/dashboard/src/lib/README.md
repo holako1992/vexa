@@ -17,3 +17,7 @@
   picks a title, buckets a status, formats a time. It never reshapes a transcript.
 - **`api.ts`** — the browser fetch helper. Fails loud, so a failure never degrades into an empty
   list.
+- **`summary.ts`** — parses the `summary.v1` note DB-60 writes (front matter + four `##`
+  sections) into data `SummaryPanel.tsx` renders. Dependency-free, like `upstream.ts`; malformed
+  input (missing front matter, an unknown version, a missing section) is its own `{kind:
+  "malformed"}` value, never silently coerced into "skipped" or an empty complete note.

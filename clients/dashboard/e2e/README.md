@@ -10,23 +10,27 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   stub process, `playwright.config.ts`, and every spec agree without importing each other's
   runtime code — the stub runs as a separate OS process, so it can only share plain data, not
   live references.
-- `fixtures.mjs` — the canned world: four meetings spanning live/scheduled/past (including one
-  user-stopped `completed` row, for the derived "stopped" status), and a five-line, two-speaker
-  transcript with offsets for the one meeting specs read a transcript from. `freshMeetings()` /
-  `freshCalendars()` return deep clones so the stub's mutations during one spec never leak into
-  the next.
+- `fixtures.mjs` — the canned world: six meetings spanning live/scheduled/past (including one
+  user-stopped `completed` row for the derived "stopped" status, one completed row with no
+  `summary.md` yet, and one with a `status: skipped` note), a five-line, two-speaker transcript
+  with offsets, a `summary.v1` note per meeting id (`summaryFor`, DB-60), and an invite/speaker
+  roster for the live meeting (`participantsFor`, DB-42). `freshMeetings()` / `freshCalendars()`
+  return deep clones so the stub's mutations during one spec never leak into the next.
 - `stub-server.mjs` — the stub backend itself: plain `node:http`, no dependency, because the
   fixtures are the point, not a framework. Runs two listeners in one process (the gateway and
   admin-api) plus a `/__control/*` remote control the specs use to reset state, inspect exactly
-  which upstream requests were made (with which headers), and force a path to fail. See the
-  file's own header comment for the full route table.
+  which upstream requests were made (with which headers), and force a path to fail. Also answers
+  `GET /agent/workspace/file?path=meetings/<id>/summary.md` (DB-60), `GET /bots/status` and
+  `DELETE /bots/<platform>/<native>` (DB-41), and `GET
+  /meetings/<platform>/<native>/participants`, `POST /meetings/<id>/annotate`, `DELETE
+  /meetings/<id>` (DB-42). See the file's own header comment for the full route table.
 - `playwright.config.ts` — boots BOTH servers via Playwright's `webServer` (the stub, then
   `next dev` pointed at it with the matching env vars) so `npm run test:e2e` runs everything from
   a cold start with no manual setup. Calls `next dev` directly with a literal `--port` rather than
   `npm run dev` (`next dev --port ${PORT:-3001}`) because npm always runs package scripts through
   `cmd.exe` on Windows regardless of the invoking shell, and that bash-style `${VAR:-default}`
   never expands there.
-- `specs/` — the nine specs. See `specs/README.md`.
+- `specs/` — the thirteen specs. See `specs/README.md`.
 
 ## Running it
 

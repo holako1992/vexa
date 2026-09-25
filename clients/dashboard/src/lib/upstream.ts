@@ -43,6 +43,28 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
     return { path: `/meetings/${encodeURIComponent(id)}` };
   }
 
+  // meetings/<id>/summary — the ONE door onto the post-meeting note (DB-60, docs/docs/how-to/
+  // post-meeting-report.mdx). The browser never sees a workspace path: this composes the fixed
+  // upstream `/agent/workspace/file?path=meetings/<id>/summary.md` itself from the numeric id
+  // alone, so nothing the caller sends can steer which workspace file gets read. The `?path=`
+  // query lives IN the resolved path on purpose — `filterQuery` is for the generic allowlist's
+  // paging params and must never touch this one (the route handler skips it whenever a resolved
+  // path already carries a query string, so a caller's own `?path=...` is always dropped, never
+  // merged).
+  if (segments.length === 3 && segments[0] === "meetings" && segments[2] === "summary") {
+    const [, id] = segments as [string, string, string];
+    if (!/^\d{1,20}$/.test(id)) return null;
+    return { path: `/agent/workspace/file?path=meetings/${id}/summary.md` };
+  }
+
+  // meetings/<platform>/<native>/participants — read-only roster (invite + speaker sources).
+  if (segments.length === 4 && segments[0] === "meetings" && segments[3] === "participants") {
+    const [, platform, native] = segments as [string, string, string, string];
+    if (!PLATFORMS.has(platform)) return null;
+    if (!SAFE_SEGMENT.test(native)) return null;
+    return { path: `/meetings/${platform}/${encodeURIComponent(native)}/participants` };
+  }
+
   const extra = resolveReadExtras(segments);
   if (extra) return extra;
 
@@ -72,6 +94,10 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 2 && segments[0] === "meeting" && segments[1] === "jitsi-hosts") {
     return { path: "/meeting/jitsi-hosts" };
   }
+  // GET /bots/status — the caller's currently-running bots (DB-41's status badge)
+  if (segments.length === 2 && segments[0] === "bots" && segments[1] === "status") {
+    return { path: "/bots/status" };
+  }
   return null;
 }
 
@@ -96,6 +122,18 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     ) {
       return { path: `/user/calendars/${encodeURIComponent(segments[2])}/sync` };
     }
+    // POST /meetings/<id>/annotate — the caller's own title/metadata, {title}. Used for the
+    // inline rename (DB-42): unlike PATCH /meetings/<id> below, meeting-api's annotate route
+    // works in ANY meeting status, because it writes the caller's DESCRIPTION rather than the
+    // dispatch instructions the FSM owns once a bot has been sent. A rename is exactly the case
+    // annotate exists for — most meetings a person renames have already completed, and PATCH
+    // refuses those with 409 ("no longer planned").
+    if (
+      segments.length === 3 && segments[0] === "meetings" && segments[2] === "annotate" &&
+      /^\d{1,20}$/.test(segments[1])
+    ) {
+      return { path: `/meetings/${encodeURIComponent(segments[1])}/annotate` };
+    }
   }
   if (method === "PATCH") {
     // PATCH /user/calendars/<id> — update auto-join / bot-name / enabled / ics-url
@@ -113,6 +151,18 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
       SAFE_CAL_ID.test(segments[2])
     ) {
       return { path: `/user/calendars/${encodeURIComponent(segments[2])}` };
+    }
+    // DELETE /meetings/<id> — delete a planned row, or wipe a completed meeting's transcript +
+    // recording (meeting-api's own two branches; the client's confirm text names both).
+    if (segments.length === 2 && segments[0] === "meetings" && /^\d{1,20}$/.test(segments[1])) {
+      return { path: `/meetings/${encodeURIComponent(segments[1])}` };
+    }
+    // DELETE /bots/<platform>/<native> — Stop recording (DB-41).
+    if (
+      segments.length === 3 && segments[0] === "bots" &&
+      PLATFORMS.has(segments[1]) && SAFE_SEGMENT.test(segments[2])
+    ) {
+      return { path: `/bots/${segments[1]}/${encodeURIComponent(segments[2])}` };
     }
   }
   return null;

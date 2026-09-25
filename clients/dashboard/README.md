@@ -85,19 +85,30 @@ Stated plainly, because "it has auth" is not a description.
   shape-checked before they are interpolated into an upstream URL.
 
   Reads (GET): `meetings` · `transcripts/by-id/<id>` · `transcripts/<platform>/<native>` — the
-  meeting list and its transcripts, scoped to the caller by the gateway. Plus two small reads that
-  feed the write flow below: `user/calendars` (the caller's connected ICS calendars) and
+  meeting list and its transcripts, scoped to the caller by the gateway. `meetings/<id>/summary`
+  is a fourth, narrower read: the numeric id is the only thing a caller supplies, and the route
+  itself composes the fixed upstream `/agent/workspace/file?path=meetings/<id>/summary.md` —
+  the post-meeting AI note (DB-60), never a general workspace-file proxy; a caller's own `?path=`
+  query is always dropped, never forwarded. `meetings/<platform>/<native>/participants` reads the
+  invite + speaker roster for one meeting. `bots/status` reads the caller's currently-running
+  bots (the live status badge DB-41's Stop control checks against). Plus two small reads that feed
+  the write flow below: `user/calendars` (the caller's connected ICS calendars) and
   `meeting/jitsi-hosts` (the deployment's declared Jitsi hostnames, so the URL parser can
   recognise a self-hosted Jitsi link).
 
   Writes (POST / PATCH / DELETE): `POST bots` dispatches a bot to a live meeting from a pasted
   URL — the "Add Bot" action in the Meetings view. `POST user/calendars`, `PATCH
   user/calendars/<id>`, `DELETE user/calendars/<id>`, and `POST user/calendars/<id>/sync` connect,
-  update, disconnect, and manually sync an ICS calendar for auto-join. Each write is a mechanism
-  the dashboard's own UI drives — dispatching a bot and managing calendar connections are read
-  surfaces' natural counterpart once a user can *act* on what they see, not a widening for its own
-  sake. There is still no agent/chat, recordings playback, admin panel, or token management path;
-  those stay out of scope below.
+  update, disconnect, and manually sync an ICS calendar for auto-join. `POST
+  meetings/<id>/annotate` renames a meeting inline (DB-42) — not `PATCH meetings/<id>`, which
+  meeting-api refuses (409) once a bot has touched the row; annotate is the caller's own
+  description and works in any meeting status. `DELETE meetings/<id>` deletes a still-planned
+  meeting outright, or wipes a completed one's transcript and recording. `DELETE
+  bots/<platform>/<native>` stops an in-progress recording (DB-41), behind a confirm dialog. Each
+  write is a mechanism the dashboard's own UI drives — dispatching a bot, managing calendar
+  connections, and now renaming/deleting/stopping a meeting you already own — not a widening for
+  its own sake. There is still no agent/chat, recordings playback, admin panel, or token
+  management path; those stay out of scope below.
 - **Least privilege on the minted token.** Sign-in mints `bot,tx` — not the `browser` scope the
   terminal needs. Login tokens are named `dashboard-login` and capped, so a sign-in loop cannot
   mint without bound; self-serve and terminal tokens are never touched.

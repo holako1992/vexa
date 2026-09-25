@@ -44,7 +44,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const token = await gatewayKey();
   if (!token) return json({ error: "not_authenticated" }, 401);
 
-  const url = `${GATEWAY_URL}${route.path}${filterQuery(req.nextUrl.searchParams)}`;
+  // A resolved path that already carries its own `?query` (meetings/<id>/summary — see
+  // upstream.ts) is server-composed and fixed; the caller's own query string is dropped
+  // entirely rather than appended, so a browser-supplied `?path=...` can never reach it.
+  const query = route.path.includes("?") ? "" : filterQuery(req.nextUrl.searchParams);
+  const url = `${GATEWAY_URL}${route.path}${query}`;
   let upstream: Response;
   try {
     upstream = await fetch(url, {

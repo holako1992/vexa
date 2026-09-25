@@ -26,7 +26,10 @@ import {
   GATEWAY_PORT,
   INTERNAL_API_SECRET,
 } from "./ports.mjs";
-import { freshCalendars, freshMeetings, transcriptFor, JITSI_HOSTS } from "./fixtures.mjs";
+import { freshCalendars, freshMeetings, transcriptFor, summaryFor, participantsFor, JITSI_HOSTS } from "./fixtures.mjs";
+
+const RUNNING_STATUSES = new Set(["requested", "joining", "awaiting_admission", "needs_help", "active", "stopping"]);
+const SUPPORTED_STOP_PLATFORMS = new Set(["google_meet", "teams", "zoom", "jitsi"]);
 
 // ── shared mutable world, reset between specs ───────────────────────────────────────────────
 
@@ -131,6 +134,86 @@ async function handleGateway(req, res) {
   // GET /meeting/jitsi-hosts
   if (req.method === "GET" && parts.length === 2 && parts[0] === "meeting" && parts[1] === "jitsi-hosts") {
     return sendJson(res, 200, { hosts: JITSI_HOSTS });
+  }
+
+  // GET /agent/workspace/file?path=meetings/<id>/summary.md — DB-60's summary door. The dashboard
+  // composes this path itself; only a numeric id ever reaches it (upstream.test.ts proves that),
+  // so this stub only ever needs to answer the one shape.
+  if (req.method === "GET" && parts.length === 3 && parts[0] === "agent" && parts[1] === "workspace" && parts[2] === "file") {
+    const path = url.searchParams.get("path") || "";
+    const m = /^meetings\/(\d+)\/summary\.md$/.exec(path);
+    const content = m ? summaryFor(m[1]) : null;
+    if (content == null) return sendJson(res, 404, { detail: "not found" });
+    return sendJson(res, 200, { path, content });
+  }
+
+  // GET /bots/status — the caller's currently running bots (DB-41).
+  if (req.method === "GET" && parts.length === 2 && parts[0] === "bots" && parts[1] === "status") {
+    const running = meetings.filter((m) => RUNNING_STATUSES.has(m.status));
+    return sendJson(res, 200, { running, running_bots: running, count: running.length });
+  }
+
+  // DELETE /bots/<platform>/<native> — Stop recording (DB-41). Mirrors meeting-api's own shape
+  // closely enough for the dashboard's spec: an unsupported platform is 422, an unknown/already-
+  // stopped pair is 404, otherwise the row moves to `completed` with `stop_requested: true`.
+  if (req.method === "DELETE" && parts.length === 3 && parts[0] === "bots") {
+    const [, platform, native] = parts;
+    if (!SUPPORTED_STOP_PLATFORMS.has(platform)) {
+      return sendJson(res, 422, { detail: `unsupported platform '${platform}'` });
+    }
+    const row = meetings.find(
+      (m) => m.platform === platform && m.native_meeting_id === native && RUNNING_STATUSES.has(m.status),
+    );
+    if (!row) return sendJson(res, 404, { detail: "No active meeting for this bot" });
+    row.status = "completed";
+    row.end_time = row.end_time || new Date().toISOString();
+    row.data = { ...(row.data || {}), stop_requested: true };
+    return sendJson(res, 200, {
+      status: "stopping", meeting_id: row.id, native_meeting_id: native, also_stopped: [], cancelled: [],
+    });
+  }
+
+  // GET /meetings/<platform>/<native>/participants — DB-42.
+  if (req.method === "GET" && parts.length === 4 && parts[0] === "meetings" && parts[3] === "participants") {
+    const [, platform, native] = parts;
+    const found = participantsFor(platform, native);
+    if (!found) return sendJson(res, 404, { detail: `Meeting not found for platform ${platform} and ID ${native}` });
+    const participants = [
+      ...(found.invited || []).map((p) => ({
+        name: p.name || null, email: p.email || null, source: "invite",
+        ...(p.partstat ? { response_status: p.partstat } : {}),
+      })),
+      ...(found.speakers || []).map((name) => ({ name, email: null, source: "speaker" })),
+    ];
+    return sendJson(res, 200, {
+      meeting_id: null, platform, native_meeting_id: native, participants,
+      sources: [...new Set(participants.map((p) => p.source))].sort(),
+      observed_roster: "not_recorded",
+    });
+  }
+
+  // POST /meetings/<id>/annotate — inline rename (DB-42): {title} merges onto the row's own data.
+  if (req.method === "POST" && parts.length === 3 && parts[0] === "meetings" && parts[2] === "annotate") {
+    const row = meetings.find((m) => String(m.id) === parts[1]);
+    if (!row) return sendJson(res, 404, { detail: "Meeting not found" });
+    const body = await readJsonBody(req);
+    if (typeof body.title === "string") row.data = { ...(row.data || {}), title: body.title };
+    return sendJson(res, 200, row);
+  }
+
+  // DELETE /meetings/<id> — delete a planned row outright, or wipe a completed one's transcript
+  // and recordings while the row itself stays (meeting-api's own two branches; DB-42's confirm
+  // text names both without knowing in advance which one a given meeting will take).
+  if (req.method === "DELETE" && parts.length === 2 && parts[0] === "meetings") {
+    const idx = meetings.findIndex((m) => String(m.id) === parts[1]);
+    if (idx === -1) return sendJson(res, 404, { detail: "Meeting not found" });
+    const row = meetings[idx];
+    if (row.status === "scheduled" || row.status === "idle") {
+      meetings.splice(idx, 1);
+      return sendJson(res, 204, null);
+    }
+    row.data = { ...(row.data || {}), recordings: undefined, artifact_deletion: { state: "completed" } };
+    return sendJson(res, 200, { status: "deleted", id: row.id, platform: row.platform, native_meeting_id: row.native_meeting_id, deleted: "completed_meeting_artifacts" });
   }
 
   // GET /user/calendars

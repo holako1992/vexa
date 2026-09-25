@@ -22,6 +22,9 @@ export interface MeetingRowDTO {
     scheduled_at?: string;
     stop_requested?: boolean;
     attendees?: { email: string; name?: string }[];
+    /** The producer's own join-failure detail (lifecycle/join_evidence.py), verbatim — never
+     *  reworded here. Present only when a join attempt actually failed. */
+    reason?: string | null;
   } | null;
 }
 
@@ -38,7 +41,11 @@ export type MeetingPhase = "live" | "scheduled" | "past";
 export interface Meeting {
   id: string;
   title: string;
+  /** The human label (e.g. "Google Meet") — for display only. */
   platform: string;
+  /** The raw platform slug (e.g. "google_meet") — for building a `/bots/<platform>/<native>` or
+   *  `/meetings/<platform>/<native>/...` upstream path. Never shown to a reader. */
+  platformId: string;
   /** The raw meeting-api status — shown verbatim on the detail page, never invented. */
   status: string;
   phase: MeetingPhase;
@@ -52,6 +59,8 @@ export interface Meeting {
   shared: boolean;
   nativeId: string | null;
   meetingUrl: string | null;
+  /** The producer's own join-failure reason, verbatim — null when the bot never failed to join. */
+  joinFailureReason: string | null;
 }
 
 /** Statuses where the bot is in, or heading to, the room. */
@@ -98,6 +107,7 @@ export function toMeeting(d: MeetingRowDTO): Meeting {
     id: String(d.id),
     title: d.data?.title || (native ? `${platformLabel(d.platform)} · ${native}` : "Untitled meeting"),
     platform: platformLabel(d.platform),
+    platformId: d.platform,
     status: displayStatus(d),
     phase: phaseOf(d),
     startTime,
@@ -109,6 +119,7 @@ export function toMeeting(d: MeetingRowDTO): Meeting {
     shared: !!d.shared,
     nativeId: native,
     meetingUrl: d.constructed_meeting_url ?? null,
+    joinFailureReason: d.data?.reason ?? null,
   };
 }
 

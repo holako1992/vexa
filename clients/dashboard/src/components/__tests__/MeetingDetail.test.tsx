@@ -7,7 +7,24 @@
  *  returns null) instead of `toBeInTheDocument()`. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+
+// MeetingDetail's delete flow (DB-42) navigates away with `useRouter()` from `next/navigation`,
+// which throws outside an actual App Router tree ("invariant expected app router to be
+// mounted"). Every other component under test here renders under plain RTL, not Next's router,
+// so the hook is stubbed the same way `next/link` already resolves fine without one.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn() }),
+}));
+
 import { MeetingDetail } from "../MeetingDetail";
+import { ToastProvider } from "../ui";
+
+// MeetingActions/BotControls now call useToast() (DB-41/DB-42), which throws outside a
+// <ToastProvider> exactly like `next/navigation`'s router does — same reason, same fix as
+// `SendBotDialog.test.tsx`.
+function renderDetail(meetingId: string) {
+  return render(<MeetingDetail meetingId={meetingId} />, { wrapper: ToastProvider });
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -44,7 +61,7 @@ describe("MeetingDetail", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MeetingDetail meetingId="42" />);
+    renderDetail("42");
 
     expect(await screen.findByText("Weekly sync")).not.toBeNull();
 
@@ -57,7 +74,7 @@ describe("MeetingDetail", () => {
     fetchMock = vi.fn(async () => jsonResponse({ detail: "Meeting not found" }, 404));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MeetingDetail meetingId="999" />);
+    renderDetail("999");
 
     expect(await screen.findByText(/isn't in your list/i)).not.toBeNull();
   });
@@ -66,7 +83,7 @@ describe("MeetingDetail", () => {
     fetchMock = vi.fn(async () => jsonResponse({ detail: "boom" }, 503));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MeetingDetail meetingId="42" />);
+    renderDetail("42");
 
     expect(await screen.findByText(/vexa backend is unreachable/i)).not.toBeNull();
     expect(screen.getByRole("button", { name: /try again/i })).not.toBeNull();
@@ -79,7 +96,7 @@ describe("MeetingDetail", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MeetingDetail meetingId="42" />);
+    renderDetail("42");
 
     expect(await screen.findByText(/couldn't reach the dashboard server/i)).not.toBeNull();
     expect(screen.queryByText(/isn't in your list/i)).toBeNull();

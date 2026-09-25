@@ -139,6 +139,112 @@ describe("resolveWriteUpstream", () => {
   });
 });
 
+describe("resolveUpstream — meeting summary (DB-60)", () => {
+  it("composes the workspace file path from the numeric id alone", () => {
+    expect(resolveUpstream(["meetings", "104", "summary"])).toEqual({
+      path: "/agent/workspace/file?path=meetings/104/summary.md",
+    });
+  });
+
+  it("refuses a non-numeric, traversal, or encoded-slash id", () => {
+    for (const id of ["104abc", "../../admin", "1%2f2", "1/2", "", "x".repeat(21)]) {
+      expect(resolveUpstream(["meetings", id, "summary"])).toBeNull();
+    }
+  });
+
+  it("refuses anything but the exact 'summary' tail segment", () => {
+    expect(resolveUpstream(["meetings", "104", "notes"])).toBeNull();
+    expect(resolveUpstream(["meetings", "104", "summary", "extra"])).toBeNull();
+  });
+
+  // The caller can never steer the upstream `path=` query — see route.ts, which drops the whole
+  // incoming query string whenever the resolved path already carries one. Proven at the route
+  // level in route.test.ts; this just fixes the resolved shape the route depends on.
+  it("the resolved path is fixed and carries no room for a caller-supplied 'path'", () => {
+    const route = resolveUpstream(["meetings", "104", "summary"]);
+    expect(route?.path).not.toContain("&");
+    expect(route?.path.match(/path=/g)?.length).toBe(1);
+  });
+});
+
+describe("resolveUpstream — participants (DB-42)", () => {
+  it("admits a known platform + safe native id", () => {
+    expect(resolveUpstream(["meetings", "google_meet", "abc-defg-hij", "participants"])).toEqual({
+      path: "/meetings/google_meet/abc-defg-hij/participants",
+    });
+  });
+
+  it("refuses an unknown platform, a separator-bearing native id, or a near-miss tail", () => {
+    expect(resolveUpstream(["meetings", "webex", "x", "participants"])).toBeNull();
+    expect(resolveUpstream(["meetings", "google_meet", "a/b", "participants"])).toBeNull();
+    expect(resolveUpstream(["meetings", "google_meet", "", "participants"])).toBeNull();
+    expect(resolveUpstream(["meetings", "google_meet", "x", "roster"])).toBeNull();
+    expect(resolveUpstream(["meetings", "google_meet", "x"])).toBeNull();
+  });
+});
+
+describe("resolveUpstream — bots/status (DB-41)", () => {
+  it("admits GET bots/status", () => {
+    expect(resolveUpstream(["bots", "status"])).toEqual({ path: "/bots/status" });
+  });
+
+  it("refuses near-misses", () => {
+    for (const path of [["bots"], ["bots", "status", "extra"], ["bot", "status"]]) {
+      expect(resolveUpstream(path)).toBeNull();
+    }
+  });
+});
+
+describe("resolveWriteUpstream — stop recording (DB-41)", () => {
+  it("admits DELETE bots/<platform>/<native> for a known platform", () => {
+    expect(resolveWriteUpstream("DELETE", ["bots", "google_meet", "abc-defg-hij"])).toEqual({
+      path: "/bots/google_meet/abc-defg-hij",
+    });
+  });
+
+  it("refuses an unknown platform, a separator-bearing native id, and the wrong method", () => {
+    expect(resolveWriteUpstream("DELETE", ["bots", "webex", "x"])).toBeNull();
+    expect(resolveWriteUpstream("DELETE", ["bots", "google_meet", "a/b"])).toBeNull();
+    expect(resolveWriteUpstream("DELETE", ["bots", "google_meet", ""])).toBeNull();
+    expect(resolveWriteUpstream("POST", ["bots", "google_meet", "x"])).toBeNull();
+    expect(resolveWriteUpstream("PATCH", ["bots", "google_meet", "x"])).toBeNull();
+    expect(resolveWriteUpstream("DELETE", ["bots", "google_meet"])).toBeNull();
+  });
+
+  it("percent-encodes a native id with URL-significant characters", () => {
+    expect(resolveWriteUpstream("DELETE", ["bots", "teams", "19:meeting_x@thread.v2"])?.path).toBe(
+      "/bots/teams/19%3Ameeting_x%40thread.v2",
+    );
+  });
+});
+
+describe("resolveWriteUpstream — rename via annotate, and delete (DB-42)", () => {
+  it("admits POST meetings/<id>/annotate for a numeric id", () => {
+    expect(resolveWriteUpstream("POST", ["meetings", "104", "annotate"])).toEqual({
+      path: "/meetings/104/annotate",
+    });
+  });
+
+  it("refuses a non-numeric id or the wrong tail on annotate", () => {
+    expect(resolveWriteUpstream("POST", ["meetings", "104abc", "annotate"])).toBeNull();
+    expect(resolveWriteUpstream("POST", ["meetings", "../../admin", "annotate"])).toBeNull();
+    expect(resolveWriteUpstream("POST", ["meetings", "104", "notes"])).toBeNull();
+    expect(resolveWriteUpstream("PATCH", ["meetings", "104", "annotate"])).toBeNull();
+  });
+
+  it("admits DELETE meetings/<id> for a numeric id", () => {
+    expect(resolveWriteUpstream("DELETE", ["meetings", "104"])).toEqual({ path: "/meetings/104" });
+  });
+
+  it("refuses a non-numeric meetings id, and PATCH meetings/<id> outright (not on the write allowlist)", () => {
+    expect(resolveWriteUpstream("DELETE", ["meetings", "104abc"])).toBeNull();
+    expect(resolveWriteUpstream("DELETE", ["meetings", ""])).toBeNull();
+    expect(resolveWriteUpstream("DELETE", ["meetings", "104", "extra"])).toBeNull();
+    expect(resolveWriteUpstream("PATCH", ["meetings", "104"])).toBeNull();
+    expect(resolveWriteUpstream("GET", ["meetings", "104"])).toBeNull();
+  });
+});
+
 describe("filterQuery", () => {
   it("keeps the paging parameters and drops everything else", () => {
     const q = new URLSearchParams("limit=10&offset=5&user_id=7&x=1");

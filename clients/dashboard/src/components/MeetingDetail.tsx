@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, Copy, Download, Search } from "lucide-react";
 import {
   type Meeting,
@@ -28,6 +29,10 @@ import { ApiError, getJson, presentError } from "@/lib/api";
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
 import { Button, Input } from "./ui";
+import { SummaryPanel } from "./SummaryPanel";
+import { BotControls } from "./BotControls";
+import { MeetingActions } from "./MeetingActions";
+import { Participants } from "./Participants";
 
 /** Avatar hues, in the same family as the accent so a busy transcript still reads calm.
  *
@@ -44,6 +49,7 @@ function speakerChipStyle(speaker: string): React.CSSProperties {
 const POLL_LIVE_MS = 5_000;
 
 export function MeetingDetail({ meetingId }: { meetingId: string }) {
+  const router = useRouter();
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [lines, setLines] = useState<TranscriptLine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +166,11 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">{meeting.title}</h1>
           <StatusPill phase={meeting.phase} status={meeting.status} />
+          <MeetingActions
+            meeting={meeting}
+            onRenamed={(title) => setMeeting((m) => (m ? { ...m, title } : m))}
+            onDeleted={() => router.push("/")}
+          />
         </div>
         <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-ink-2">
           <Fact label="Platform" value={meeting.platform} />
@@ -178,7 +189,12 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
             ))}
           </div>
         )}
+        <Participants meeting={meeting} />
       </header>
+
+      <BotControls meeting={meeting} onStopped={() => void load()} />
+
+      <SummaryPanel meetingId={meetingId} meeting={meeting} />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
