@@ -74,8 +74,8 @@ from flows_steps import common as _common
 # namespace, so one `monkeypatch.setattr(production, …)` sets the world for both (the idiom
 # `flows_steps.common.agent_door` states). Bind it in the other module and half the suite's fakes
 # would be bypassed silently.
-from flows_steps.common import (ensure_platform_user, mint_scaffold, platform_user_id,  # noqa: F401
-                                scaffolded, setting, ws_file)
+from flows_steps.common import (ensure_platform_user, mint_scaffold, platform_user_email,  # noqa: F401
+                                platform_user_id, scaffolded, setting, ws_file)
 from flows_steps.notify import notify
 # THE ONE SCOPING PREDICATE, imported rather than re-written. `flows_timeline.model` is pure and
 # stdlib-only; `concerns` answers "is this fact about this person" over BOTH the uid and the email
@@ -1877,6 +1877,81 @@ def build(reg: Registry, db) -> None:
             row_id=row_id, status="complete", generated_at=now, report=report))
         return Done({"path": path, "status": "complete", "meeting_id": row_id})
 
+    # ── the owner's own "it's ready" mail, for a meeting with no invite ───────────────────────
+    # `email_minutes` above tells the ORGANISER — a name a calendar invite supplied. An ad hoc
+    # bot (the dashboard's "Send Bot", MCP's `request_meeting_bot`, or any bot started without an
+    # invite) carries no organiser at all, so that step skips cleanly and, until this step
+    # existed, the person who actually owns the meeting — `refs.uid`, a platform id, never an
+    # address — was told nothing. This step owns exactly that gap and nothing else: an
+    # invite-originated meeting already has its mail, and the guard below is the same test
+    # `email_minutes` makes, inverted.
+    @reg.step
+    def email_owner_ready(ctx: StepCtx):
+        """The one "your meeting is ready" mail an ad hoc meeting's owner gets — subject to the
+        SAME `mail_minutes` setting `email_minutes` already honours, with a short excerpt and one
+        link into the dashboard.
+
+        READS THE RECEIPTS ALREADY ON THE TABLE, after `commit_meeting_summary`, rather than
+        dispatching a second agent turn or re-reading the workspace: `process_meeting`'s report is
+        the one grounded artefact this flow produces, and `commit_meeting_summary`'s own `status`
+        already says whether it cleared the grounding gate. `status: complete` contributes its
+        Overview section as the excerpt; `status: skipped` (too little transcript, no report, an
+        ungrounded reply) still earns the "ready" mail and the link — the transcript IS ready even
+        when there was too little of it to summarize — with no excerpt, because the mail must
+        never carry text the grounding gate did not clear.
+
+        THE OWNER'S ADDRESS comes from `platform_user_email(uid)` — the reverse of the lookup
+        `ensure_platform_user` already does the other way, through the same admin-tier door. A
+        uid with no resolvable address (the account was removed between admission and this read)
+        skips cleanly rather than raising: there is nobody to mail, the same shape `email_minutes`
+        already answers for "no organiser".
+
+        THE LINK is `<VEXA_FLOWS_DASHBOARD_URL>/meetings/<row-id>`, read off the environment the
+        way `_provenance` reads `VEXA_FLOWS_DATA_STATEMENT` — a deployment fact, not a door: no
+        deployment has wired a dashboard here yet, so unset means the mail goes out with no link
+        rather than a guessed one.
+
+        IDEMPOTENT ON `mail_outbox_sent`, the SAME table `_drive` already dedupes a conversation's
+        outbox against, not a second mechanism: one row per (uid, meeting) makes a step retried
+        within one reaction a no-op rather than a second mail, on top of the admission-level dedupe
+        every `meeting.completed` redelivery already gets for free (`emit_completed`'s stable
+        source event id, see `commit_meeting_summary`'s own docstring).
+
+        Reads: refs.{uid,organizer?,meeting_id} · Prior: process_meeting, commit_meeting_summary
+        Effect: at most one notification · Result: {skipped} or {message_id, link, excerpt}."""
+        if ctx.refs.get("organizer"):
+            return Done({"skipped": "invite-originated meeting — email_minutes already "
+                                    "addressed the organiser"})
+        uid = ctx.refs["uid"]
+        if not setting(uid, "mail_minutes"):
+            return Done({"skipped": "mail_minutes is off for this person"})
+        summary = ctx.prior.get("commit_meeting_summary") or {}
+        row_id = summary.get("meeting_id") or ctx.refs.get("meeting_id")
+        session = f"meeting-ready-{row_id}"
+        if db.execute(
+                "SELECT 1 FROM mail_outbox_sent WHERE subject_uid=:u AND session=:s AND hash=:h",
+                {"u": uid, "s": session, "h": "v1"}):
+            return Done({"skipped": "already sent for this meeting"})
+        email = platform_user_email(uid)
+        if not email:
+            return Done({"skipped": f"no email on file for platform user {uid}"})
+        excerpt = ""
+        if summary.get("status") == "complete":
+            report = _readable((ctx.prior.get("process_meeting") or {}).get("report") or "").strip()
+            if report:
+                excerpt = _summary_sections(report)["overview"].strip()
+        dash = os.environ.get("VEXA_FLOWS_DASHBOARD_URL", "").strip()
+        link = f"{dash.rstrip('/')}/meetings/{row_id}" if dash and row_id is not None else None
+        body = "Your meeting is ready — the recording finished and the transcript is processed.\n"
+        if excerpt:
+            body += "\n## Overview\n\n" + excerpt + "\n"
+        body += "\n—\nRecorded by Vexa\n"
+        mid = notify(email, "Your meeting is ready", body, link=link)
+        db.execute("""INSERT INTO mail_outbox_sent (subject_uid, session, hash, sent_at)
+                      VALUES (:u,:s,:h,:t) ON CONFLICT DO NOTHING""",
+                   {"u": uid, "s": session, "h": "v1", "t": ctx.clock_now})
+        return Done({"message_id": mid, "link": link, "excerpt": bool(excerpt)}, provider_ref=mid)
+
     # ── the live call (PRD decision 42.2) ─────────────────────────────────────
     # The two DESK cards that used to sit beside it are `production_agent`'s now: a desk is agent
     # state, so a card on one has nothing to be in a deployment with no agent domain.
@@ -2096,9 +2171,15 @@ def build(reg: Registry, db) -> None:
     # grounded receipt and never blocks on the mail/drop side effects ahead of it: those are
     # idempotent by scratch/content-compare, so a retry of this step alone costs nothing extra if
     # the mail already went out.
-    reg.flow(name="post_meeting", version=5, on=COMPLETED,
+    # VERSION 6 — `email_owner_ready` ADDED, last. An ad hoc meeting carries no organiser for
+    # `email_minutes` to address, so its owner heard nothing when their meeting finished; this
+    # step reads the same two receipts `commit_meeting_summary` reads and mails exactly that
+    # person, subject to the same `mail_minutes` setting, and is a no-op for an invite-originated
+    # meeting — `email_minutes` already told the organiser, unchanged.
+    reg.flow(name="post_meeting", version=6, on=COMPLETED,
              steps=[s["process_meeting"], s["email_minutes"],
-                    s["email_attendees"], s["drop_to_attendees"], s["commit_meeting_summary"]])
+                    s["email_attendees"], s["drop_to_attendees"], s["commit_meeting_summary"],
+                    s["email_owner_ready"]])
     # THE QUEUE FLOW THIS FILE KEEPS (PRD decision 42.2). It is one step and produces no effect:
     # what it produces is a REACTION ROW in a state a person can be told about — pending while a
     # call runs. That row is the queue. Its two siblings, the desk cards, are `production_agent`'s.

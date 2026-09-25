@@ -74,6 +74,7 @@ class Desks:
         self.writes: list[tuple[str, str]] = []
         self.inits: list[str] = []
         self.users: list[str] = []          # every `ensure_platform_user(email)` call
+        self.owner_emails: dict[str, str] = {}   # uid -> email, for `platform_user_email` (DB-80)
 
     def uid_of(self, email):
         self.users.append(email)
@@ -93,6 +94,11 @@ class Desks:
 
     def of(self, uid, path):
         return self.files.get((uid, path))
+
+    def email_of(self, uid):
+        """`platform_user_email(uid)` — the reverse lookup DB-80's `email_owner_ready` uses.
+        Empty by default (no account on file), same as the real door for a uid it does not know."""
+        return self.owner_emails.get(str(uid), "")
 
 
 class FakeMeetings:
@@ -131,6 +137,7 @@ def _rig(monkeypatch, desks, meetings):
     reg = Registry()
     production.build(reg, _StubDB())
     monkeypatch.setattr(production, "ensure_platform_user", desks.uid_of)
+    monkeypatch.setattr(production, "platform_user_email", desks.email_of)
     monkeypatch.setattr(production, "ws_file", desks.read)
     # `mailtext` binds `ws_file` on import (`from .common import ws_file`) — patching
     # `production`'s name alone leaves the attendee-head template read reaching a real socket.
@@ -258,14 +265,16 @@ def test_commit_meeting_summary_still_writes_the_db_60_note(monkeypatch):
 
 def test_the_whole_post_meeting_sequence_reaches_commit_meeting_summary(monkeypatch):
     """END TO END, in registration order: `process_meeting`'s receipt feeds every later step, and
-    none of the four steps after it raises for an ad hoc completion — which is the property that
-    was false before this fix (either mail step's crash stopped the reaction before this line ever
-    ran)."""
+    none of the five steps after it raises for an ad hoc completion — which is the property that
+    was false before the DB-60b fix (either mail step's crash stopped the reaction before this
+    line ever ran). `platform_user_email` answers "" here (no account on file for uid 7), so
+    `email_owner_ready` (DB-80, version 6's own addition) skips cleanly too — its actual send is
+    `test_meeting_ready_email.py`'s to prove."""
     desks, meetings = Desks(), FakeMeetings(row_id=97)
     reg, _scaffolds, channel = _rig(monkeypatch, desks, meetings)
-    steps = list(reg.flows[("post_meeting", 5)].steps)
+    steps = list(reg.flows[("post_meeting", 6)].steps)
     assert steps == ["process_meeting", "email_minutes", "email_attendees",
-                     "drop_to_attendees", "commit_meeting_summary"]
+                     "drop_to_attendees", "commit_meeting_summary", "email_owner_ready"]
 
     ctx_prior = dict(PRIOR)
     refs = dict(AD_HOC_REFS)
@@ -275,14 +284,19 @@ def test_the_whole_post_meeting_sequence_reaches_commit_meeting_summary(monkeypa
         ctx_prior[name] = out.result
 
     assert ctx_prior["commit_meeting_summary"]["status"] == "complete"
-    assert channel.sent == [], "an ad hoc meeting with no organizer mails nobody"
+    assert ctx_prior["email_owner_ready"]["skipped"] == "no email on file for platform user 7"
+    assert channel.sent == [], "no email on file for this uid — nobody to mail"
 
 
 # ── the sibling: the invite-originated path is unchanged ────────────────────────────────────────
 def test_the_invite_path_still_mails_and_drops_exactly_as_before(monkeypatch):
+    """DB-80's new last step must not add a second mail on the invite path: the organiser check
+    inside `email_owner_ready` is the same test `email_minutes` makes, inverted, so this asserts
+    the recipient list is BYTE-FOR-BYTE what it was before the step existed — two sends, nobody
+    else — with `email_owner_ready` itself only a clean skip."""
     desks, meetings = Desks(), FakeMeetings(row_id=97)
     reg, scaffolds, channel = _rig(monkeypatch, desks, meetings)
-    steps = list(reg.flows[("post_meeting", 5)].steps)
+    steps = list(reg.flows[("post_meeting", 6)].steps)
 
     ctx_prior = dict(PRIOR)
     refs = dict(INVITE_REFS)
@@ -299,3 +313,6 @@ def test_the_invite_path_still_mails_and_drops_exactly_as_before(monkeypatch):
     assert sorted(ctx_prior["drop_to_attendees"]["to"]) == ["anna@bank.test", "ben@bank.test"]
     assert desks.users == ["anna@bank.test", "ben@bank.test"]   # resolved by email, as before
     assert ctx_prior["commit_meeting_summary"]["status"] == "complete"
+    assert ctx_prior["email_owner_ready"]["skipped"] == (
+        "invite-originated meeting — email_minutes already addressed the organiser")
+    assert len(channel.sent) == 2, "email_owner_ready must not add a third recipient here"

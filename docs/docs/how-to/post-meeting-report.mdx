@@ -168,3 +168,33 @@ crash and never a slower bot. **Recreate the `meeting-api` service** (`docker co
 meeting-api`, or the full stack) for a changed `VEXA_FLOWS_API_URL` to take effect — the value is
 read once, at process start.
 
+## Email when it's ready (DB-80)
+
+`email_minutes` mails the meeting's **organiser** — a name a calendar invite supplied. An ad hoc
+bot carries no organiser at all (see above), so that mail skips cleanly, and until `post_meeting`
+version 6 the person who dispatched the bot heard nothing when their meeting finished: `uid` is a
+platform id, never an address, and nothing resolved one from the other.
+
+`post_meeting`'s last step, `email_owner_ready` (`core/flows/src/flows_defs/production.py`), closes
+that gap and nothing else. For an **ad hoc meeting** (no organiser on the completion) it mails the
+meeting's own owner — resolved from `uid` through the same admin-tier door `ensure_platform_user`
+already opens the other way — subject to the SAME `mail_minutes` setting `email_minutes` already
+honours. An invite-originated meeting is untouched: `email_minutes` already addressed its
+organiser, so this step is a clean no-op for it.
+
+**The mail's excerpt is the `summary.v1` note's Overview section**, read off
+`commit_meeting_summary`'s own receipt — never a second agent turn, never re-derived. When that
+note is `status: skipped` (too little transcript, no report, an ungrounded reply — see above), the
+mail still goes out, with no excerpt: the transcript itself is ready even when there was too little
+of it to summarize, and the mail never carries text the grounding gate did not clear.
+
+**The link** is `<VEXA_FLOWS_DASHBOARD_URL>/meetings/<row-id>` — a deployment-configured value,
+read the way `VEXA_UI_URL` already is for the terminal. Unset, the mail sends with no link rather
+than a guessed one; `core/flows/src/config.v1.json` declares the key with an empty `targets` list
+because no deploy surface in this tree carries it yet (a follow-up: `dashboard-next`'s own
+`DASHBOARD_NEXT_URL` is the value to wire it from).
+
+**Idempotent** on the same `mail_outbox_sent` table a conversation's own outbox already dedupes
+against — one row per (uid, meeting) — on top of the admission-level dedup every
+`meeting.completed` redelivery already gets from `emit_completed`'s stable source event id.
+

@@ -102,6 +102,15 @@ DECLARED: dict[str, tuple[str, object, str]] = {
                     "where a person's own terminal lives — it goes into every link we mail. UNSET "
                     "MEANS THIS DEPLOYMENT HAS NO TERMINAL ADAPTER: nothing is mailed with a link "
                     "and any step that would compose one refuses, naming this key."),
+    # THE SAME SHAPE, for the dashboard. `email_owner_ready` (post_meeting v6) mails an ad hoc
+    # meeting's owner a link at `<VEXA_FLOWS_DASHBOARD_URL>/meetings/<row-id>`; unset, that mail
+    # still goes out with no link. NOT YET WIRED ON A DEPLOY SURFACE: the compose service that
+    # would carry it (`dashboard-next`'s own `DASHBOARD_NEXT_URL`) is outside this change's
+    # footprint, so `config.v1.json` declares this key with `targets: []` rather than claiming a
+    # surface it is not actually on.
+    "VEXA_FLOWS_DASHBOARD_URL": ("capability", None,
+                                 "the dashboard's own origin. UNSET MEANS NO DASHBOARD LINK: the "
+                                 "meeting-ready mail still sends, with no link."),
     # THE AGENT DOMAIN'S PRESENCE SIGNAL (PRD decision 40.7: *"meetings, agents and flows work
     # independently and together in any configuration"*). `capability`, which is exactly what the
     # class means here — unset is not a misconfiguration, it is the `no-agents` profile, and every

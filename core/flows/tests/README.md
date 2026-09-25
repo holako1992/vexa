@@ -15,3 +15,10 @@ meeting) and `test_flow_packs.py` (the three seams a private flow pack plugs int
 `VEXA_FLOWS_DEFS_EXTRA`, `$VEXA_BEHAVIOR_DIR/queue/`, and an intake with no carrier allow-list).
 That `registry` fixture is what blanks the domain doors `OFFLINE_DOORS` declares above; it is
 deliberately not autouse, so `test_no_agents.py` keeps owning its own unset.
+
+`test_meeting_summary.py` (DB-60, `commit_meeting_summary`), `test_ad_hoc_post_meeting.py` (DB-60b,
+the same step vocabulary given meeting-api's organiser-less refs) and `test_meeting_ready_email.py`
+(DB-80, `email_owner_ready` — the ad hoc owner's own "it's ready" mail, added after
+`commit_meeting_summary`) call `post_meeting`'s real production steps directly, each with its own
+small fakes for `production.{setting,platform_user_email,mt,ag,ws_file}` and the notify channel —
+no engine, no admission, the same idiom `test_link_loop.py`'s `FakeChannel` sets up.

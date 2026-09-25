@@ -349,14 +349,17 @@ def test_redelivery_of_the_same_completion_admits_no_second_reaction():
     assert len([r for r in db.rows if r["sid"].endswith("::post_meeting")]) == 1
 
 
-# ── 6 · the step is registered, last, in post_meeting ────────────────────────────────────────
-def test_commit_meeting_summary_is_the_last_step_of_post_meeting():
+# ── 6 · the step is registered in post_meeting, ahead of DB-80's own last step ──────────────────
+def test_commit_meeting_summary_is_registered_in_post_meeting():
+    """`commit_meeting_summary` was the LAST step through version 5; version 6 (DB-80) adds
+    `email_owner_ready` after it — which reads this step's own receipt (see
+    `test_meeting_ready_email.py`), so the order here still matters even though "last" no longer
+    names this step."""
     reg = Registry()
     production.build(reg, _StubDB())
-    steps = list(reg.flows[("post_meeting", 5)].steps)
-    assert steps[-1] == "commit_meeting_summary"
+    steps = list(reg.flows[("post_meeting", 6)].steps)
     assert steps == ["process_meeting", "email_minutes", "email_attendees",
-                     "drop_to_attendees", "commit_meeting_summary"]
+                     "drop_to_attendees", "commit_meeting_summary", "email_owner_ready"]
 
 
 def test_commit_meeting_summary_needs_agent_and_meetings():

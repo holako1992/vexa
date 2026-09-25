@@ -382,6 +382,21 @@ def platform_user_id(email: str) -> str:
     return str(u["id"]) if code == 200 and isinstance(u, dict) and u.get("id") is not None else ""
 
 
+def platform_user_email(uid: str) -> str:
+    """The REVERSE of `platform_user_id` — this platform user's own address, or "" for a uid
+    with no such account.
+
+    A step that only ever learns a MEETING OWNER as a platform id — meeting-api's ad hoc
+    completion carries `uid` and nothing else, no invite to read an address off — has no way to
+    address a mail to them without this. `GET /admin/users/{id}` is the same admin-tier door
+    `platform_user_id` and `ensure_platform_user` already open, read the other direction; no new
+    door, no new credential.
+    """
+    code, u = http("GET", f"{_door('VEXA_FLOWS_ADMIN_API_URL')}/admin/users/"
+                          f"{_q(str(uid), safe='')}", _admin_headers())
+    return str(u["email"]) if code == 200 and isinstance(u, dict) and u.get("email") else ""
+
+
 def ensure_platform_user(email: str) -> str:
     """This person's platform id, CREATING the account when they have none.
 

@@ -27,7 +27,7 @@ the module object handed to its `build(reg, db, home=…)`** — never `from .pr
 
 ## DB-60 — the AI note (`commit_meeting_summary`)
 
-`post_meeting`'s LAST step, added at version 5. It writes `meetings/<row_id>/summary.md` in the
+Added to `post_meeting` at version 5. It writes `meetings/<row_id>/summary.md` in the
 organiser's own workspace — a path derivable from the meeting's ROW ID ALONE, unlike
 `drop_to_attendees`'s `kg/entities/meeting/<date>-<slug>.md`, which only a mail recipient can
 already resolve. No second agent turn: it reshapes `process_meeting`'s already-grounded report
@@ -35,3 +35,15 @@ already resolve. No second agent turn: it reshapes `process_meeting`'s already-g
 recorded reason, never a silent empty file — a meeting whose transcript is too thin or whose
 report does not ground. See `docs/docs/how-to/post-meeting-report.mdx` for the wire contract the
 dashboard reads, and `core/flows/tests/test_meeting_summary.py` for the property list.
+
+## DB-80 — the "it's ready" mail for an ad hoc owner (`email_owner_ready`)
+
+`post_meeting`'s LAST step, added at version 6, right after DB-60's. `email_minutes` mails a
+calendar invite's organiser; an ad hoc bot (the dashboard's "Send Bot", MCP's
+`request_meeting_bot`) carries no organiser at all, so this step reads the same two receipts
+`commit_meeting_summary` reads — `process_meeting`'s report and `commit_meeting_summary`'s own
+`status` — and mails the meeting's OWNER instead, resolved from `uid` through
+`platform_user_email` (the reverse of `ensure_platform_user`). Subject to the same `mail_minutes`
+setting `email_minutes` honours; a clean no-op when an organiser IS on the meeting, since that
+mail already went out. See `docs/docs/how-to/post-meeting-report.mdx#email-when-its-ready-db-80`
+and `core/flows/tests/test_meeting_ready_email.py` for the property list.

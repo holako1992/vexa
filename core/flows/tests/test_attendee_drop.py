@@ -404,11 +404,11 @@ def test_a_retry_after_a_partial_failure_finishes_the_rest(monkeypatch):
 def test_drop_to_attendees_runs_after_email_attendees_in_post_meeting():
     reg = Registry()
     production.build(reg, _StubDB())
-    # VERSION 5 (DB-60): `commit_meeting_summary` added, last — see production.py's own comment
-    # on the registration for why it trails the mail/drop steps rather than leading them.
-    steps = list(reg.flows[("post_meeting", 5)].steps)
+    # VERSION 6 (DB-80): `email_owner_ready` added, after `commit_meeting_summary` — see
+    # production.py's own comment on the registration for why the mail/drop/summary steps lead it.
+    steps = list(reg.flows[("post_meeting", 6)].steps)
     assert steps == ["process_meeting", "email_minutes", "email_attendees",
-                     "drop_to_attendees", "commit_meeting_summary"]
+                     "drop_to_attendees", "commit_meeting_summary", "email_owner_ready"]
     # DECISION 29: the minutes are never gated on setup.  used to lead this
     # list and mail "Finish the setup conversation and the minutes arrive right after" while it
     # waited; the founder's ruling on that mail was "no we do not want that".

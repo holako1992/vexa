@@ -341,6 +341,13 @@
       "targets": []
     },
     {
+      "key": "VEXA_FLOWS_DASHBOARD_URL",
+      "class": "capability",
+      "description": "Where the dashboard lives; it goes into the meeting-ready mail an ad hoc meeting's owner gets (`email_owner_ready`), as `<VEXA_FLOWS_DASHBOARD_URL>/meetings/<row-id>`. A PORT, on the same shape VEXA_UI_URL already is for the terminal: unset means this deployment has not wired a dashboard adapter here yet, and the mail goes out with no link rather than a guessed one — it never decides whether flows-api boots. NOT YET WIRED ON A DEPLOY SURFACE (`targets: []`): the compose service that would carry it (`DASHBOARD_NEXT_URL`, already read by `dashboard-next`) is outside this change's footprint, so this key is declared and read but not yet plumbed into deploy/compose/docker-compose.yml — a follow-up, not a capability this repo ships dark by design the way VEXA_FLOWS_DEFS_EXTRA is.",
+      "capability": "dashboard_link",
+      "targets": []
+    },
+    {
       "key": "VEXA_FLOWS_DEFS_EXTRA",
       "class": "capability",
       "description": "Flow packs this deployment composes on top of the ones in this repo — importable module names, comma-separated, each exposing `build(reg, db)`, called last by `flows_defs.production.build`. THE ONE SEAM A PRIVATE PACK NEEDED THAT DID NOT ALREADY EXIST: flows-as-data (`POST /flows`) already authors a flow version from existing steps and the worker hot-loads it; `VEXA_BEHAVIOR_DIR` already carries that flow's queue words ahead of the baked showcase; and the intake already admits any event type a registered flow reacts to. What none of them can do is add a STEP — `Registry.flow_by_names` validates every name against the image's reviewed vocabulary and refuses the rest, deliberately, because the API never accepts code. So the vocabulary stays closed to the API and open to the operator, the same split behavior already draws for prose. UNSET IS THIS REPO'S OWN PRODUCT. A named module that cannot be imported is a REFUSAL, never a fallback: a deployment that declares a pack and boots without it reacts to none of that pack's events, silently, for as long as nobody looks.",
@@ -360,6 +367,10 @@
     "terminal_link": {
       "description": "A terminal adapter behind flows' link port (PRD decision 4). Flows owns the port; the terminal is one adapter; a deployment may have none.",
       "when_unconfigured": "Nothing is mailed carrying a link, and any step that would compose one refuses naming VEXA_UI_URL at the moment the link would have gone out. It does not stop the process booting."
+    },
+    "dashboard_link": {
+      "description": "The dashboard's own origin, carried into the meeting-ready mail an ad hoc meeting's owner gets. Read straight off the environment, not through a required door — the same `capability` shape VEXA_UI_URL already is for the terminal.",
+      "when_unconfigured": "The meeting-ready mail still goes out (subject to `mail_minutes`), with no link — never a guessed URL."
     },
     "mailbox": {
       "description": "The inbound mail intake — the `flows-mailbox` lane, IMAP poll to `POST /events`.",
