@@ -122,8 +122,17 @@ widening the allowlist beyond what this client's own UI drives. The scope is the
 
 ```
 src/
-  middleware.ts   the gate + the security headers — every request passes through
-  app/            routes: /, /login, /meetings/[id], and the api/ handlers
-  components/     the UI: shell, list, detail, login card
-  lib/            session · adminApi · upstream allowlist · meeting mapping · security
+  middleware.ts     the gate + the security headers — every request passes through
+  app/              routes: /, /login, /meetings/[id], and the api/ handlers
+  components/       the UI: shell, nav, list, detail, login card
+  components/ui/    the design system: Button, Input, Dialog, Toggle, Tabs, Toast, Skeleton
+  lib/              session · adminApi · upstream allowlist · meeting mapping · security
 ```
+
+Every page but `/login` renders inside `Shell` (`components/Shell.tsx`): a skip-to-content link,
+a left rail that collapses to a drawer below `md` (responsive down to 375px), and a top bar with
+an account menu. The rail's links come from `components/nav.ts` — a single declared list, filtered
+to the items that are actually implemented, so the sidebar can never point at a page that does not
+exist. `components/ui/` is the shared primitive set every other component is built from; see
+`components/README.md` and `components/ui/README.md` for the full picture and how a later task
+adds a page and its nav entry.

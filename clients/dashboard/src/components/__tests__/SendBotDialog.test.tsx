@@ -5,14 +5,22 @@
  *  workspace, so assertions use plain DOM truthiness (`getBy*` throws if absent; `queryBy*`
  *  returns null) instead of `toBeInTheDocument()`. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SendBotDialog } from "../SendBotDialog";
+import { ToastProvider } from "../ui";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// DB-04: SendBotDialog's bot-send and calendar mutations now confirm/fail through `useToast()`,
+// which throws outside a `ToastProvider`. Every render below needs the same provider `app/layout.tsx`
+// mounts in the real app — wrapping here is infrastructure, not a loosened assertion.
+function renderDialog(props: { onClose: () => void; onBotSent: () => void }) {
+  return render(<SendBotDialog {...props} />, { wrapper: ToastProvider });
 }
 
 describe("SendBotDialog", () => {
@@ -52,7 +60,7 @@ describe("SendBotDialog", () => {
   });
 
   it("renders both tabs, defaulting to the meeting-link tab", () => {
-    render(<SendBotDialog onClose={() => {}} onBotSent={() => {}} />);
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
     expect(screen.getByRole("dialog", { name: /add a vexa bot/i })).not.toBeNull();
     expect(screen.getByRole("button", { name: /meeting link/i })).not.toBeNull();
     expect(screen.getByRole("button", { name: /^calendar$/i })).not.toBeNull();
@@ -60,7 +68,7 @@ describe("SendBotDialog", () => {
   });
 
   it("surfaces the parsed platform chip and enables Send for a valid Meet URL", async () => {
-    render(<SendBotDialog onClose={() => {}} onBotSent={() => {}} />);
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
 
     const input = screen.getByLabelText(/meeting url/i) as HTMLInputElement;
     const sendButton = screen.getByRole("button", { name: /send bot/i }) as HTMLButtonElement;
@@ -74,7 +82,7 @@ describe("SendBotDialog", () => {
   });
 
   it("leaves Send disabled for an unparseable URL", async () => {
-    render(<SendBotDialog onClose={() => {}} onBotSent={() => {}} />);
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
 
     const input = screen.getByLabelText(/meeting url/i) as HTMLInputElement;
     const sendButton = screen.getByRole("button", { name: /send bot/i }) as HTMLButtonElement;
@@ -91,7 +99,7 @@ describe("SendBotDialog", () => {
     // pasted. The parse effect used to key its `setResult(null)` off `url` itself, so that
     // programmatic clear fired the very next render and erased the confirmation before anyone
     // could see it — this test is red without the fix in ../SendBotDialog.tsx.
-    render(<SendBotDialog onClose={() => {}} onBotSent={() => {}} />);
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
 
     const input = screen.getByLabelText(/meeting url/i) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "https://meet.google.com/abc-defg-hij" } });
@@ -99,28 +107,35 @@ describe("SendBotDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /send bot/i }));
 
-    expect(await screen.findByText("Bot is joining the meeting.")).not.toBeNull();
+    // DB-04: the same confirmation text now also appears in a toast (a sibling of the dialog,
+    // pushed via `useToast()`) — scope to the dialog so this asserts the inline banner
+    // specifically, the thing the regression this test guards against actually erased.
+    const dialog = within(screen.getByRole("dialog"));
+    expect(await dialog.findByText("Bot is joining the meeting.")).not.toBeNull();
     expect(input.value).toBe("");
     // Give any stray effect a chance to run before asserting the message is still there.
-    await waitFor(() => expect(screen.getByText("Bot is joining the meeting.")).not.toBeNull());
+    await waitFor(() => expect(dialog.getByText("Bot is joining the meeting.")).not.toBeNull());
   });
 
   it("clears a prior result as soon as the user edits the URL themselves", async () => {
-    render(<SendBotDialog onClose={() => {}} onBotSent={() => {}} />);
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
 
+    const dialog = within(screen.getByRole("dialog"));
     const input = screen.getByLabelText(/meeting url/i) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "https://meet.google.com/abc-defg-hij" } });
     await waitFor(() => expect((screen.getByRole("button", { name: /send bot/i }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: /send bot/i }));
-    await screen.findByText("Bot is joining the meeting.");
+    await dialog.findByText("Bot is joining the meeting.");
 
     fireEvent.change(input, { target: { value: "https://meet.google.com/another-one" } });
 
-    expect(screen.queryByText("Bot is joining the meeting.")).toBeNull();
+    // Scoped to the dialog (see above) — the toast pushed by the same send is a separate,
+    // independently-timed piece of UI and is allowed to still be on screen here.
+    expect(dialog.queryByText("Bot is joining the meeting.")).toBeNull();
   });
 
   it("lists calendar connections from /api/vexa/user/calendars on the Calendar tab", async () => {
-    render(<SendBotDialog onClose={() => {}} onBotSent={() => {}} />);
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
 
     fireEvent.click(screen.getByRole("button", { name: /^calendar$/i }));
 

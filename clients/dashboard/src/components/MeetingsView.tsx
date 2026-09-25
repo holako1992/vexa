@@ -9,12 +9,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Bot, Search, Users, Video } from "lucide-react";
-import clsx from "clsx";
 import { getJson, presentError } from "@/lib/api";
 import { type Meeting, type MeetingRowDTO, filterMeetings, formatClock, sortMeetings, toMeeting } from "@/lib/meetings";
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
 import { SendBotDialog } from "./SendBotDialog";
+import { Button, Input, Tab, Tabs } from "./ui";
 
 const TABS = [
   { id: "all", label: "All" },
@@ -109,46 +109,30 @@ export function MeetingsView() {
           <h1 className="text-2xl font-semibold tracking-tight">Meetings</h1>
           <p className="mt-1 text-sm text-ink-2">Everything Vexa has captured for you.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="flex shrink-0 items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-ink shadow-sm transition-opacity hover:opacity-90"
-        >
-          <Bot size={15} aria-hidden />
+        <Button variant="primary" size="lg" icon={<Bot size={15} aria-hidden />} onClick={() => setDialogOpen(true)} className="rounded-xl shadow-sm">
           Add Bot
-        </button>
+        </Button>
       </header>
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" aria-hidden />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search meetings"
-            aria-label="Search meetings"
-            className="w-full rounded-lg border border-line bg-card py-2.5 pl-9 pr-3 text-sm placeholder:text-ink-3 focus:border-accent focus:outline-none"
-          />
-        </div>
-        <div className="flex gap-1 rounded-lg bg-raised p-1" role="tablist" aria-label="Filter meetings">
+        <Input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search meetings"
+          aria-label="Search meetings"
+          icon={<Search size={16} aria-hidden />}
+          containerClassName="flex-1"
+          className="bg-card py-2.5"
+        />
+        <Tabs value={tab} onChange={(v) => setTab(v as TabId)} label="Filter meetings">
           {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              onClick={() => setTab(t.id)}
-              className={clsx(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                tab === t.id ? "bg-card text-ink shadow-sm" : "text-ink-2 hover:text-ink",
-              )}
-            >
+            <Tab key={t.id} value={t.id}>
               {t.label}
               <span className="ml-1.5 text-xs text-ink-3">{counts[t.id]}</span>
-            </button>
+            </Tab>
           ))}
-        </div>
+        </Tabs>
       </div>
 
       {error && <ErrorState message={error} onRetry={() => void load()} />}

@@ -11,8 +11,9 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { AudioLines, Loader2 } from "lucide-react";
+import { AudioLines } from "lucide-react";
 import { safeNext } from "@/lib/security";
+import { Button, Input } from "./ui";
 
 export interface LoginOptions {
   google: boolean;
@@ -103,27 +104,20 @@ export function LoginForm({ options }: { options: LoginOptions }) {
                 </div>
               )}
               <form onSubmit={emailSubmit}>
-                <label htmlFor="email" className="mb-1.5 block text-sm font-medium">
-                  Email
-                </label>
-                <input
+                <Input
                   id="email"
+                  label="Email"
                   type="email"
                   required
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="w-full rounded-lg border border-line bg-canvas px-3 py-2.5 text-sm placeholder:text-ink-3 focus:border-accent focus:outline-none"
+                  className="bg-canvas"
                 />
-                <button
-                  type="submit"
-                  disabled={busy !== null}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-medium text-accent-ink disabled:opacity-60"
-                >
-                  {busy === "email" && <Loader2 size={15} className="animate-spin" aria-hidden />}
+                <Button type="submit" variant="primary" loading={busy === "email"} disabled={busy !== null} className="mt-3 w-full">
                   Continue
-                </button>
+                </Button>
               </form>
               <p className="mt-3 text-xs text-ink-3">
                 Email sign-in is a development door — it proves no ownership of the address. Production
@@ -145,14 +139,8 @@ export function LoginForm({ options }: { options: LoginOptions }) {
 
 function ProviderButton({ label, busy, onClick }: { label: string; busy: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className="mb-2 flex w-full items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-sm font-medium hover:bg-raised disabled:opacity-60"
-    >
-      {busy && <Loader2 size={15} className="animate-spin" aria-hidden />}
+    <Button type="button" variant="secondary" loading={busy} onClick={onClick} className="mb-2 w-full">
       {label}
-    </button>
+    </Button>
   );
 }

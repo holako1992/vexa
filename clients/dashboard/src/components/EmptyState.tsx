@@ -2,13 +2,20 @@
 /** The three states a data surface can be in other than "here is your data": loading, failed,
  *  and genuinely empty. They are separate on purpose — a failure that renders as "no meetings"
  *  is the bug this component exists to make impossible. */
-import { AlertCircle, Inbox, Loader2 } from "lucide-react";
+import { AlertCircle, Inbox } from "lucide-react";
+import { Button, Skeleton } from "./ui";
 
+/** `label` is the accessible announcement (visually hidden) — the visible placeholder is a
+ *  `Skeleton`, which communicates nothing to a screen reader on its own. */
 export function LoadingState({ label = "Loading…" }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-20 text-sm text-ink-3" role="status">
-      <Loader2 size={16} className="animate-spin" aria-hidden />
-      {label}
+    <div className="px-4 py-8 md:px-8" role="status">
+      <span className="sr-only">{label}</span>
+      <div aria-hidden className="flex flex-col gap-3">
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-16 w-2/3" />
+      </div>
     </div>
   );
 }
@@ -19,13 +26,9 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
       <AlertCircle size={22} className="mx-auto mb-3 text-live" aria-hidden />
       <p className="text-sm text-ink">{message}</p>
       {onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-4 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accent-ink"
-        >
+        <Button variant="primary" onClick={onRetry} className="mt-4">
           Try again
-        </button>
+        </Button>
       )}
     </div>
   );

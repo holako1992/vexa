@@ -1,4 +1,4 @@
-# `e2e/specs/` — the nine browser specs (DB-02)
+# `e2e/specs/` — the browser specs (DB-02, extended by DB-04)
 
 Every file proves one property from the DB-02 acceptance table against a REAL running dashboard
 and a REAL running stub backend (`../stub-server.mjs`) — no mocked `fetch`, which is what every
@@ -28,6 +28,26 @@ spec's body is only the property, not the plumbing.
 - `09-failure-states.spec.ts` — a forced 500 on `/meetings` shows the list's error state with
   retry (never "No meetings yet."); a forced 404 on `/meetings/<id>` shows not-found, not the
   generic error banner — the distinction `EmptyState.tsx` exists to make possible.
+- `10-a11y-keyboard.spec.ts` (DB-04) — the accessibility claim, proven with Playwright rather than
+  a Lighthouse score this harness has no way to run honestly (nothing here adds a dependency to
+  measure one — see the note below). The whole Add Bot flow completes with no mouse click inside
+  the dialog; opening it traps focus (fifteen Tabs never escape the panel) and Escape returns
+  focus to the "Add Bot" button that opened it; the calendar auto-join control is a real
+  `role="switch"` and Space toggles it.
+- `11-mobile-viewport.spec.ts` (DB-04) — the meetings list and a meeting's detail page both render
+  at 375×812 with no horizontal scroll (`document.documentElement.scrollWidth <= innerWidth`), and
+  the rail drawer opens/closes without causing any. Drawer presence is asserted with
+  `toBeInViewport()`, not `toBeVisible()` — the closed rail is translated off-canvas, not
+  unmounted, and a CSS transform doesn't zero out the bounding box Playwright's plain visibility
+  check looks at, so `toBeVisible()` would pass even while the drawer sits off-screen.
+
+**On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
+wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints
+(no new runtime dependency without justification) argue against pulling in just to print one
+number. `10-a11y-keyboard.spec.ts` above asserts the underlying properties a Lighthouse a11y audit
+actually checks for this surface — accessible names and roles, keyboard operability, focus
+management — directly, which is verifiable in CI without a score nobody re-measures. No Lighthouse
+number is reported anywhere in this tree; treat any that shows up as unmeasured.
 
 Run: `npm run test:e2e` from `clients/dashboard/` (needs `npx playwright install chromium` once;
 see `../README.md`).

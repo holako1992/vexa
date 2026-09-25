@@ -27,6 +27,7 @@ import {
 import { ApiError, getJson, presentError } from "@/lib/api";
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
+import { Button, Input } from "./ui";
 
 /** Avatar hues, in the same family as the accent so a busy transcript still reads calm.
  *
@@ -180,36 +181,28 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
       </header>
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" aria-hidden />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search this transcript"
-            aria-label="Search this transcript"
-            className="w-full rounded-lg border border-line bg-card py-2.5 pl-9 pr-3 text-sm placeholder:text-ink-3 focus:border-accent focus:outline-none"
-          />
-        </div>
+        <Input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search this transcript"
+          aria-label="Search this transcript"
+          icon={<Search size={16} aria-hidden />}
+          containerClassName="flex-1"
+          className="bg-card py-2.5"
+        />
         <div className="flex gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             onClick={copyTranscript}
             disabled={!lines?.length}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-medium text-ink-2 hover:bg-raised disabled:opacity-40"
+            icon={copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
           >
-            {copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
             {copied ? "Copied" : "Copy"}
-          </button>
-          <button
-            type="button"
-            onClick={downloadTranscript}
-            disabled={!lines?.length}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-medium text-ink-2 hover:bg-raised disabled:opacity-40"
-          >
-            <Download size={15} aria-hidden />
+          </Button>
+          <Button variant="secondary" onClick={downloadTranscript} disabled={!lines?.length} icon={<Download size={15} aria-hidden />}>
             Download
-          </button>
+          </Button>
         </div>
       </div>
 

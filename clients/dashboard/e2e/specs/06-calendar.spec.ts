@@ -30,7 +30,9 @@ test("connect an ICS calendar, then toggle auto-join", async ({ page, request })
   // Expand the row, then flip auto-join.
   await page.getByRole("button", { name: "Expand" }).click();
   await expect(page.getByText("Auto-join meetings from this calendar")).toBeVisible();
-  await page.getByRole("checkbox").click();
+  // DB-04: auto-join is a real `Toggle` (`role="switch"`) now, not a `<span role="checkbox">` —
+  // the control's accessible role changed on purpose, so the locator follows it.
+  await page.getByRole("switch").click();
 
   await expect
     .poll(async () => {
