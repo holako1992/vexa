@@ -194,3 +194,33 @@ def test_the_agent_publish_edge_points_at_the_flows_service_by_default():
     # through, never re-defaulted to a literal (F95). A target without its credential 401s, which
     # looks exactly like a deployment running no flows and is not one.
     assert "VEXA_FLOWS_API_KEY=${VEXA_FLOWS_API_KEY:-}" in block
+
+
+def test_the_meetings_domain_carries_the_publish_edge_it_declares():
+    """`core/meetings/services/meeting-api/src/meeting_api/config.v1.json` declares
+    `VEXA_FLOWS_API_URL`/`VEXA_FLOWS_API_KEY` as `publish-edge` keys — meeting-api telling flows
+    about every bot it dispatches, invite or not (F168/F181). Read from the declaration, the same
+    way `test_the_agent_domain_carries_the_publish_edge_it_declares` does, so a third key added to
+    the edge is covered the moment it is declared."""
+    decl = json.loads((ROOT / "core/meetings/services/meeting-api/src/meeting_api/config.v1.json")
+                      .read_text())
+    edge = [k["key"] for k in decl["keys"] if k.get("class") == "publish-edge"]
+    assert edge, "meeting-api declares no publish edge — its meeting facts have no producer"
+    block = _service("meeting-api")
+    for key in edge:
+        assert f"- {key}=" in block, (
+            f"meeting-api declares {key} as part of its publish edge and the compose service sets "
+            f"it nowhere")
+
+
+def test_the_meetings_publish_edge_points_at_the_flows_service_by_default():
+    """Same rule as the agent-api and mcp assertions above, and the same reason: flows-api is a
+    service in THIS FILE. An empty default here would mean a plain `up -d` of the full stack
+    dispatches ad hoc bots (the dashboard's "Send Bot", the MCP `request_meeting_bot`) whose
+    completions never reach `post_meeting`, silently — the mechanism reports itself healthy and
+    the dashboard's meeting summary simply never appears. Set it empty to run a deployment that
+    genuinely carries no flows domain."""
+    block = _service("meeting-api")
+    assert re.search(r"VEXA_FLOWS_API_URL=\$\{VEXA_FLOWS_API_URL:-http://flows-api:8200\}", block), \
+        "meeting-api has no default route to the flows service, so ad hoc completions go nowhere"
+    assert "VEXA_FLOWS_API_KEY=${VEXA_FLOWS_API_KEY:-}" in block

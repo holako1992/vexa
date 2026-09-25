@@ -358,19 +358,13 @@ services:
       - VEXA_SYSTEM_WEBHOOK_TIMEOUT_S=${VEXA_SYSTEM_WEBHOOK_TIMEOUT_S:-10}
       # F168/F181: meetings→flows publish edge (config.v1 publish-edge, meeting_api/events.py) —
       # meeting-api telling flows a bot it dispatched went active / completed, best-effort and
-      # swallowed on failure. DB-60b: THIS USED TO DEFAULT TO EMPTY, and empty is exactly why an
-      # ad hoc bot (the dashboard's "Send Bot", or the MCP `request_meeting_bot`) never reached
-      # `post_meeting` on THIS COMPOSE STACK even though `flows-api` and `flows-worker` are both
-      # services it already defines and starts: nothing wired meeting-api to tell them. The mcp
-      # service two blocks down (`FLOWS_API_URL=${VEXA_FLOWS_API_URL:-http://flows-api:8200}`) is
-      # the one place in this file that already defaults this same door on, and this line now
-      # matches it — `flows-api` is this stack's own service name, `8200` is the port its
-      # container listens on (`flows-api:`'s own `command`/healthcheck, this file, a few hundred
-      # lines up). A DEPLOYMENT WITH NO `flows-api` CONTAINER IS UNCHANGED: the publish is
-      # bounded at 2s and swallowed on any failure (`events.py`'s own `TIMEOUT_S`/`try`), so a
-      # stack that does not run flows pays one bounded, silent timeout per meeting lifecycle
-      # transition and nothing else — never a crash, never a slower bot. Override to point at a
-      # flows elsewhere, or set empty to run a deployment that genuinely carries no flows domain.
+      # swallowed on failure. Defaults to this stack's own `flows-api` service on its `8200` port,
+      # matching the default the `mcp` service two blocks down already uses for the same door. The
+      # publish is bounded at 2s and swallowed on any failure (`events.py`'s own `TIMEOUT_S`), so a
+      # stack with no `flows-api` container runs meetings exactly as one with flows does — one
+      # bounded, silent timeout per meeting lifecycle transition, never a crash. Override to point
+      # at a flows elsewhere, or set empty to run a deployment that genuinely carries no flows
+      # domain.
       - VEXA_FLOWS_API_URL=${VEXA_FLOWS_API_URL:-http://flows-api:8200}
       - VEXA_FLOWS_API_KEY=${VEXA_FLOWS_API_KEY:-}
       # Self-hosted Jitsi hostnames (comma-separated) recognized in pasted + calendar links.

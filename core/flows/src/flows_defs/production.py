@@ -1035,17 +1035,15 @@ def build(reg: Registry, db) -> None:
 
         Reads: refs.{uid,organizer,title,meeting_id} · Effect: one notification.
 
-        DB-60b: AN AD HOC MEETING (dashboard "Send Bot", MCP `request_meeting_bot`, or any bot
-        started without a calendar invite) carries no `organizer` at all — meeting-api's
+        AN AD HOC MEETING (dashboard "Send Bot", MCP `request_meeting_bot`, or any bot started
+        without a calendar invite) carries no `organizer` at all — meeting-api's
         `meeting_completed_refs` (`core/meetings/services/meeting-api/src/meeting_api/events.py`)
         states only `{uid, meeting_id, native, platform, completion_reason}`, because meeting-api's
-        domain holds no invite and cannot invent one. There is nobody to mail: the uid is a platform
-        id, not an address, and this step has never resolved one from the other. SKIPPING here is
-        the same shape as `mail_minutes` being off — a normal outcome, recorded, not an error — and
-        it is load-bearing: this used to be an uncaught `KeyError` on `ctx.refs["organizer"]`,
-        which failed the WHOLE `post_meeting` reaction non-retryably and meant `commit_meeting_
-        summary` (DB-60, the step after `drop_to_attendees`) never ran for a single dashboard-sent
-        meeting."""
+        domain holds no invite and cannot invent one. There is nobody to mail: the uid is a
+        platform id, not an address, and this step never resolves one from the other. SKIPPING
+        here is the same shape as `mail_minutes` being off — a normal outcome, recorded, not an
+        error — and it is what lets the rest of `post_meeting`, `commit_meeting_summary` included,
+        run for a meeting with no invite context."""
         if not ctx.refs.get("organizer"):
             return Done({"skipped": "no organizer on this meeting — ad hoc bot, no invite context"})
         if not setting(ctx.refs["uid"], "mail_minutes"):
@@ -1615,15 +1613,12 @@ def build(reg: Registry, db) -> None:
         Prior: process_meeting{report}, email_attendees{drops}, email_minutes{link}
         Effect: N desk writes · Result: {dropped, to, failed, entity}.
 
-        DB-60b: AN AD HOC MEETING carries no `organizer` (see `email_minutes`'s own note — the
-        same absent field, the same producer). There is no invite room to build here either, but
-        there IS one desk: the bot's own owner, `refs.uid`, already a resolved platform id — no
-        email to look one up from and none needed. That desk is addressed DIRECTLY, by uid, never
-        by re-deriving it through `ensure_platform_user(email)`, which is the branch that used to
-        mint an account for the literal string "the organiser" and crash the whole step non-
-        retryably (an unhandled exception from `mint_scaffold`, thrown building `organiser_link`
-        before the per-person try/except below even starts) — failing `post_meeting` outright and
-        keeping `commit_meeting_summary` from ever running."""
+        AN AD HOC MEETING carries no `organizer` (see `email_minutes`'s own note — the same
+        absent field, the same producer), so there is no invite room to build here. There IS one
+        desk: the bot's own owner, `refs.uid`, already a resolved platform id. That desk is
+        addressed DIRECTLY, by uid, never by re-deriving it through `ensure_platform_user(email)`
+        — there is no address to derive an account from, and none is needed when the identity is
+        already known."""
         pm = ctx.prior.get("process_meeting") or {}
         report = _readable(pm.get("report") or "").strip()
         if not report:
