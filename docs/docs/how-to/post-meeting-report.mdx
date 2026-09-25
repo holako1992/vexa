@@ -69,3 +69,65 @@ Routines and dispatches are workspace writes, so they need a **trusted** trigger
 which mounts the workspace `rw`. Untrusted triggers are propose-only — see
 [Governance](/architecture/governance).
 </Note>
+
+## Automatic — the AI note (DB-60)
+
+No dispatch needed for the short-form note the dashboard shows: when a meeting **completes**,
+`post_meeting`'s last step (`commit_meeting_summary` in `core/flows/src/flows_defs/production.py`)
+commits a `summary.v1` note automatically, reusing the SAME grounded report the full post-meeting
+turn above already produced — no second agent turn, no second model call.
+
+**The path is derivable from the meeting's row id alone:**
+
+```
+meetings/<row_id>/summary.md
+```
+
+Read it exactly like any other workspace file, over the same door this page opened with:
+
+```bash
+curl -H "X-API-Key: $API_KEY" "$API_BASE/agent/workspace/file?path=meetings/104/summary.md"
+```
+
+A `bot,tx`-scoped key reads its own holder's copy — the same scope the dashboard's own login
+mints (see `AGENTS.md`'s dashboard allowlist rule). A **404** on that path means the note has not
+been generated yet (the meeting has not completed, or completion has not been processed) — this
+is different from a note that exists and says it was skipped; see below.
+
+**The shape (`summary.v1`):**
+
+```
+---
+type: meeting-summary
+version: v1
+meeting_id: 104
+status: complete            # or "skipped"
+generated_at: 2026-06-24T14:05:00Z
+reason: "..."                # present only when status is "skipped"
+---
+
+## Overview
+...
+## Decisions
+...
+## Action items
+...
+## Open questions
+...
+```
+
+`status: skipped` carries a `reason` and no body sections — the meeting had too little transcript
+to summarize (fewer than `summary_min_segments`, default 3), the agent turn produced no report, or
+the report did not ground in the transcript (re-checked independently, not assumed from the mailed
+report). `status: complete` always carries all four sections; a section the report named no content
+for still appears, saying so explicitly (`_none recorded in this meeting._`) — a reader never has
+to tell "nothing to report" apart from "the writer forgot this section".
+
+**Idempotent, by construction, not by convention.** The triggering `meeting.completed` fact carries
+a stable id per meeting, so a redelivery never creates a second run; the write itself is also a
+content-compare, so retrying the step is a no-op once the note already matches. One completed
+meeting → one note.
+
+**Regenerate** (the dashboard's own button) is the display half of DB-60 and lives with the
+dashboard client, not here — it re-dispatches and overwrites this same path.
+

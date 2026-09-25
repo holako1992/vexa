@@ -1677,6 +1677,170 @@ def build(reg: Registry, db) -> None:
             f"every desk drop failed for meeting {mid} ({len(room)} person(s) in the room): "
             + " · ".join(failed), retryable=True)
 
+    # ── DB-60: the AI note, at a path the DASHBOARD can find from the row id alone ────────────
+    # `drop_to_attendees` above already lands the mailed report on every desk in the room, but at
+    # `kg/entities/meeting/<date>-<title-slug>.md` — a path only a mail RECIPIENT can resolve
+    # (they have the date and the title from the mail they were just sent). The dashboard has
+    # neither: it has the meetings-domain ROW id and nothing else, the same identity every other
+    # DB-60-adjacent read in this file insists on (R-B06, R-B19 — "by ROW id, never by the ref").
+    # So this is a SECOND, parallel recipe, not a reuse of `_note_path`: the two serve different
+    # readers and must not be made to agree by convention, only by the row id both already carry.
+    #
+    # NO SECOND AGENT TURN. `process_meeting` already produced ONE grounded report for this
+    # meeting — that is the whole point of the grounding gate inside it — and this step reads
+    # that same receipt rather than dispatching a turn of its own. Two turns would double the
+    # model cost per meeting and could ground two DIFFERENT reports differently; `_summary_v1`
+    # below only reshapes text the gate has already cleared.
+    #: HOW MANY TRANSCRIPT SEGMENTS a meeting needs before a note is worth writing at all (DB-60
+    #: "skip empties"). Below this a summary would describe a meeting the agent barely heard —
+    #: more confident than the transcript earns. A flow param overrides it per deployment;
+    #: `mt.transcript_segment_count`'s own three-way answer (`None`/`0`/`n`) is respected below:
+    #: unreadable is retried, not skipped, and only a REAL count below the floor is a skip.
+    def _summary_min_segments(ctx) -> int:
+        raw = (ctx.flow.param("summary_min_segments") if ctx.flow else None)
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            return 3
+        return n if n >= 0 else 3
+
+    def _summary_path(row_id) -> str:
+        """THE ONE RECIPE for where meeting row `row_id`'s summary.v1 note lives — derivable from
+        the row id ALONE. See the block comment above for why this is not `_note_path`."""
+        return f"meetings/{row_id}/summary.md"
+
+    def _summary_sections(report: str) -> dict:
+        """A freeform report split into the summary.v1 sections it may already carry, BY HEADING
+        — never invented, only found. `## Decisions`, `## Action items` and `## Open questions`
+        (any of `#`/`##`/`###`, case-insensitive, singular or plural); every other line, including
+        everything before the first recognised heading, is the overview. A report with none of
+        these headings is entirely overview, which is the honest answer for freeform text rather
+        than a guess at where a decision might be hiding."""
+        import re
+        heading_re = re.compile(
+            r"^#{1,3}\s*(decisions?|action\s*items?|open\s*questions?)\s*$", re.IGNORECASE)
+        key_of = {"decision": "decisions", "decisions": "decisions",
+                  "action item": "action_items", "action items": "action_items",
+                  "open question": "open_questions", "open questions": "open_questions"}
+        buckets = {"overview": [], "decisions": [], "action_items": [], "open_questions": []}
+        current = "overview"
+        for line in (report or "").splitlines():
+            m = heading_re.match(line.strip())
+            if m:
+                norm = re.sub(r"\s+", " ", m.group(1).strip().lower())
+                current = key_of.get(norm, "overview")
+                continue
+            buckets[current].append(line)
+        return {k: "\n".join(v).strip() for k, v in buckets.items()}
+
+    def _summary_v1(*, row_id, status: str, generated_at: str, report: str = "",
+                    reason: str = "") -> str:
+        """THE SHAPE (DB-60): front-matter `{type, version, meeting_id, status, generated_at
+        [,reason]}` plus a markdown body — `status: complete` carries Overview/Decisions/Action
+        items/Open questions (each explicitly empty rather than omitted, so a reader — or the
+        dashboard's parser — never has to distinguish "we found nothing" from "we forgot to
+        write" a section); `status: skipped` carries `reason` and NO body sections at all, which
+        is the whole difference between "not yet generated" (the path 404s — nothing has run) and
+        "skipped" (the path exists and says why, per the contract this task asks for)."""
+        lines = ["---", "type: meeting-summary", "version: v1", f"meeting_id: {row_id}",
+                 f"status: {status}", f"generated_at: {generated_at}"]
+        if reason:
+            lines.append(f"reason: {_yaml(reason)}")
+        lines += ["---", ""]
+        if status != "complete":
+            lines += [f"_{reason}_", ""]
+            return "\n".join(lines)
+        sec = _summary_sections(report)
+        lines += ["## Overview", "", sec["overview"] or "_(no overview text)_", "",
+                  "## Decisions", "", sec["decisions"] or "_none recorded in this meeting._", "",
+                  "## Action items", "",
+                  sec["action_items"] or "_none recorded in this meeting._", "",
+                  "## Open questions", "",
+                  sec["open_questions"] or "_none recorded in this meeting._", ""]
+        return "\n".join(lines)
+
+    # REACHES THE AGENT DOMAIN (PRD decision 40.7) and MEETINGS — reads the segment count and the
+    # transcript to decide whether there is anything to summarize, and to re-check grounding.
+    @reg.step(needs=("agent", "meetings"))
+    def commit_meeting_summary(ctx: StepCtx):
+        """DB-60 — the Otter-style note, committed to a path the dashboard can resolve from the
+        meeting's ROW ID ALONE: `meetings/<row_id>/summary.md`, in the ORGANISER's own workspace
+        (the desk `email_minutes`/`drop_to_attendees` already address by row id, read back over
+        the same `GET /agent/workspace/file?path=...` door documented in
+        `docs/docs/how-to/post-meeting-report.mdx`).
+
+        ONE SUMMARY PER COMPLETED MEETING, FOR FREE. `emit_completed` emits with source event id
+        `done-{meeting_id}`; `admit()` is `INSERT ... ON CONFLICT (source_event_id) DO NOTHING`
+        (`flows/admission.py`), so a redelivered `meeting.completed` for the same meeting creates
+        no second reaction and this step never runs twice for it. Within one reaction, the write
+        is ALSO a content-compare (`_write_if_changed`), so a retried step is a no-op rewrite, not
+        a second commit.
+
+        SKIP, NEVER A SILENT EMPTY FILE. Three ways a meeting earns a `status: skipped` note
+        instead of a `status: complete` one, each with its OWN reason on the front-matter and NONE
+        of them an exception — a meeting that legitimately has nothing to summarize is not a
+        defect: too few transcript segments (`_summary_min_segments`), an agent turn that produced
+        no report at all, or a report that failed the grounding re-check below. An UNREADABLE
+        transcript is different in kind — a gateway restart, not a quiet meeting — and stays a
+        retryable `StepError`, the same three-way split `mt.transcript_segment_count` documents.
+
+        GROUNDING, CHECKED AGAIN, NOT ASSUMED. `process_meeting`'s own gate already refuses to
+        reach `Done` with an ungrounded reply (see its docstring), so in the registered flow this
+        branch is a belt worn over braces — but this step reads the receipt, not the gate, and a
+        receipt read out of context (a future caller, a replayed prior) must not be trusted to
+        have passed a check it cannot see. `mt.grounded_in` is the same function, called again,
+        against a transcript read fresh.
+
+        Reads: refs.{uid,meeting_id,native} · Prior: process_meeting{report}
+        Effect: one workspace write (or none, on a genuine skip) · Result:
+        {path, status, meeting_id[, reason]}."""
+        import datetime
+        uid = ctx.refs["uid"]
+        pm = ctx.prior.get("process_meeting") or {}
+        report = _readable(pm.get("report") or "").strip()
+        row = mt.meeting_row(uid, ctx.refs.get("meeting_id"), ctx.refs.get("native"))
+        row_id = (row or {}).get("id") if isinstance(row, dict) else None
+        if row_id is None:
+            row_id = ctx.refs.get("meeting_id")
+        if row_id is None:
+            raise StepError(
+                "commit_meeting_summary: this meeting has no row id to address a summary "
+                "against — the dashboard's path is keyed on it and there is nowhere to put one.",
+                retryable=False)
+        now = datetime.datetime.fromtimestamp(
+            ctx.clock_now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        path = _summary_path(row_id)
+
+        def _skip(reason: str):
+            _write_if_changed(uid, path, _summary_v1(
+                row_id=row_id, status="skipped", generated_at=now, reason=reason))
+            return Done({"path": path, "status": "skipped", "reason": reason,
+                        "meeting_id": row_id})
+
+        n = mt.transcript_segment_count(uid, row_id)
+        if n is None:
+            raise StepError(
+                f"commit_meeting_summary: the transcript for meeting {row_id} could not be read "
+                "— cannot tell whether it is empty or merely unreadable, and the two must not "
+                "look the same.", retryable=True)
+        floor = _summary_min_segments(ctx)
+        if n < floor:
+            return _skip("no transcript was captured" if n == 0 else
+                        f"captured {n} segment(s), fewer than the {floor} needed to summarize")
+        if not report:
+            return _skip("the agent turn produced no report to summarize")
+        transcript = mt.transcript_text(uid, row_id)
+        if transcript is None:
+            raise StepError(
+                f"commit_meeting_summary: the transcript for meeting {row_id} could not be read "
+                "on the grounding re-check, so the report cannot be verified against it.",
+                retryable=True)
+        if not mt.grounded_in(report, transcript):
+            return _skip("the report did not ground in the transcript")
+        _write_if_changed(uid, path, _summary_v1(
+            row_id=row_id, status="complete", generated_at=now, report=report))
+        return Done({"path": path, "status": "complete", "meeting_id": row_id})
+
     # ── the live call (PRD decision 42.2) ─────────────────────────────────────
     # The two DESK cards that used to sit beside it are `production_agent`'s now: a desk is agent
     # state, so a card on one has nothing to be in a deployment with no agent domain.
@@ -1892,9 +2056,13 @@ def build(reg: Registry, db) -> None:
     # 3 were authored through the API against this same flow name and `match()` takes the newest
     # number wherever it came from; a code change that does not clear the highest DB version is
     # inert, which is exactly the defect `Registry.shadowing_versions` now warns about.
-    reg.flow(name="post_meeting", version=4, on=COMPLETED,
+    # VERSION 5 — `commit_meeting_summary` ADDED, last (DB-60). It reads process_meeting's already-
+    # grounded receipt and never blocks on the mail/drop side effects ahead of it: those are
+    # idempotent by scratch/content-compare, so a retry of this step alone costs nothing extra if
+    # the mail already went out.
+    reg.flow(name="post_meeting", version=5, on=COMPLETED,
              steps=[s["process_meeting"], s["email_minutes"],
-                    s["email_attendees"], s["drop_to_attendees"]])
+                    s["email_attendees"], s["drop_to_attendees"], s["commit_meeting_summary"]])
     # THE QUEUE FLOW THIS FILE KEEPS (PRD decision 42.2). It is one step and produces no effect:
     # what it produces is a REACTION ROW in a state a person can be told about — pending while a
     # call runs. That row is the queue. Its two siblings, the desk cards, are `production_agent`'s.

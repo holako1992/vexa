@@ -24,3 +24,14 @@ that deletes `production_agent.py` outright is supported: the seam checks `find_
 Shared helpers stay in `production.py`, and `production_agent` reads every collaborator **through
 the module object handed to its `build(reg, db, home=…)`** — never `from .production import …`. One
 `monkeypatch.setattr(production, …)` has to reach both halves.
+
+## DB-60 — the AI note (`commit_meeting_summary`)
+
+`post_meeting`'s LAST step, added at version 5. It writes `meetings/<row_id>/summary.md` in the
+organiser's own workspace — a path derivable from the meeting's ROW ID ALONE, unlike
+`drop_to_attendees`'s `kg/entities/meeting/<date>-<slug>.md`, which only a mail recipient can
+already resolve. No second agent turn: it reshapes `process_meeting`'s already-grounded report
+(re-checking `mt.grounded_in` itself rather than trusting the receipt blindly) and skips — with a
+recorded reason, never a silent empty file — a meeting whose transcript is too thin or whose
+report does not ground. See `docs/docs/how-to/post-meeting-report.mdx` for the wire contract the
+dashboard reads, and `core/flows/tests/test_meeting_summary.py` for the property list.

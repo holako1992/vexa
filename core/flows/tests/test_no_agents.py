@@ -148,6 +148,8 @@ def test_the_rename_carries_the_declaration_with_the_function():
 AGENT_STEPS_CORE = {
     "ack_by_email", "open_person", "drive_person", "open_group", "drive_group",
     "process_meeting", "email_minutes", "email_attendees", "drop_to_attendees",
+    # DB-60: writes the summary.v1 note via `ag.workspace_write` (through `_write_if_changed`).
+    "commit_meeting_summary",
 }
 #: `production_agent.py`'s half — registered only where that OPTIONAL module is in the tree, and
 #: `agent_half` is the same `find_spec` signal `production._register_agent_flows` reads. The two
