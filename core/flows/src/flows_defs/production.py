@@ -1033,7 +1033,21 @@ def build(reg: Registry, db) -> None:
         substitutes {{meeting}}: the URL never carries prompt text, so nobody who can send mail can
         drive somebody else's agent.
 
-        Reads: refs.{uid,organizer,title,meeting_id} · Effect: one notification."""
+        Reads: refs.{uid,organizer,title,meeting_id} · Effect: one notification.
+
+        DB-60b: AN AD HOC MEETING (dashboard "Send Bot", MCP `request_meeting_bot`, or any bot
+        started without a calendar invite) carries no `organizer` at all — meeting-api's
+        `meeting_completed_refs` (`core/meetings/services/meeting-api/src/meeting_api/events.py`)
+        states only `{uid, meeting_id, native, platform, completion_reason}`, because meeting-api's
+        domain holds no invite and cannot invent one. There is nobody to mail: the uid is a platform
+        id, not an address, and this step has never resolved one from the other. SKIPPING here is
+        the same shape as `mail_minutes` being off — a normal outcome, recorded, not an error — and
+        it is load-bearing: this used to be an uncaught `KeyError` on `ctx.refs["organizer"]`,
+        which failed the WHOLE `post_meeting` reaction non-retryably and meant `commit_meeting_
+        summary` (DB-60, the step after `drop_to_attendees`) never ran for a single dashboard-sent
+        meeting."""
+        if not ctx.refs.get("organizer"):
+            return Done({"skipped": "no organizer on this meeting — ad hoc bot, no invite context"})
         if not setting(ctx.refs["uid"], "mail_minutes"):
             return Done({"skipped": "mail_minutes is off for this person"})
         # THE ONE ARTEFACT, off the receipt. It used to be re-read out of the organiser's desk
@@ -1061,7 +1075,8 @@ def build(reg: Registry, db) -> None:
             provenance={"flow": "post_meeting", "step": "email_minutes",
                         "reaction_id": str(getattr(ctx, "reaction_id", "") or ""),
                         "minted_by": str(ctx.refs["uid"])})
-        mid = notify(ctx.refs["organizer"], f"Minutes: {ctx.refs['title']}", body, link=link)
+        mid = notify(ctx.refs["organizer"], f"Minutes: {ctx.refs.get('title') or 'your meeting'}",
+                    body, link=link)
         mx.register_thread(db, mid, ctx.refs["uid"], f"meet-{ctx.refs['meeting_id']}")
         return Done({"message_id": mid, "link": link}, provider_ref=mid)
 
@@ -1598,7 +1613,17 @@ def build(reg: Registry, db) -> None:
         write above is safe to repeat.
 
         Prior: process_meeting{report}, email_attendees{drops}, email_minutes{link}
-        Effect: N desk writes · Result: {dropped, to, failed, entity}."""
+        Effect: N desk writes · Result: {dropped, to, failed, entity}.
+
+        DB-60b: AN AD HOC MEETING carries no `organizer` (see `email_minutes`'s own note — the
+        same absent field, the same producer). There is no invite room to build here either, but
+        there IS one desk: the bot's own owner, `refs.uid`, already a resolved platform id — no
+        email to look one up from and none needed. That desk is addressed DIRECTLY, by uid, never
+        by re-deriving it through `ensure_platform_user(email)`, which is the branch that used to
+        mint an account for the literal string "the organiser" and crash the whole step non-
+        retryably (an unhandled exception from `mint_scaffold`, thrown building `organiser_link`
+        before the per-person try/except below even starts) — failing `post_meeting` outright and
+        keeping `commit_meeting_summary` from ever running."""
         pm = ctx.prior.get("process_meeting") or {}
         report = _readable(pm.get("report") or "").strip()
         if not report:
@@ -1606,65 +1631,81 @@ def build(reg: Registry, db) -> None:
                          "skipped": "there is no report to drop"})
         uid = ctx.refs["uid"]
         title = ctx.refs.get("title") or "your meeting"
-        organizer = ctx.refs.get("organizer") or "the organiser"
+        organizer = ctx.refs.get("organizer") or ""
         day = _meeting_stamp(ctx, uid)[:10]          # the MEETING's day, in the organiser's zone
         date_prose = _meeting_date(ctx, uid)
         entity_path = _note_path(ctx, uid, title)      # the one recipe — see `_note_path`
         filename = entity_path.rsplit("/", 1)[-1]
         index_path = "kg/entities/meeting/index.md"
         att = ctx.prior.get("email_attendees") or {}
-        roster = [str(a).strip().lower() for a in (ctx.refs.get("participants") or [])
-                  if str(a).strip()]
-        if organizer.lower() not in roster:
-            roster = [organizer.lower()] + roster
-        # THE ORGANISER IS ONE OF THE ROOM. Their link is the one `email_minutes` already built —
-        # no share token, because the meeting is theirs — and when that step was skipped (their
-        # `mail_minutes` is off) the same link is composed here rather than dropped: a preference
-        # about MAIL is not a preference about what lands on their own desk.
         mid = att.get("meeting_id") or ctx.refs.get("meeting_id")
-        organiser_link = (ctx.prior.get("email_minutes") or {}).get("link") \
-            or mint_scaffold("post-meeting", organizer, opening="minutes-review", meeting_id=mid,
-                             refs=_scaffold_refs(ctx, uid),
-                             provenance={"flow": "post_meeting", "step": "drop_to_attendees",
-                                         "reaction_id": str(getattr(ctx, "reaction_id", "") or ""),
-                                         "minted_by": str(uid)})
-        # THE ROOM IS THE INVITE, NOT THE MAILING LIST. This used to be
-        # `[organiser] + att["drops"]`, and `drops` is empty whenever the attendee MAIL was
-        # switched off (`attendee_followup`) or every attendee is outside the organiser's domain
-        # (PRD §16.2's allow-list, which governs mail and nothing else). A preference about mail
-        # was therefore silently a preference about whose desk the meeting reached — while
-        # `room_order` had already MOUNTED those same desks to write the report. Decision 20 says
-        # the drop goes into every attendee's workspace, creating it if absent; decision 22a says
-        # the organiser's always does. `drops` now supplies one thing only: that person's own
-        # share link, where they were mailed one.
-        links = {str((d or {}).get("to") or "").strip().lower(): str((d or {}).get("link") or "")
-                 for d in (att.get("drops") or [])}
-        room = [{"to": organizer, "link": organiser_link}]
-        room += [{"to": a, "link": links.get(a, "")}
-                 for a in roster if a != organizer.lower()]
+
+        if not organizer:
+            # NO INVITE, NO ROOM — only the owner's own desk, addressed by the uid we already
+            # have. No mail went out (`email_minutes`/`email_attendees` both skipped for the same
+            # missing field), so there is no link to reuse and none to mint: a scaffold names a
+            # RECIPIENT to open the link as, and the only identity here is a uid, not an address.
+            organizer_label = "you"
+            roster: list[str] = []
+            room = [{"to": None, "uid": uid, "link": ""}]
+        else:
+            organizer_label = organizer
+            roster = [str(a).strip().lower() for a in (ctx.refs.get("participants") or [])
+                      if str(a).strip()]
+            if organizer.lower() not in roster:
+                roster = [organizer.lower()] + roster
+            # THE ORGANISER IS ONE OF THE ROOM. Their link is the one `email_minutes` already
+            # built — no share token, because the meeting is theirs — and when that step was
+            # skipped (their `mail_minutes` is off) the same link is composed here rather than
+            # dropped: a preference about MAIL is not a preference about what lands on their own
+            # desk.
+            organiser_link = (ctx.prior.get("email_minutes") or {}).get("link") \
+                or mint_scaffold("post-meeting", organizer, opening="minutes-review",
+                                 meeting_id=mid, refs=_scaffold_refs(ctx, uid),
+                                 provenance={"flow": "post_meeting", "step": "drop_to_attendees",
+                                             "reaction_id": str(getattr(ctx, "reaction_id", "") or ""),
+                                             "minted_by": str(uid)})
+            # THE ROOM IS THE INVITE, NOT THE MAILING LIST. This used to be
+            # `[organiser] + att["drops"]`, and `drops` is empty whenever the attendee MAIL was
+            # switched off (`attendee_followup`) or every attendee is outside the organiser's
+            # domain (PRD §16.2's allow-list, which governs mail and nothing else). A preference
+            # about mail was therefore silently a preference about whose desk the meeting reached
+            # — while `room_order` had already MOUNTED those same desks to write the report.
+            # Decision 20 says the drop goes into every attendee's workspace, creating it if
+            # absent; decision 22a says the organiser's always does. `drops` now supplies one
+            # thing only: that person's own share link, where they were mailed one.
+            links = {str((d or {}).get("to") or "").strip().lower(): str((d or {}).get("link") or "")
+                     for d in (att.get("drops") or [])}
+            room = [{"to": organizer, "link": organiser_link}]
+            room += [{"to": a, "link": links.get(a, "")}
+                     for a in roster if a != organizer.lower()]
         entity_id = filename[:-3] if filename.endswith(".md") else filename
         body = _drop_entity(title=title, day=day, entity_id=entity_id, date_prose=date_prose,
-                            organizer=organizer, participants=roster, report=report, link="")
+                            organizer=organizer_label, participants=roster, report=report, link="")
         done = list(ctx.scratch.setdefault("dropped", []))
         failed = list(ctx.scratch.setdefault("drop_failed", []))
         for d in room:
             a = str((d or {}).get("to") or "").strip()
-            if not a or a in done:
+            direct_uid = (d or {}).get("uid")
+            # THE KEY IDENTIFIES THE PERSON ACROSS RETRIES — an address for the invite room, or
+            # the uid itself when there is no address to have (the ad hoc, no-organizer branch).
+            key = str(direct_uid or a)
+            if not key or key in done:
                 continue
             try:
-                their_uid = ensure_platform_user(a)
+                their_uid = str(direct_uid) if direct_uid else ensure_platform_user(a)
                 ag.workspace_init(their_uid)
                 _write_if_changed(their_uid, entity_path, _drop_entity(
                     title=title, day=day, entity_id=entity_id, date_prose=date_prose,
-                    organizer=organizer, participants=roster, report=report,
+                    organizer=organizer_label, participants=roster, report=report,
                     link=d.get("link") or ""))
                 _write_if_changed(their_uid, index_path, _index_entry(
                     ws_file(their_uid, index_path), title, filename, day))
-                done.append(a)
-                failed = [f for f in failed if not f.startswith(a + ":")]
+                done.append(key)
+                failed = [f for f in failed if not f.startswith(key + ":")]
             except Exception as e:  # noqa: BLE001 — one person never costs the rest theirs
-                failed = [f for f in failed if not f.startswith(a + ":")]
-                failed.append(f"{a}: {type(e).__name__}: {e}"[:240])
+                failed = [f for f in failed if not f.startswith(key + ":")]
+                failed.append(f"{key}: {type(e).__name__}: {e}"[:240])
             ctx.scratch["dropped"] = done
             ctx.scratch["drop_failed"] = failed
             ctx.checkpoint()      # same shape as the fan-out above: N round trips, one lease

@@ -131,3 +131,40 @@ meeting → one note.
 **Regenerate** (the dashboard's own button) is the display half of DB-60 and lives with the
 dashboard client, not here — it re-dispatches and overwrites this same path.
 
+### Which meetings get one (DB-60b)
+
+A summary is written for **every completed meeting**, calendar-invited or not — including a bot
+the dashboard's own "Send Bot" button dispatched, or one started over MCP's
+`request_meeting_bot`, neither of which ever came from a calendar invite.
+
+Two producers can tell flows a meeting completed:
+
+- **`invite_intake`** (flows' own flow, calendar-only) emits `meeting.completed` with the full
+  invite context — organiser, attendees, the meeting's title.
+- **meeting-api** (`core/meetings/services/meeting-api/src/meeting_api/events.py`) emits the same
+  fact for **every** bot it dispatches, invite or not. Its refs carry only what meeting-api's own
+  domain knows: `{uid, meeting_id, native, platform, completion_reason}` — no organiser, no title,
+  no attendee list, because meeting-api holds no invite to state one from.
+
+`commit_meeting_summary` (the step that writes this note) reads only `refs.{uid,meeting_id,
+native}` and the report `process_meeting` already produced — never the invite-only fields — so an
+ad hoc meeting gets exactly the same `summary.v1` note, at exactly the same path, as a calendar
+one. The two mail/desk steps ahead of it in `post_meeting` (`email_minutes`, `email_attendees`,
+`drop_to_attendees`) degrade instead of failing when there is no organiser to address: no mail
+goes out (there is no address to send it to — an ad hoc meeting mails **nobody**, before or after
+this note existed), and the report still lands on the bot owner's own desk, addressed by `uid`
+directly rather than by an email that does not exist. None of that blocks the summary — it is
+written whether or not any mail went out.
+
+**For this second producer to reach flows at all, the deployment must set one thing:** in
+`deploy/compose/docker-compose.yml`, meeting-api's `VEXA_FLOWS_API_URL` defaults to
+`http://flows-api:8200` — flows-api's own service name and port on the compose network — so a
+stock `docker compose up` of the full stack (meeting-api + flows-api + flows-worker) needs no
+`.env` change at all. Set `VEXA_FLOWS_API_URL=` (empty) in `.env` to run a deployment that
+genuinely carries no flows domain; that publish is best-effort, bounded at 2 seconds and swallowed
+on any failure (`events.py`'s `TIMEOUT_S`), so a stack with no `flows-api` container behaves
+exactly as it always has — one bounded, silent timeout per meeting lifecycle transition, never a
+crash and never a slower bot. **Recreate the `meeting-api` service** (`docker compose up -d
+meeting-api`, or the full stack) for a changed `VEXA_FLOWS_API_URL` to take effect — the value is
+read once, at process start.
+
