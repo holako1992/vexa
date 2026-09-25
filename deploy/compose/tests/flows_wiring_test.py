@@ -129,6 +129,17 @@ def test_the_link_port_is_declared_and_may_be_empty():
         assert "VEXA_UI_URL=${VEXA_UI_URL:-}" in _service(lane), lane
 
 
+def test_the_dashboard_link_is_wired_on_the_flows_step_runner():
+    """`email_owner_ready` (`post_meeting` version 6) reads `VEXA_FLOWS_DASHBOARD_URL` at STEP
+    TIME, inside `flows-worker` — the lane that ticks reactions and runs step bodies. `flows-api`
+    only serves HTTP and `flows-mailbox` only admits facts; neither ever executes a step, so
+    neither needs the key. One variable, the SAME one `dashboard-next` itself reads
+    (`DASHBOARD_NEXT_URL`), so one `.env` line sets the dashboard's own origin and the link this
+    mail composes."""
+    block = _service("flows-worker")
+    assert "VEXA_FLOWS_DASHBOARD_URL=${DASHBOARD_NEXT_URL:-}" in block
+
+
 def test_the_host_port_is_overridable_and_bound_to_loopback():
     """Published for debugging like every other service here, on 127.0.0.1 so it is not on the
     box's public interfaces, and overridable so two stacks can share a host."""

@@ -104,10 +104,11 @@ DECLARED: dict[str, tuple[str, object, str]] = {
                     "and any step that would compose one refuses, naming this key."),
     # THE SAME SHAPE, for the dashboard. `email_owner_ready` (post_meeting v6) mails an ad hoc
     # meeting's owner a link at `<VEXA_FLOWS_DASHBOARD_URL>/meetings/<row-id>`; unset, that mail
-    # still goes out with no link. NOT YET WIRED ON A DEPLOY SURFACE: the compose service that
-    # would carry it (`dashboard-next`'s own `DASHBOARD_NEXT_URL`) is outside this change's
-    # footprint, so `config.v1.json` declares this key with `targets: []` rather than claiming a
-    # surface it is not actually on.
+    # still goes out with no link. Compose sets it from `DASHBOARD_NEXT_URL` on `flows-worker` —
+    # the lane that actually ticks reactions and runs this step, not `flows-api` or
+    # `flows-mailbox`. `config.v1.json` keeps `targets: []`: `gate:config-contract`'s single flows
+    # declaration binds to the `flows-api` compose lane, which never reads this key, so the real
+    # wiring is pinned by `deploy/compose/tests/flows_wiring_test.py` instead.
     "VEXA_FLOWS_DASHBOARD_URL": ("capability", None,
                                  "the dashboard's own origin. UNSET MEANS NO DASHBOARD LINK: the "
                                  "meeting-ready mail still sends, with no link."),

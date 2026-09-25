@@ -740,6 +740,10 @@ services:
       # adapter, the no-agents product has none). Unset, nothing is mailed with a link and any step
       # that would compose one refuses naming this key — it no longer decides whether flows BOOTS.
       - VEXA_UI_URL=${VEXA_UI_URL:-}
+      # The dashboard's own link port, read only here: this is the lane that ticks reactions and
+      # runs the mail steps, not flows-api or flows-mailbox. The same origin dashboard-next itself
+      # reads, so one .env line sets both.
+      - VEXA_FLOWS_DASHBOARD_URL=${DASHBOARD_NEXT_URL:-}
       # ── the mailbox (read by the flows-mailbox lane above; one image, one declaration) ───────
       - VEXA_MAIL_INBOX=${VEXA_MAIL_INBOX:-imap}
       - VEXA_MAIL_ADDR=${VEXA_MAIL_ADDR:-}

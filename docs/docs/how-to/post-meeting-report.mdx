@@ -189,10 +189,10 @@ mail still goes out, with no excerpt: the transcript itself is ready even when t
 of it to summarize, and the mail never carries text the grounding gate did not clear.
 
 **The link** is `<VEXA_FLOWS_DASHBOARD_URL>/meetings/<row-id>` — a deployment-configured value,
-read the way `VEXA_UI_URL` already is for the terminal. Unset, the mail sends with no link rather
-than a guessed one; `core/flows/src/config.v1.json` declares the key with an empty `targets` list
-because no deploy surface in this tree carries it yet (a follow-up: `dashboard-next`'s own
-`DASHBOARD_NEXT_URL` is the value to wire it from).
+read the way `VEXA_UI_URL` already is for the terminal. Compose sets it from `DASHBOARD_NEXT_URL`
+on the `flows-worker` service, the SAME origin `dashboard-next` itself reads — one `.env` line
+(`DASHBOARD_NEXT_URL=https://your-dashboard.example`) sets both. Unset, the mail still sends, with
+no link rather than a guessed one.
 
 **Idempotent** on the same `mail_outbox_sent` table a conversation's own outbox already dedupes
 against — one row per (uid, meeting) — on top of the admission-level dedup every
