@@ -1,0 +1,146 @@
+---
+title: "Subscribe, manage billing, and receive plan changes"
+description: "Stripe Checkout for upgrades, the Customer Portal for card/cancel/invoices, and the webhook that keeps a user's plan in sync (DB-73)."
+---
+
+<Note>
+Self-host only if you intend to **sell** subscriptions — a self-host that gives every account the
+Free plan for free needs none of this. The endpoints below answer a typed **503** naming exactly
+what's missing until you configure Stripe (see [Deploy this yourself](#deploy-this-yourself)).
+</Note>
+
+Vexa's plan catalog (Free / Pro / Team — meetings/month, minutes/meeting, concurrent bots, recording
+retention, AI summaries) lives in one file:
+`core/identity/services/admin-api/src/admin_api/app/billing/catalog.py`. A user's subscription state
+— tier, status, renewal — lives on their own account row and is resolved into limits + usage by
+`GET /user/entitlements`. This page covers the three endpoints that keep that state true: **Checkout**
+(buy), **Portal** (manage), and the **webhook** (the only thing that ever writes it).
+
+**Don't have a key yet?** Hosted: sign in at [vexa.ai/signin](https://vexa.ai/signin) with a Google
+account and copy your key from [your account page](https://vexa.ai/account) — free credit, no card
+required. Self-hosted: `make all` prints a key when the stack comes up.
+
+## Start a subscription
+
+```bash
+curl -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"plan": "pro", "interval": "month"}' \
+  "$API_BASE/billing/checkout"
+```
+
+`plan` is `pro` or `team` (never `free` — there is nothing to buy to get it); `interval` is `month`
+or `year`. The response is `{"url": "https://checkout.stripe.com/..."}` — redirect the person there.
+The FIRST checkout for an account creates its Stripe customer and stores the id; every later
+checkout or portal call reuses it. A `(plan, interval)` this deployment does not sell (no matching
+`STRIPE_PRICE_*` configured) answers 503 naming the missing key, never a guessed price.
+
+## Manage an existing subscription
+
+```bash
+curl -X POST -H "X-API-Key: $API_KEY" "$API_BASE/billing/portal"
+```
+
+Returns `{"url": "https://billing.stripe.com/..."}` — Stripe's own hosted portal for card changes,
+cancellation, and invoice history. Card data never touches Vexa's servers. A caller with no Stripe
+customer yet (never checked out) gets a **409** — checkout first.
+
+## Read the resolved plan
+
+```bash
+curl -H "X-API-Key: $API_KEY" "$API_BASE/user/entitlements"
+```
+
+Returns the resolved plan, its limits, the current billing period, and usage so far this period —
+`plan_id`, `status`, `limits`, and `usage`. This is what `POST /bots`' quota enforcement reads; a
+`past_due` subscription keeps its paid tier for a 7-day
+grace window before falling back to Free, and a `canceled` one keeps its paid tier until
+`period_end` (Stripe's own "still paid for what you bought" shape) and resolves to Free only after.
+
+## How the webhook keeps this true
+
+`POST /billing/webhook` is the **only** writer of a user's Stripe fields. It never trusts a
+delivered event's own body for what to write: on `checkout.session.completed`,
+`customer.subscription.created|updated|deleted`, and `invoice.payment_failed|paid`, it resolves
+which Stripe **subscription** the event concerns and re-reads that subscription's **current**
+state from the Stripe API before writing anything. That makes a redelivery a no-op and makes two
+events arriving **out of order** converge on the same answer regardless of which is processed
+last — the alternative (trusting each event's own snapshot) can let a stale "updated" event
+resurrect a subscription Stripe has already canceled.
+
+Authentication is the `Stripe-Signature` header alone (HMAC-SHA256 over the timestamped raw body,
+constant-time compared, a 300-second tolerance) — Stripe cannot present an API key, so this route
+carries none of the usual `X-API-Key` scoping. **Where this route is reachable from the public
+internet is a per-deployment decision this page does not make for you** — see
+[Deploy this yourself](#deploy-this-yourself).
+
+A price id that doesn't match any `STRIPE_PRICE_*` you've configured is logged and ignored —
+`users.data` is left exactly as it was, never guessed at.
+
+## The plan → price mapping
+
+One file decides what a price id means: `billing/catalog.py`'s `STRIPE_PRICE_ENV` maps
+`(plan, interval)` to the env var carrying that price's Stripe id. Nothing in this codebase
+hardcodes a `price_...` literal — every plan a deployment sells is one env var away.
+
+| Plan / interval | Env var |
+|---|---|
+| Pro / monthly | `STRIPE_PRICE_PRO_MONTHLY` |
+| Pro / yearly | `STRIPE_PRICE_PRO_YEARLY` |
+| Team / monthly | `STRIPE_PRICE_TEAM_MONTHLY` |
+| Team / yearly | `STRIPE_PRICE_TEAM_YEARLY` |
+
+Leave one unset and that combination simply isn't for sale — `POST /billing/checkout` for it
+answers 503 naming the env var, rather than falling back to a different plan or a wrong price.
+
+## Deploy this yourself
+
+### 1. In the Stripe dashboard
+
+1. **Products & prices** — create one Product per paid plan (Pro, Team), each with a **monthly**
+   and a **yearly recurring Price**. Copy each Price id (`price_...`) into the matching
+   `STRIPE_PRICE_*` env var above.
+2. **Customer Portal** ([dashboard.stripe.com/settings/billing/portal](https://dashboard.stripe.com/settings/billing/portal))
+   — enable it and turn on the features you want self-serve (cancel, update payment method,
+   view invoices). Vexa creates the session; Stripe renders the page.
+3. **Webhook endpoint** ([dashboard.stripe.com/webhooks](https://dashboard.stripe.com/webhooks)) —
+   add an endpoint pointing at your deployment's `POST /billing/webhook` and select exactly these
+   events: `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`,
+   `invoice.paid`. Copy the endpoint's **Signing secret** (`whsec_...`) into
+   `STRIPE_WEBHOOK_SECRET`.
+4. Copy your account's **Secret key** (`sk_...`, Developers → API keys) into `STRIPE_SECRET_KEY`.
+
+<Warning>
+`POST /billing/webhook` needs to be reachable from Stripe's servers. admin-api itself binds
+`127.0.0.1` only in the standard Docker Compose deploy (see [Deployment](/deployment)) — it is
+**not** fronted by the gateway for this one route, because every gateway route requires an
+`X-API-Key` and Stripe cannot present one. Exposing this endpoint (a dedicated reverse-proxy path
+straight to admin-api, or another ingress shape) is a decision to make for your own deployment;
+this page intentionally does not prescribe one. Until it's wired up, checkout and the portal work
+end to end but a completed purchase will not update the buyer's plan — test with the
+[Stripe CLI](https://stripe.com/docs/stripe-cli) (`stripe listen --forward-to
+localhost:18057/billing/webhook`) against a local admin-api port in the meantime.
+</Warning>
+
+### 2. On the deployment
+
+Set on **admin-api** (`deploy/compose/.env` for Docker Compose):
+
+```bash
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_CHECKOUT_SUCCESS_URL=https://your-host.example.com/settings/billing?checkout=success
+STRIPE_CHECKOUT_CANCEL_URL=https://your-host.example.com/settings/billing?checkout=cancelled
+STRIPE_PORTAL_RETURN_URL=https://your-host.example.com/settings/billing
+STRIPE_PRICE_PRO_MONTHLY=price_...
+STRIPE_PRICE_PRO_YEARLY=price_...
+STRIPE_PRICE_TEAM_MONTHLY=price_...
+STRIPE_PRICE_TEAM_YEARLY=price_...
+```
+
+Any of `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / the three URLs left unset takes down all
+three `/billing/*` routes with a 503 naming what's missing — the rest of the deployment is
+unaffected. An unset `STRIPE_PRICE_*` only takes down checkout for that one plan/interval. See
+also `BILLING_UPGRADE_URL` on the same service — the page a `quota_exceeded` refusal (from
+`POST /bots` when a Free user is over their monthly meeting) points them at, typically this same
+billing page.

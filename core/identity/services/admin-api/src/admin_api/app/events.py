@@ -34,6 +34,10 @@ import os
 from typing import Optional
 
 EVENT_ONBOARDING_COMPLETED = "onboarding.completed"
+#: DB-73 — the Stripe webhook hands this to flows beside `onboarding.completed`, same publish
+#: edge, same best-effort/swallowed contract (see `publish()` below). Identity tells; it does not
+#: ask, here as everywhere else in this module.
+EVENT_SUBSCRIPTION_CHANGED = "subscription.changed"
 
 log = logging.getLogger("admin_api.events")
 
@@ -164,3 +168,17 @@ def onboarding_refs(subject, org, seat) -> dict:
     rather than left for a consumer to infer, because a consumer that infers them is a second place
     the answer lives."""
     return {"subject": str(subject), "org": str(org or ""), "seat": str(seat or "member")}
+
+
+def subscription_changed_source_id(user_id, stripe_event_id) -> str:
+    """The fact's id, keyed to the Stripe delivery that produced it. flows admits on
+    `(source_event_id, flow)`, so a Stripe redelivery (the whole point of DB-73's webhook design,
+    see `billing/stripe_webhook.py`) is a no-op there too — the SAME event id always produces the
+    SAME source_event_id, however many times Stripe resends it."""
+    return f"subscription-{user_id}-{stripe_event_id}"
+
+
+def subscription_changed_refs(subject, tier, status) -> dict:
+    """`{subject, tier, status}` — the resolved plan a billing consumer (dunning, seat counting)
+    needs, stated here rather than left for flows to re-derive from a Stripe object it never sees."""
+    return {"subject": str(subject), "tier": str(tier or ""), "status": str(status or "")}

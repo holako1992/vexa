@@ -18,6 +18,8 @@ exercises:
   is refused (422) — never silently dropped (#922).
 """
 import hmac
+import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -31,14 +33,26 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import config_preflight
 from ..schema.models import APIToken, PlatformSetting, User
 from ..token_scope import VALID_SCOPES, generate_prefixed_token
 from .db import get_db
 from . import events as events_mod
 from . import person_settings as person_settings_mod
+from .billing import catalog as billing_catalog
 from .billing.catalog import effective_concurrent_cap
 from .billing.entitlements import resolve_entitlements, resolve_plan
 from .billing.meetings_usage import MeetingsUsagePort
+from .billing.stripe_gateway import StripeClient, StripeSignatureError, verify_signature
+from .billing.stripe_webhook import (
+    HANDLED_EVENT_TYPES,
+    apply_subscription_patch,
+    client_reference_id_for_event,
+    customer_id_for_event,
+    subscription_id_for_event,
+)
+
+log = logging.getLogger("admin_api.billing")
 
 ADMIN_KEY_HEADER = APIKeyHeader(name="X-Admin-API-Key", auto_error=False)
 USER_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -83,6 +97,31 @@ def _billing_upgrade_url() -> Optional[str]:
     sold) names no such page — `null`, never a hardcoded vexa.ai URL a self-host response would
     otherwise leak."""
     return os.getenv("BILLING_UPGRADE_URL") or None
+
+
+def _stripe_client() -> StripeClient:
+    """The Stripe REST client, built fresh per request from the live env (no boot-time snapshot —
+    same rule `config_preflight` uses). Callers check `capability_state("stripe_billing")` FIRST
+    (see the three `/billing/*` routes) so this is only ever built when `STRIPE_SECRET_KEY` is
+    known to be set."""
+    return StripeClient(secret_key=os.environ.get("STRIPE_SECRET_KEY", ""))
+
+
+def _require_stripe_billing() -> None:
+    """Fail loud with a typed, actionable 503 — never a 500 — when DB-73's config is incomplete.
+    Every one of checkout/portal/webhook calls this FIRST, so an unconfigured deployment's
+    `/billing/*` surface is uniformly unavailable and names exactly what an operator must set,
+    while the rest of admin-api is unaffected (config.v1 capability `stripe_billing`)."""
+    state = config_preflight.capability_state("stripe_billing")
+    if state != config_preflight.CONFIGURED:
+        missing = config_preflight.missing_capability_keys("stripe_billing")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Stripe billing is not configured on this deployment"
+                + (f" — missing: {', '.join(missing)}" if missing else f" ({state})")
+            ),
+        )
 
 
 async def verify_admin_token(admin_api_key: str = Security(ADMIN_KEY_HEADER)):
@@ -229,6 +268,32 @@ class WebhookUpdate(BaseModel):
     webhook_url: str
     webhook_secret: Optional[str] = None
     webhook_events: Optional[Dict[str, bool]] = None
+
+
+# ── billing: Stripe checkout/portal request/response shapes (DB-73) ──────────────────────────────
+class CheckoutRequest(BaseModel):
+    """`plan`/`interval` name a catalog price via `billing.catalog.price_id_for` — never a raw
+    Stripe price id from the client (the id lives only in this service's own env, per plan)."""
+    plan: str
+    interval: str = "month"
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def validate_choice(self):
+        if self.plan not in ("pro", "team"):
+            raise ValueError(f"plan must be one of ('pro', 'team'); the free plan needs no checkout, got {self.plan!r}")
+        if self.interval not in billing_catalog.PLAN_INTERVALS:
+            raise ValueError(f"interval must be one of {billing_catalog.PLAN_INTERVALS}, got {self.interval!r}")
+        return self
+
+
+class CheckoutResponse(BaseModel):
+    url: str
+
+
+class PortalResponse(BaseModel):
+    url: str
 
 
 class CalendarUpdate(BaseModel):
@@ -918,6 +983,156 @@ def create_app() -> FastAPI:
                 "minutes_used": resolved.usage.minutes_used,
             },
         }
+
+    # --- user tier: Stripe checkout (DB-73). Creates the Stripe customer on first use (stored on
+    #     the user row so a second checkout, or the portal, reuses it) and a Checkout Session in
+    #     mode=subscription for the requested catalog plan/interval. `client_reference_id` carries
+    #     OUR user id so the webhook can resolve `checkout.session.completed` back to a user with
+    #     no second lookup table. Same auth tier as /user/webhook et al. (bot,tx).
+    @app.post("/billing/checkout", response_model=CheckoutResponse)
+    async def create_billing_checkout(body: CheckoutRequest,
+                                      user: User = Depends(get_current_user_for_update),
+                                      db: AsyncSession = Depends(get_db)):
+        _require_stripe_billing()
+        price_id = billing_catalog.price_id_for(body.plan, body.interval)
+        if not price_id:
+            env_key = billing_catalog.STRIPE_PRICE_ENV.get((body.plan, body.interval))
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"{body.plan}/{body.interval} is not on sale on this deployment"
+                       + (f" — {env_key} is not set" if env_key else ""),
+            )
+        success_url = os.environ.get("STRIPE_CHECKOUT_SUCCESS_URL", "")
+        cancel_url = os.environ.get("STRIPE_CHECKOUT_CANCEL_URL", "")
+        client = _stripe_client()
+        data_blob = user.data if isinstance(user.data, dict) else {}
+        customer_id = data_blob.get("stripe_customer_id")
+        if not customer_id:
+            customer = await client.create_customer(
+                email=user.email, metadata={"vexa_user_id": str(user.id)},
+            )
+            customer_id = customer["id"]
+            user.data = {**data_blob, "stripe_customer_id": customer_id}
+            await db.commit()
+            await db.refresh(user)
+        session = await client.create_checkout_session(
+            customer_id=customer_id, price_id=price_id,
+            success_url=success_url, cancel_url=cancel_url,
+            client_reference_id=str(user.id),
+            metadata={"vexa_user_id": str(user.id), "plan": body.plan, "interval": body.interval},
+        )
+        return CheckoutResponse(url=session["url"])
+
+    # --- user tier: Stripe Customer Portal (DB-73) — card changes, cancellation, invoices. Stripe
+    #     hosts the whole surface; this route only mints the session. 409 when the caller has no
+    #     Stripe customer yet (nothing to manage before a first checkout).
+    @app.post("/billing/portal", response_model=PortalResponse)
+    async def create_billing_portal(user: User = Depends(get_current_user),
+                                    db: AsyncSession = Depends(get_db)):
+        _require_stripe_billing()
+        data_blob = user.data if isinstance(user.data, dict) else {}
+        customer_id = data_blob.get("stripe_customer_id")
+        if not customer_id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="No Stripe customer on file yet — checkout (POST /billing/checkout) first",
+            )
+        return_url = os.environ.get("STRIPE_PORTAL_RETURN_URL", "")
+        client = _stripe_client()
+        session = await client.create_portal_session(customer_id=customer_id, return_url=return_url)
+        return PortalResponse(url=session["url"])
+
+    # --- Stripe webhook (DB-73) — authenticated ONLY by the Stripe-Signature header (HMAC-SHA256,
+    #     constant-time compare, 300s timestamp tolerance; see billing/stripe_gateway.verify_signature).
+    #     NOT a user-tier or admin-tier route: Stripe cannot present an X-API-Key. It is deliberately
+    #     absent from routes.v1.json/the gateway — see the DB-73 report for the ingress options this
+    #     needs a coordinator decision on (the gateway's ROUTE RULE has no precedent for a public,
+    #     unauthenticated, signature-gated inbound route; every existing gateway route requires
+    #     x-api-key, including the "unscoped" ones). This handler exists and is fully tested against
+    #     admin-api directly so the ingress decision is the ONLY thing blocking it from receiving
+    #     real Stripe traffic.
+    #
+    #     RE-READ DESIGN (not an event-id ledger) — see billing/stripe_webhook.py's module docstring
+    #     for why: every subscription-affecting event re-fetches the subscription's CURRENT state
+    #     from the Stripe API and writes THAT, which makes redelivery a no-op and reordering
+    #     converge on the same answer regardless of which event is processed last.
+    @app.post("/billing/webhook", include_in_schema=False)
+    async def stripe_billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+        _require_stripe_billing()
+        raw_body = await request.body()
+        try:
+            verify_signature(
+                raw_body, request.headers.get("stripe-signature"),
+                os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
+            )
+        except StripeSignatureError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                detail=f"invalid Stripe-Signature: {e.reason}") from e
+        try:
+            event = json.loads(raw_body)
+        except ValueError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="invalid JSON body") from e
+
+        event_type = event.get("type") or ""
+        event_object = ((event.get("data") or {}).get("object")) or {}
+        if event_type not in HANDLED_EVENT_TYPES:
+            return {"received": True, "handled": False, "reason": "event type not handled"}
+
+        subscription_id = subscription_id_for_event(event_type, event_object)
+        if not subscription_id:
+            return {"received": True, "handled": False, "reason": "event carries no subscription"}
+
+        client = _stripe_client()
+        subscription = await client.get_subscription(subscription_id)
+        patch = apply_subscription_patch(subscription)
+        if patch is None:
+            # Logged inside apply_subscription_patch — an unrecognized price is ignored, never
+            # guessed (AGENTS.md: never invent a plan outside billing/catalog.py).
+            return {"received": True, "handled": False, "reason": "unrecognized price"}
+
+        customer_id = subscription.get("customer") or customer_id_for_event(event_object)
+        ref_user_id = client_reference_id_for_event(event_type, event_object)
+        target_user: Optional[User] = None
+        if ref_user_id:
+            try:
+                target_user = (await db.execute(
+                    select(User).where(User.id == int(ref_user_id)).with_for_update()
+                )).scalar_one_or_none()
+            except (TypeError, ValueError):
+                target_user = None
+        if target_user is None and customer_id:
+            target_user = (await db.execute(
+                select(User).where(User.data["stripe_customer_id"].astext == customer_id)
+                .with_for_update()
+            )).scalars().first()
+        if target_user is None:
+            log.warning(
+                "billing.webhook: %s (subscription=%s, customer=%s) names no known user — "
+                "ignoring (200, so Stripe does not retry a delivery we will never be able to place)",
+                event_type, subscription_id, customer_id,
+            )
+            return {"received": True, "handled": False, "reason": "no matching user"}
+
+        data_blob = target_user.data if isinstance(target_user.data, dict) else {}
+        merged = {**data_blob, **patch, "updated_by_webhook": int(time.time())}
+        if customer_id and not data_blob.get("stripe_customer_id"):
+            merged["stripe_customer_id"] = customer_id
+        target_user.data = merged
+        await db.commit()
+
+        # FIRE-AND-FORGET, same contract as onboarding.completed (app/events.py module docstring):
+        # a deployment with no flows domain still updates the subscriber's plan.
+        try:
+            await events_mod.publish(
+                events_mod.EVENT_SUBSCRIPTION_CHANGED,
+                events_mod.subscription_changed_source_id(target_user.id, event.get("id") or ""),
+                events_mod.subscription_changed_refs(
+                    target_user.id, patch.get("subscription_tier"), patch.get("subscription_status"),
+                ),
+            )
+        except Exception:  # noqa: BLE001 — a publish edge is not a dependency
+            pass
+        return {"received": True, "handled": True}
 
     # --- internal tier: the gateway's authz oracle (FAIL-CLOSED) ---
     @app.post("/internal/validate", include_in_schema=False)

@@ -123,14 +123,14 @@
   {
    "key": "VEXA_FLOWS_API_URL",
    "class": "publish-edge",
-   "publishes_events": ["onboarding.completed"],
+   "publishes_events": ["onboarding.completed", "subscription.changed"],
    "description": "flows' intake, told that a person finished onboarding. IDENTITY TELLS FLOWS; IT DOES NOT ASK IT — the publish is best-effort, bounded at 2s and swallowed, so a deployment with no flows domain onboards people exactly as one with a flows domain does, and so does one where flows is simply down. Unset is therefore not a degraded state, it is a profile. The fact itself is stamped on the person in the same transaction as the account, so the record survives a publish that never lands (app/events.py, app/main.py POST /admin/users). Spelled bare FLOWS_API_URL until F208 — the only one of the three flows publishers not carrying the VEXA_ prefix this repo uses for its own keys; app/events.py still reads that name for one release, with a boot warning, so an unmigrated deployment keeps publishing.",
    "targets": ["compose"]
   },
   {
    "key": "VEXA_FLOWS_API_KEY",
    "class": "publish-edge",
-   "publishes_events": ["onboarding.completed"],
+   "publishes_events": ["onboarding.completed", "subscription.changed"],
    "secret": true,
    "description": "operator key for the same edge, sent as X-Flows-Operator-Key (flows' POST /events is authenticated). The header was spelled X-Flows-Admin-Key until #1486 and flows still accepts that name for one release; admin-api sends only the new one. Declared as part of the edge rather than beside it: a publish target without its credential is a publish that always 401s, and the pair is what makes the edge real. Unset alongside an unset URL is the no-flows profile; unset with a URL set is a deployment whose facts are being refused, which is why both are visible on one declaration.",
    "targets": ["compose"]
@@ -148,6 +148,85 @@
    "default": "8001",
    "description": "uvicorn bind port",
    "targets": ["lite"]
+  },
+  {
+   "key": "BILLING_UPGRADE_URL",
+   "class": "defaulted",
+   "default": "(unset — the DB-72 quota_exceeded refusal body then names no upgrade page: upgrade_url is null)",
+   "description": "the dashboard's upgrade/pricing page, named in DB-72's quota_exceeded refusal body (main.py:_billing_upgrade_url). A self-host that has not wired billing at all — DB-73 not configured, or no plans sold — names no such page rather than leaking a hardcoded vexa.ai URL into a self-hosted response.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_SECRET_KEY",
+   "class": "capability",
+   "capability": "stripe_billing",
+   "secret": true,
+   "description": "Stripe's account secret key (sk_...), bearer-authenticates every REST call `billing/stripe_gateway.StripeClient` makes — create customer, create checkout/portal session, and the webhook handler's re-read of a subscription's current state. Unset ⇒ POST /billing/checkout, POST /billing/portal and POST /billing/webhook all answer a typed 503 naming the missing key(s); the rest of admin-api is unaffected (DB-73).",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_WEBHOOK_SECRET",
+   "class": "capability",
+   "capability": "stripe_billing",
+   "secret": true,
+   "description": "the whsec_... signing secret POST /billing/webhook verifies the Stripe-Signature header against (HMAC-SHA256 over \"{t}.{raw_body}\", constant-time compare, 300s timestamp tolerance — billing/stripe_gateway.verify_signature). One per registered Stripe webhook endpoint; a deployment that rotates it sends the payload signed under both the old and new secret for a transition window, and verify_signature checks every v1 entry against the ONE secret this key holds — set the new value only after the old endpoint is retired, or run two endpoints during rotation.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_CHECKOUT_SUCCESS_URL",
+   "class": "capability",
+   "capability": "stripe_billing",
+   "description": "where Stripe Checkout redirects after a successful subscription purchase (the dashboard's billing page, e.g. https://app.example.com/settings/billing?checkout=success). Never invented — POST /billing/checkout passes it to Stripe verbatim.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_CHECKOUT_CANCEL_URL",
+   "class": "capability",
+   "capability": "stripe_billing",
+   "description": "where Stripe Checkout redirects when the person abandons the purchase (e.g. https://app.example.com/settings/billing?checkout=cancelled).",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_PORTAL_RETURN_URL",
+   "class": "capability",
+   "capability": "stripe_billing",
+   "description": "where the Stripe Customer Portal (card changes, cancellation, invoices) returns the person to (e.g. https://app.example.com/settings/billing).",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_PRICE_PRO_MONTHLY",
+   "class": "defaulted",
+   "default": "(unset — checking out Pro/monthly then answers a typed 503 naming this key)",
+   "description": "the Stripe Price id (price_...) for the catalog's `pro` plan, monthly interval. Read at call time by billing/catalog.py:price_id_for(\"pro\",\"month\") / plan_for_price_id — the ONE place a price id becomes a plan; never hardcoded. A deployment that does not sell Pro leaves this unset and Pro/monthly checkout 503s naming it, which is the correct behaviour for a plan not on sale.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_PRICE_PRO_YEARLY",
+   "class": "defaulted",
+   "default": "(unset — checking out Pro/yearly then answers a typed 503 naming this key)",
+   "description": "the Stripe Price id for the catalog's `pro` plan, yearly interval. See STRIPE_PRICE_PRO_MONTHLY.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_PRICE_TEAM_MONTHLY",
+   "class": "defaulted",
+   "default": "(unset — checking out Team/monthly then answers a typed 503 naming this key)",
+   "description": "the Stripe Price id for the catalog's `team` plan, monthly interval. See STRIPE_PRICE_PRO_MONTHLY.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "STRIPE_PRICE_TEAM_YEARLY",
+   "class": "defaulted",
+   "default": "(unset — checking out Team/yearly then answers a typed 503 naming this key)",
+   "description": "the Stripe Price id for the catalog's `team` plan, yearly interval. See STRIPE_PRICE_PRO_MONTHLY.",
+   "targets": ["compose"]
   }
- ]
+ ],
+ "capabilities": {
+  "stripe_billing": {
+   "description": "checkout, the billing portal, and the webhook's write path (POST /billing/checkout, POST /billing/portal, POST /billing/webhook)",
+   "mode": "all",
+   "when_unconfigured": "all three /billing/* routes answer a typed 503 naming the missing key(s); every other admin-api route is unaffected"
+  }
+ }
 }

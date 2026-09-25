@@ -799,6 +799,21 @@ def create_app(
     async def get_user_entitlements(request: Request):
         return await _forward("GET", _admin("/user/entitlements"), request)
 
+    # ---- Stripe checkout + portal (DB-73). Scoped BOT_OR_TX like the rest of /user/* and
+    # /billing/*; identity mints the Checkout/Portal session, Stripe hosts the payment UI, this
+    # edge never sees card data. The webhook (POST /billing/webhook, admin-api) is deliberately
+    # NOT declared here — Stripe cannot present an x-api-key, and every route this edge fronts
+    # requires one (even the two UNSCOPED rows, /health and /auth/me, still authenticate — see
+    # ROUTE_SCOPES/_authorize). See the DB-73 report for the ingress options that need a
+    # coordinator decision before that route can be added to routes.v1.json.
+    @app.post("/billing/checkout")
+    async def create_billing_checkout(request: Request):
+        return await _forward("POST", _admin("/billing/checkout"), request)
+
+    @app.post("/billing/portal")
+    async def create_billing_portal(request: Request):
+        return await _forward("POST", _admin("/billing/portal"), request)
+
     # ---- the AGENT domain (P20·Stage 2): the gateway fronts agent-api under the canonical /agent/*
     # prefix so the SAME edge resolves key → user and injects X-User-Id; agent-api derives `subject`
     # from it (never the client). The terminal therefore talks ONLY to the gateway (one authenticated

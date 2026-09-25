@@ -1,0 +1,12 @@
+{
+  "event": "subscription.changed",
+  "owner": "identity",
+  "cardinality": "once_per_occurrence",
+  "refs": [
+    "subject",
+    "tier",
+    "status"
+  ],
+  "source_event_id": "subscription-<subject>-<stripe_event_id> — keyed to the person AND the Stripe delivery, so a Stripe redelivery (the webhook's own re-read design re-derives the SAME resolved state from EVERY delivery of an event) dedupes at the flows intake exactly as it does at the write to users.data",
+  "description": "DB-73 — a user's Stripe subscription moved to a new resolved state (a new tier, a status change such as active → past_due → canceled, or a renewal). Published by identity's `POST /billing/webhook` (admin-api) beside `onboarding.completed`, same publish edge (VEXA_FLOWS_API_URL/VEXA_FLOWS_API_KEY), same best-effort/swallowed contract: a deployment with no flows domain still updates the subscriber's plan, and so does one where flows is down. `tier`/`status` are the resolved catalog plan id and the raw Stripe subscription status STATED here rather than left for a consumer to re-derive from a Stripe object it never sees — the same reasoning `onboarding.completed`'s `org`/`seat` fields already state. Fired only when the subscription's price resolves to a known catalog plan (`billing/catalog.py`); an unrecognized price is logged and ignored upstream of this publish, never guessed."
+}

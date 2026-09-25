@@ -113,6 +113,22 @@ services:
       # the person either way. The key authenticates the same edge; flows' POST /events is not open.
       - VEXA_FLOWS_API_URL=${VEXA_FLOWS_API_URL:-}
       - VEXA_FLOWS_API_KEY=${VEXA_FLOWS_API_KEY:-}
+      # DB-72's quota_exceeded refusal body names this page; unset means no such page is named
+      # (never a hardcoded vexa.ai URL leaking into a self-hosted response).
+      - BILLING_UPGRADE_URL=${BILLING_UPGRADE_URL:-}
+      # ── DB-73 Stripe billing (config.v1 capability `stripe_billing`) ───────────────────────
+      # Empty by default — the whole /billing/* surface then answers a typed 503 naming what's
+      # missing (config.v1.json); the rest of admin-api is unaffected. See docs/docs/billing.mdx
+      # for what to create in the Stripe dashboard and paste here.
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_CHECKOUT_SUCCESS_URL=${STRIPE_CHECKOUT_SUCCESS_URL:-}
+      - STRIPE_CHECKOUT_CANCEL_URL=${STRIPE_CHECKOUT_CANCEL_URL:-}
+      - STRIPE_PORTAL_RETURN_URL=${STRIPE_PORTAL_RETURN_URL:-}
+      - STRIPE_PRICE_PRO_MONTHLY=${STRIPE_PRICE_PRO_MONTHLY:-}
+      - STRIPE_PRICE_PRO_YEARLY=${STRIPE_PRICE_PRO_YEARLY:-}
+      - STRIPE_PRICE_TEAM_MONTHLY=${STRIPE_PRICE_TEAM_MONTHLY:-}
+      - STRIPE_PRICE_TEAM_YEARLY=${STRIPE_PRICE_TEAM_YEARLY:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
       interval: 10s

@@ -12,8 +12,9 @@ doing arithmetic on a limit field.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 #: `PlatformBillingDataPatch.billing_catalog_version` (main.py) already carries this spelling of
 #: the concept — bump this string whenever a plan's limits change, so a resolved entitlement can
@@ -130,3 +131,57 @@ def effective_concurrent_cap(
     ):
         return plan_concurrent_bots
     return min(plan_concurrent_bots, stored_max_concurrent_bots)
+
+
+# ── Stripe price ↔ catalog plan (DB-73) ─────────────────────────────────────────────────────────
+#
+# THIS IS THE ONE PLACE A STRIPE PRICE ID BECOMES A PLAN. The webhook handler
+# (`billing/stripe_webhook.py`) and the checkout endpoint (`main.py`) both go through
+# `price_id_for`/`plan_for_price_id` — neither one hardcodes a `price_...` literal, and neither
+# reinterprets a plan's meaning. A price id is never invented here: each entry names the ENV VAR
+# that carries it (set per-deployment from the operator's own Stripe dashboard), so a self-host
+# with no Stripe account configured simply has every entry resolve to `None` — never a placeholder
+# id that would silently checkout against nothing.
+#
+# Free carries no price — there is nothing to buy to get it, and a webhook can never move a user
+# TO free by price id (only by the absence/expiry of a paid subscription, in `entitlements.py`).
+PLAN_INTERVALS = ("month", "year")
+
+#: (plan_id, interval) -> the env var that carries that price's Stripe id. Every paid plan ×
+#: interval combination the catalog defines gets one row; a plan the catalog does not define
+#: (there is no third paid plan) simply has no row, so `price_id_for` on it is a KeyError-free
+#: `None` rather than a typo silently doing the wrong thing.
+STRIPE_PRICE_ENV: Dict[Tuple[str, str], str] = {
+    ("pro", "month"): "STRIPE_PRICE_PRO_MONTHLY",
+    ("pro", "year"): "STRIPE_PRICE_PRO_YEARLY",
+    ("team", "month"): "STRIPE_PRICE_TEAM_MONTHLY",
+    ("team", "year"): "STRIPE_PRICE_TEAM_YEARLY",
+}
+
+
+def price_id_for(plan_id: str, interval: str, env: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """The configured Stripe price id for `(plan_id, interval)`, or `None` when the plan/interval
+    combination does not exist in the catalog, or the operator has not set that env var.
+
+    Read AT CALL TIME (no boot-time snapshot) — same rule `config_preflight.py` uses — so a test
+    monkeypatching the environment and a long-lived process both observe the truth.
+    """
+    env_key = STRIPE_PRICE_ENV.get((plan_id, interval))
+    if not env_key:
+        return None
+    source = env if env is not None else os.environ
+    return (source.get(env_key) or "").strip() or None
+
+
+def plan_for_price_id(price_id: str, env: Optional[Dict[str, str]] = None) -> Optional[Tuple[str, str]]:
+    """The `(plan_id, interval)` a Stripe price id resolves to, or `None` when it matches nothing
+    this deployment has configured — an unrecognized price is the caller's to LOG AND IGNORE
+    (never guess), see `billing/stripe_webhook.py`."""
+    if not price_id:
+        return None
+    source = env if env is not None else os.environ
+    for (plan_id, interval), env_key in STRIPE_PRICE_ENV.items():
+        configured = (source.get(env_key) or "").strip()
+        if configured and configured == price_id:
+            return (plan_id, interval)
+    return None
