@@ -37,6 +37,7 @@ from .db import get_db
 from . import events as events_mod
 from . import person_settings as person_settings_mod
 from .billing.entitlements import resolve_entitlements
+from .billing.meetings_usage import MeetingsUsagePort
 
 ADMIN_KEY_HEADER = APIKeyHeader(name="X-Admin-API-Key", auto_error=False)
 USER_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -872,13 +873,18 @@ def create_app() -> FastAPI:
         }
 
     # --- user tier: resolved billing entitlements (DB-70) — read-only, same auth as
-    #     /user/webhook and /user/transcription. DB-71 (usage meter) and DB-72 (spawn-time quota
-    #     enforcement) both read the SAME resolve_entitlements() this calls; nothing here writes
-    #     billing fields — those come from Stripe webhooks (DB-73), not from a GET.
+    #     /user/webhook and /user/transcription. DB-72 (spawn-time quota enforcement) reads the
+    #     SAME resolve_entitlements() this calls; nothing here writes billing fields — those come
+    #     from Stripe webhooks (DB-73), not from a GET. Usage (DB-71) is metered live from the
+    #     `meetings` table via MeetingsUsagePort — see billing/meetings_usage.py for which
+    #     statuses count and why a query failure reports unknown, never 0.
     @app.get("/user/entitlements")
-    async def get_user_entitlements(user: User = Depends(get_current_user)):
+    async def get_user_entitlements(user: User = Depends(get_current_user),
+                                    db: AsyncSession = Depends(get_db)):
         data = user.data if isinstance(user.data, dict) else {}
-        resolved = await resolve_entitlements(data, datetime.now(timezone.utc), user.id)
+        resolved = await resolve_entitlements(
+            data, datetime.now(timezone.utc), user.id, usage_port=MeetingsUsagePort(db),
+        )
         plan = resolved.plan
         return {
             "plan_id": plan.plan_id,

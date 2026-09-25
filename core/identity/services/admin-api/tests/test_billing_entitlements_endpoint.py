@@ -8,19 +8,24 @@ enforce the user tier's auth, and does it read the billing fields this caller's 
 
 Same testcontainers-PG harness as the other identity suites (skips without docker).
 """
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from admin_api.app import db as app_db
 from admin_api.app.main import create_app
-from admin_api.schema.models import Base
+from admin_api.schema.models import Base, Meeting
 from admin_api.schema.sync import ensure_schema_sync
 
 from conftest import requires_docker
 from test_stack_admin_api import ADMIN_TOKEN, INTERNAL_SECRET, _admin, _dispose_async_engine
 
 pytestmark = requires_docker
+
+UTC = timezone.utc
 
 
 @pytest.fixture()
@@ -59,8 +64,11 @@ def test_valid_key_defaults_to_free_plan(client):
     assert body["plan_id"] == "free"
     assert body["limits"]["concurrent_bots"] == 1
     assert body["limits"]["meetings_per_month"] == 1
-    assert body["usage"]["meetings_used"] is None  # NullUsagePort — unknown, not zero
-    assert body["usage"]["minutes_used"] is None
+    # DB-71: a real MeetingsUsagePort is wired in — a user with no meetings reads as counted-zero,
+    # not unknown. NullUsagePort's unknown-vs-zero distinction is covered on its own in
+    # test_billing_entitlements.py and the query-failure path below.
+    assert body["usage"]["meetings_used"] == 0
+    assert body["usage"]["minutes_used"] == 0
 
 
 def test_valid_key_reads_own_billing_data_not_defaults(client):
@@ -98,3 +106,57 @@ def test_caller_never_sees_another_users_entitlements(client):
 def test_invalid_key_is_403(client):
     r = client.get("/user/entitlements", headers={"X-API-Key": "not-a-real-token"})
     assert r.status_code == 403
+
+
+# --- DB-71: usage is now metered live from `meetings`, not always unknown ---
+
+def _seed_meeting(pg_url, **fields):
+    """Insert one `meetings` row directly (bypassing meeting-api — same table, same columns)."""
+    engine = create_engine(pg_url)
+    try:
+        with Session(engine) as s:
+            m = Meeting(**fields)
+            s.add(m)
+            s.commit()
+            return m.id
+    finally:
+        engine.dispose()
+
+
+def test_usage_reflects_joined_meetings_in_the_current_calendar_month(client, pg_url):
+    user_id, token = _create_user_with_token(client, "usage-real@vexa.ai")
+    now = datetime.now(UTC)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    inside = month_start + timedelta(hours=2)
+
+    # Consumed: the bot reached the room.
+    _seed_meeting(pg_url, user_id=user_id, platform="google_meet", status="completed",
+                 created_at=inside.replace(tzinfo=None),
+                 start_time=inside.replace(tzinfo=None),
+                 end_time=(inside + timedelta(minutes=15)).replace(tzinfo=None))
+    # Not consumed: never got past awaiting_admission.
+    _seed_meeting(pg_url, user_id=user_id, platform="google_meet", status="awaiting_admission",
+                 created_at=inside.replace(tzinfo=None))
+
+    r = client.get("/user/entitlements", headers={"X-API-Key": token})
+    assert r.status_code == 200, r.text
+    usage = r.json()["usage"]
+    assert usage["meetings_used"] == 1  # only the completed row
+    assert usage["minutes_used"] == 15
+
+
+def test_usage_query_failure_reports_unknown_not_zero(client, monkeypatch):
+    """A broken usage query must surface as `null` usage fields (200, unknown) — never `0`,
+    which would read as "0 of 1 used" and let an over-quota user straight through."""
+    _user_id, token = _create_user_with_token(client, "usage-broken@vexa.ai")
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated query failure")
+
+    monkeypatch.setattr("admin_api.app.billing.meetings_usage.select", _boom)
+
+    r = client.get("/user/entitlements", headers={"X-API-Key": token})
+    assert r.status_code == 200, r.text
+    usage = r.json()["usage"]
+    assert usage["meetings_used"] is None
+    assert usage["minutes_used"] is None
