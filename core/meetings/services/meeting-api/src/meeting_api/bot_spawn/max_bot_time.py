@@ -41,8 +41,7 @@ def resolve_max_bot_time_ms(
     ``automatic_leave.max_bot_time`` — the wire unit for every ``automatic_leave`` field).
 
     A ``None`` result means the bot's own deployment-wide ``BOT_MAX_ACTIVE_MS`` (default 4h)
-    applies alone — this function never invents a cap where both sources are silent (a deployment
-    with no billing wired, and a caller who named no cap, behaves exactly as before DB-72b)."""
+    applies alone — this function never invents a cap where both sources are silent."""
     plan_ms = (
         plan_max_minutes_per_meeting * MS_PER_MINUTE
         if plan_max_minutes_per_meeting is not None
