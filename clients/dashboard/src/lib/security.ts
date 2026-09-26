@@ -159,3 +159,27 @@ export function isTrustedGoogleAuthorizeRedirect(url: string): boolean {
   }
   return parsed.protocol === "https:" && parsed.hostname === GOOGLE_AUTHORIZE_HOST;
 }
+
+/** The one host Microsoft's consent screen is ever served from (`microsoft_oauth.py`'s
+ *  `authorize_endpoint`, `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize`) —
+ *  the tenant segment varies (`common` by default, or an operator's pinned
+ *  `MICROSOFT_CALENDAR_TENANT_ID`), so this checks the HOST only, the same way
+ *  `isTrustedGoogleAuthorizeRedirect` checks Google's fixed host. */
+const MICROSOFT_AUTHORIZE_HOST = "login.microsoftonline.com";
+
+/** Is a `GET /user/calendars/microsoft/authorize` response's `authorize_url` safe to send the
+ *  browser to with `window.location.assign()`? Same shape and same reason as
+ *  `isTrustedGoogleAuthorizeRedirect` above: admin-api's response types `authorize_url` as a
+ *  plain `str` with no shape check of its own, so this client checks it is
+ *  `https://login.microsoftonline.com/...` before ever navigating there — a malformed response
+ *  or a future regression fails closed instead of taking a signed-in user's browser to an
+ *  arbitrary origin. */
+export function isTrustedMicrosoftAuthorizeRedirect(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" && parsed.hostname === MICROSOFT_AUTHORIZE_HOST;
+}

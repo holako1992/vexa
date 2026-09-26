@@ -105,7 +105,6 @@ describe("resolveUpstream — Google calendar authorize (DB-31)", () => {
     for (const path of [
       ["user", "calendars", "google"],
       ["user", "calendars", "google", "exchange"],
-      ["user", "calendars", "microsoft", "authorize"],
       ["user", "calendars", "google", "authorize", "extra"],
       ["users", "calendars", "google", "authorize"],
     ]) {
@@ -113,6 +112,27 @@ describe("resolveUpstream — Google calendar authorize (DB-31)", () => {
     }
     expect(resolveWriteUpstream("POST", ["user", "calendars", "google", "authorize"])).toBeNull();
     expect(resolveWriteUpstream("GET", ["user", "calendars", "google", "authorize"])).toBeNull();
+  });
+});
+
+describe("resolveUpstream — Microsoft calendar authorize (DB-32/DB-33)", () => {
+  it("admits GET user/calendars/microsoft/authorize", () => {
+    expect(resolveUpstream(["user", "calendars", "microsoft", "authorize"])).toEqual({
+      path: "/user/calendars/microsoft/authorize",
+    });
+  });
+
+  it("refuses near-misses: wrong segment, extra segment, and the exchange path (POST-only)", () => {
+    for (const path of [
+      ["user", "calendars", "microsoft"],
+      ["user", "calendars", "microsoft", "exchange"],
+      ["user", "calendars", "microsoft", "authorize", "extra"],
+      ["users", "calendars", "microsoft", "authorize"],
+    ]) {
+      expect(resolveUpstream(path)).toBeNull();
+    }
+    expect(resolveWriteUpstream("POST", ["user", "calendars", "microsoft", "authorize"])).toBeNull();
+    expect(resolveWriteUpstream("GET", ["user", "calendars", "microsoft", "authorize"])).toBeNull();
   });
 });
 
@@ -132,10 +152,87 @@ describe("resolveWriteUpstream — Google calendar exchange (DB-31)", () => {
       ["POST", ["user", "calendars", "google", "authorize"]],
       ["POST", ["user", "calendars", "google"]],
       ["POST", ["user", "calendars", "google", "exchange", "extra"]],
-      ["POST", ["user", "calendars", "microsoft", "exchange"]],
     ] as const) {
       expect(resolveWriteUpstream(method, path)).toBeNull();
     }
+  });
+});
+
+describe("resolveWriteUpstream — Microsoft calendar exchange (DB-32/DB-33)", () => {
+  it("admits POST /user/calendars/microsoft/exchange with a body check attached", () => {
+    expect(resolveWriteUpstream("POST", ["user", "calendars", "microsoft", "exchange"])).toEqual({
+      path: "/user/calendars/microsoft/exchange",
+      body: expect.any(Function),
+    });
+  });
+
+  it("refuses method/path near-misses, including the authorize path (GET-only)", () => {
+    for (const [method, path] of [
+      ["GET", ["user", "calendars", "microsoft", "exchange"]],
+      ["PATCH", ["user", "calendars", "microsoft", "exchange"]],
+      ["DELETE", ["user", "calendars", "microsoft", "exchange"]],
+      ["POST", ["user", "calendars", "microsoft", "authorize"]],
+      ["POST", ["user", "calendars", "microsoft"]],
+      ["POST", ["user", "calendars", "microsoft", "exchange", "extra"]],
+    ] as const) {
+      expect(resolveWriteUpstream(method, path)).toBeNull();
+    }
+  });
+});
+
+describe("validateBody — user/calendars/microsoft/exchange (DB-32/DB-33)", () => {
+  const exchange = resolveWriteUpstream("POST", ["user", "calendars", "microsoft", "exchange"])!;
+  // `microsoft_oauth.sign_state` produces the identical two-segment shape `google_oauth.sign_state`
+  // does (see `isOAuthExchangeBody`'s comment in upstream.ts) — this allowlist checks the SHAPE
+  // only, never validity: the core alone signs and verifies it.
+  const realState = "eyJ1aWQiOjF9.c2lnbmF0dXJl";
+
+  it("admits exactly {code, state}, both plausible strings", () => {
+    expect(validateBody(exchange, JSON.stringify({ code: "M.test-code", state: realState }))).toBe(true);
+  });
+
+  it("refuses extra keys, missing keys, wrong types, and non-object bodies", () => {
+    expect(validateBody(exchange, JSON.stringify({ code: "abc", state: realState, extra: 1 }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ code: "abc" }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ state: realState }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ code: 1, state: realState }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ code: "abc", state: 1 }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify(["abc", realState]))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify(null))).toBe(false);
+  });
+
+  it("refuses a state that isn't the signed token's two-segment shape", () => {
+    for (const state of ["", "no-dot-here", "a.b.c", ".", "short.short"]) {
+      expect(validateBody(exchange, JSON.stringify({ code: "abc", state }))).toBe(false);
+    }
+  });
+
+  it("refuses an empty body and malformed JSON", () => {
+    expect(validateBody(exchange, "")).toBe(false);
+    expect(validateBody(exchange, "{not json")).toBe(false);
+  });
+});
+
+describe("resolveUpstream — calendar connection sync status (DB-34)", () => {
+  it("admits GET user/calendars/<id>/sync", () => {
+    expect(resolveUpstream(["user", "calendars", "cal-1", "sync"])).toEqual({
+      path: "/user/calendars/cal-1/sync",
+    });
+  });
+
+  it("refuses a calendar id that fails SAFE_CAL_ID, and near-misses", () => {
+    for (const id of ["a/b", "a?b", "a#b", "a b", "x".repeat(129)]) {
+      expect(resolveUpstream(["user", "calendars", id, "sync"])).toBeNull();
+    }
+    expect(resolveUpstream(["user", "calendars", "cal-1", "sync", "extra"])).toBeNull();
+    // No trailing "sync": a bare connection id is not itself a route.
+    expect(resolveUpstream(["user", "calendars", "cal-1"])).toBeNull();
+  });
+
+  it("percent-encodes a calendar id that carries URL-significant characters", () => {
+    expect(resolveUpstream(["user", "calendars", "a@b:c", "sync"])?.path).toBe(
+      "/user/calendars/a%40b%3Ac/sync",
+    );
   });
 });
 
@@ -340,12 +437,58 @@ describe("resolveWriteUpstream — rename via annotate, and delete (DB-42)", () 
     expect(resolveWriteUpstream("DELETE", ["meetings", "104"])).toEqual({ path: "/meetings/104" });
   });
 
-  it("refuses a non-numeric meetings id, and PATCH meetings/<id> outright (not on the write allowlist)", () => {
+  it("refuses a non-numeric meetings id on delete; GET is never a write", () => {
     expect(resolveWriteUpstream("DELETE", ["meetings", "104abc"])).toBeNull();
     expect(resolveWriteUpstream("DELETE", ["meetings", ""])).toBeNull();
     expect(resolveWriteUpstream("DELETE", ["meetings", "104", "extra"])).toBeNull();
-    expect(resolveWriteUpstream("PATCH", ["meetings", "104"])).toBeNull();
     expect(resolveWriteUpstream("GET", ["meetings", "104"])).toBeNull();
+  });
+});
+
+describe("resolveWriteUpstream — auto-join override (DB-33)", () => {
+  it("admits PATCH meetings/<id> with a body check attached", () => {
+    expect(resolveWriteUpstream("PATCH", ["meetings", "104"])).toEqual({
+      path: "/meetings/104",
+      body: expect.any(Function),
+    });
+  });
+
+  it("refuses a non-numeric id, the wrong method, or an extra segment", () => {
+    expect(resolveWriteUpstream("PATCH", ["meetings", "104abc"])).toBeNull();
+    expect(resolveWriteUpstream("PATCH", ["meetings", "../../admin"])).toBeNull();
+    expect(resolveWriteUpstream("PATCH", ["meetings", "104", "intent"])).toBeNull();
+    expect(resolveWriteUpstream("POST", ["meetings", "104"])).toBeNull();
+    expect(resolveWriteUpstream("GET", ["meetings", "104"])).toBeNull();
+  });
+});
+
+describe("validateBody — meetings/<id> auto-join override (DB-33)", () => {
+  const patch = resolveWriteUpstream("PATCH", ["meetings", "104"])!;
+
+  it("admits exactly {auto_join: <boolean>}", () => {
+    expect(validateBody(patch, JSON.stringify({ auto_join: true }))).toBe(true);
+    expect(validateBody(patch, JSON.stringify({ auto_join: false }))).toBe(true);
+  });
+
+  it("refuses every other field this route's real handler would also accept", () => {
+    expect(validateBody(patch, JSON.stringify({ title: "Renamed" }))).toBe(false);
+    expect(validateBody(patch, JSON.stringify({ scheduled_at: "2026-10-01T00:00:00Z" }))).toBe(false);
+    expect(validateBody(patch, JSON.stringify({ meeting_url: "https://meet.google.com/x" }))).toBe(false);
+    expect(validateBody(patch, JSON.stringify({ workspace_id: "ws-1" }))).toBe(false);
+    expect(validateBody(patch, JSON.stringify({ auto_join: true, title: "Renamed" }))).toBe(false);
+  });
+
+  it("refuses a non-boolean auto_join, extra keys, missing keys, and non-object bodies", () => {
+    expect(validateBody(patch, JSON.stringify({ auto_join: "true" }))).toBe(false);
+    expect(validateBody(patch, JSON.stringify({ auto_join: 1 }))).toBe(false);
+    expect(validateBody(patch, JSON.stringify({}))).toBe(false);
+    expect(validateBody(patch, JSON.stringify([true]))).toBe(false);
+    expect(validateBody(patch, JSON.stringify(null))).toBe(false);
+  });
+
+  it("refuses an empty body and malformed JSON", () => {
+    expect(validateBody(patch, "")).toBe(false);
+    expect(validateBody(patch, "{not json")).toBe(false);
   });
 });
 

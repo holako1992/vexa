@@ -42,6 +42,11 @@ const PLATFORMS = new Set(["google_meet", "teams", "zoom", "jitsi"]);
  *  interpolated into an upstream URL. */
 const SAFE_SEGMENT = /^[^/?#\s]{1,256}$/;
 
+/** Safe calendar-id shape: printable, no path separators, bounded. Declared here (rather than
+ *  next to the write routes that first needed it) so `resolveReadExtras`' calendar-sync-status
+ *  route below can use it too. */
+const SAFE_CAL_ID = /^[^/?#\s]{1,128}$/;
+
 /** A bounded, all-digits integer — the shape check every `limit`/`offset` value gets before it is
  *  forwarded. Rejects negative numbers, decimals, and anything with leading `+`/whitespace that
  *  `Number()` would otherwise coerce. */
@@ -188,11 +193,29 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   ) {
     return { path: "/user/calendars/google/authorize" };
   }
+  // GET /user/calendars/microsoft/authorize — the Microsoft 365 sibling of the Google route just
+  // above (DB-32's core, this dashboard's connect button). Same rule: the caller's own
+  // `isTrustedMicrosoftAuthorizeRedirect` (lib/security.ts) checks `authorize_url` before ever
+  // navigating there, so this entry only needs to get the request there and back.
+  if (
+    segments.length === 4 && segments[0] === "user" && segments[1] === "calendars" &&
+    segments[2] === "microsoft" && segments[3] === "authorize"
+  ) {
+    return { path: "/user/calendars/microsoft/authorize" };
+  }
+  // GET /user/calendars/<id>/sync — the connection's last sync stamp (`{last_sync, last_error,
+  // counts}`, meeting_api/calendar_sync/runner.py), read-only. The calendar health surface
+  // (DB-34) reads this per connection; `POST` on the same path (`resolveWriteUpstream` below) is
+  // the existing "sync now" action.
+  if (
+    segments.length === 4 &&
+    segments[0] === "user" && segments[1] === "calendars" && segments[3] === "sync" &&
+    SAFE_CAL_ID.test(segments[2])
+  ) {
+    return { path: `/user/calendars/${encodeURIComponent(segments[2])}/sync` };
+  }
   return null;
 }
-
-/** Safe calendar-id shape: printable, no path separators, bounded. */
-const SAFE_CAL_ID = /^[^/?#\s]{1,128}$/;
 
 /** The two paid plan ids `POST /billing/checkout` sells — exactly admin-api's own
  *  `CheckoutRequest.validate_choice` (`main.py`): `free` needs no checkout, and any id outside the
@@ -220,29 +243,41 @@ function isCheckoutBody(parsed: unknown): boolean {
     && typeof interval === "string" && CHECKOUT_INTERVALS.has(interval);
 }
 
-/** `POST /user/calendars/google/exchange`'s body, exactly: `code` and `state`, both strings,
- *  from Google's own redirect (DB-31's callback page relays them verbatim — it never constructs
- *  either value itself). `state` is checked for SHAPE only — the two dot-separated base64url
- *  segments `google_oauth.sign_state` (core/identity/services/admin-api/src/admin_api/app/
- *  google_oauth.py) always produces — never for validity: the core is the only party that signs
- *  and verifies it (signature, TTL, caller binding, single-use), so this allowlist does not
+/** `POST /user/calendars/<provider>/exchange`'s body, exactly: `code` and `state`, both strings,
+ *  from the provider's own redirect (the callback page relays them verbatim — it never
+ *  constructs either value itself). `state` is checked for SHAPE only — the two dot-separated
+ *  base64url segments `google_oauth.sign_state` / `microsoft_oauth.sign_state`
+ *  (core/identity/services/admin-api/src/admin_api/app/{google,microsoft}_oauth.py) always
+ *  produce, identically for both providers — never for validity: the core is the only party that
+ *  signs and verifies it (signature, TTL, caller binding, single-use), so this allowlist does not
  *  invent a second, weaker check of its own. `code` gets a generous length bound and no character
- *  allowlist beyond "no control characters" — Google's authorization codes are not a fixed shape
- *  this client should assume it knows, unlike the calendar-id path segments elsewhere in this
- *  file, which this value never becomes (it stays in the JSON body all the way to admin-api). */
-const GOOGLE_STATE_SHAPE = /^[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{8,2048}$/;
-const MAX_GOOGLE_CODE_CHARS = 2048;
+ *  allowlist beyond "no control characters" — an authorization code is not a fixed shape this
+ *  client should assume it knows, unlike the calendar-id path segments elsewhere in this file,
+ *  which this value never becomes (it stays in the JSON body all the way to admin-api). Shared by
+ *  `isGoogleExchangeBody` and `isMicrosoftExchangeBody` below so the two providers' allowlist
+ *  entries can never drift on what "a well-shaped exchange body" means. */
+const OAUTH_STATE_SHAPE = /^[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{8,2048}$/;
+const MAX_OAUTH_CODE_CHARS = 2048;
 
-function isGoogleExchangeBody(parsed: unknown): boolean {
+function isOAuthExchangeBody(parsed: unknown): boolean {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
   const keys = Object.keys(parsed as Record<string, unknown>);
   if (keys.length !== 2) return false;
   const { code, state } = parsed as Record<string, unknown>;
   return (
-    typeof code === "string" && code.length >= 1 && code.length <= MAX_GOOGLE_CODE_CHARS &&
+    typeof code === "string" && code.length >= 1 && code.length <= MAX_OAUTH_CODE_CHARS &&
     !/[\r\n]/.test(code) &&
-    typeof state === "string" && GOOGLE_STATE_SHAPE.test(state)
+    typeof state === "string" && OAUTH_STATE_SHAPE.test(state)
   );
+}
+
+function isGoogleExchangeBody(parsed: unknown): boolean {
+  return isOAuthExchangeBody(parsed);
+}
+
+/** DB-32/DB-33's Microsoft sibling of `isGoogleExchangeBody` — see `isOAuthExchangeBody` above. */
+function isMicrosoftExchangeBody(parsed: unknown): boolean {
+  return isOAuthExchangeBody(parsed);
 }
 
 /** `POST /billing/portal` takes no body at all (`create_billing_portal` in `main.py` has no
@@ -251,6 +286,16 @@ function isGoogleExchangeBody(parsed: unknown): boolean {
  *  is ever forwarded unread. */
 function isEmptyBody(parsed: unknown): boolean {
   return parsed === undefined;
+}
+
+/** `PATCH /meetings/<id>`'s ONLY admitted shape through this allowlist: exactly one key,
+ *  `auto_join`, a boolean — DB-33's Join / Don't join override. See the route comment above for
+ *  why this is deliberately narrower than everything the producer's route actually accepts. */
+function isAutoJoinBody(parsed: unknown): boolean {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+  const keys = Object.keys(parsed as Record<string, unknown>);
+  if (keys.length !== 1) return false;
+  return typeof (parsed as Record<string, unknown>).auto_join === "boolean";
 }
 
 /** Resolve a write (POST / PATCH / DELETE) request against the closed write-path allowlist.
@@ -293,6 +338,15 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     ) {
       return { path: "/user/calendars/google/exchange", body: isGoogleExchangeBody };
     }
+    // POST /user/calendars/microsoft/exchange {code, state} — DB-32/DB-33's Microsoft 365
+    // connect button's callback page. Same rule as the Google entry just above: `microsoft` is a
+    // fixed literal segment here, checked before the generic `/user/calendars/<id>/sync` branch.
+    if (
+      segments.length === 4 && segments[0] === "user" && segments[1] === "calendars" &&
+      segments[2] === "microsoft" && segments[3] === "exchange"
+    ) {
+      return { path: "/user/calendars/microsoft/exchange", body: isMicrosoftExchangeBody };
+    }
     // POST /billing/checkout {plan, interval} — DB-74b's Upgrade button. `_require_stripe_billing`
     // on the core answers 503 when Stripe isn't configured on this deployment; that is the core's
     // decision to make, not this allowlist's — the check here is only the wire shape.
@@ -313,6 +367,18 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
       SAFE_CAL_ID.test(segments[2])
     ) {
       return { path: `/user/calendars/${encodeURIComponent(segments[2])}` };
+    }
+    // PATCH /meetings/<id> {auto_join} — the Upcoming page's per-meeting Join / Don't join
+    // override (DB-33). meeting-api's `_apply_meeting_patch` (collector/app.py) accepts several
+    // fields on this route (title, scheduled_at, meeting_url, workspace_id, auto_join); this
+    // allowlist admits only the ONE shape the Upcoming page ever sends — a body with exactly the
+    // key `auto_join`, a boolean — so this entry can never become a back door for the others.
+    // Addressed by ROW id (never `platform`/`native`) because a link-less plan has no native id
+    // to key off, and the row id is always present on a planned meeting the caller can see.
+    if (
+      segments.length === 2 && segments[0] === "meetings" && /^\d{1,20}$/.test(segments[1])
+    ) {
+      return { path: `/meetings/${encodeURIComponent(segments[1])}`, body: isAutoJoinBody };
     }
   }
   if (method === "DELETE") {

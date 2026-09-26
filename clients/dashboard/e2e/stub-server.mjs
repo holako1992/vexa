@@ -37,6 +37,7 @@ import {
   freeEntitlements,
   QUOTA_EXCEEDED_BODY,
   E2E_GOOGLE_EMAIL,
+  E2E_MICROSOFT_EMAIL,
 } from "./fixtures.mjs";
 
 const RUNNING_STATUSES = new Set(["requested", "joining", "awaiting_admission", "needs_help", "active", "stopping"]);
@@ -53,7 +54,10 @@ const adminLog = [];
 /** Forced response overrides, keyed by a short name a spec asks for. Cleared on reset.
  *  `botsQuota: true` makes `POST /bots` answer DB-72's unwrapped 402 `quota_exceeded` body
  *  instead of dispatching — spec 14's paywall proof. */
-let force = { meetings: null, meetingDetail: null, botsQuota: false, search: null, googleExchange: null };
+let force = {
+  meetings: null, meetingDetail: null, botsQuota: false, search: null,
+  googleExchange: null, microsoftExchange: null,
+};
 /** DB-31 — the state tokens `GET /user/calendars/google/authorize` has issued, and which of
  *  those have already been consumed by an exchange. Mirrors just enough of the core's real
  *  behaviour (`google_oauth.sign_state`/`verify_state`) for the e2e specs: an unknown or
@@ -62,6 +66,17 @@ let force = { meetings: null, meetingDetail: null, botsQuota: false, search: nul
  *  handling of that refusal, not the core's crypto. */
 let issuedGoogleStates = new Set();
 let usedGoogleStates = new Set();
+/** DB-32/DB-33 — the Microsoft sibling of the two sets just above (`microsoft_oauth.sign_state`/
+ *  `verify_state`), kept in its OWN sets so a state minted for one provider's flow is never
+ *  mistaken for a replay of the other's — same rule `main.py`'s `_consume_oauth_nonce` applies
+ *  with its per-provider `field`. */
+let issuedMicrosoftStates = new Set();
+let usedMicrosoftStates = new Set();
+/** DB-34 — each connected calendar's last sync stamp, keyed by calendar id, in EXACTLY the shape
+ *  `GET /user/calendars/<id>/sync` answers (`{last_sync, last_error, counts}` —
+ *  `meeting_api/calendar_sync/runner.py`'s `run_user_sync`). No entry means "never synced yet",
+ *  which the route answers as `{}`, same as the real one before any sync has run. */
+let syncStamps = new Map();
 /** `GET /user/entitlements`'s current answer (DB-74/DB-75) — swapped per spec via
  *  `/__control/entitlements` (`helpers.ts`'s `setEntitlements`), reset to the free-plan default
  *  on every `/__control/reset`. */
@@ -93,9 +108,15 @@ function resetAll() {
   bots.length = 0;
   gatewayLog.length = 0;
   adminLog.length = 0;
-  force = { meetings: null, meetingDetail: null, botsQuota: false, search: null, googleExchange: null };
+  force = {
+    meetings: null, meetingDetail: null, botsQuota: false, search: null,
+    googleExchange: null, microsoftExchange: null,
+  };
   issuedGoogleStates = new Set();
   usedGoogleStates = new Set();
+  issuedMicrosoftStates = new Set();
+  usedMicrosoftStates = new Set();
+  syncStamps = new Map();
   entitlements = freeEntitlements();
   stripeCustomerId = null;
   releaseSearchHold();
@@ -130,12 +151,26 @@ async function readJsonBody(req) {
 }
 
 function logRequest(log, req) {
-  log.push({
+  const entry = {
     method: req.method,
     url: req.url,
     headers: { ...req.headers },
     at: Date.now(),
-  });
+  };
+  log.push(entry);
+  return entry;
+}
+
+/** Read a request's JSON body AND record it on its own already-logged entry — so a spec can
+ *  assert not just "the dashboard called this route" (`gatewayRequests()`) but the exact payload
+ *  it sent (`entry.body`), e.g. DB-33's Join / Don't join toggle asserting `{auto_join: false}`
+ *  actually reached the stub. `entry` is whatever `logRequest` returned for THIS request — every
+ *  write handler in `handleGateway` that used to call bare `readJsonBody(req)` calls this instead,
+ *  so the one entry already in `gatewayLog` gains a `body` field rather than a second log write. */
+async function readAndLogBody(req, entry) {
+  const body = await readJsonBody(req);
+  if (entry) entry.body = body;
+  return body;
 }
 
 // ── the gateway ──────────────────────────────────────────────────────────────────────────────
@@ -189,6 +224,15 @@ async function handleGateway(req, res) {
     calendars.push(cal);
     return sendJson(res, 200, { ok: true, calendar: cal });
   }
+  // DB-34: seed a connection's sync stamp directly — the health page's "failed feed" and "N
+  // events touched" specs need a specific `{last_sync, last_error, counts}` without driving a
+  // real sync first. `calendarId` names an EXISTING connection (seed it with `seedCalendar`
+  // first, or use the fixture's own id).
+  if (url.pathname === "/__control/seedSyncStamp" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    syncStamps.set(String(body.calendarId), body.stamp ?? {});
+    return sendJson(res, 200, { ok: true });
+  }
   if (url.pathname === "/__control/setMeetingStatus" && req.method === "POST") {
     const body = await readJsonBody(req);
     const row = meetings.find((m) => String(m.id) === String(body.id));
@@ -198,7 +242,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { ok: true });
   }
 
-  logRequest(gatewayLog, req);
+  const logEntry = logRequest(gatewayLog, req);
 
   // GET /meetings — DB-48: honours `limit`/`offset` and reports `has_more`, exactly like
   // meeting-api's own handler (`meeting_api/collector/app.py`'s `get_meetings`, which forwards
@@ -310,8 +354,24 @@ async function handleGateway(req, res) {
   if (req.method === "POST" && parts.length === 3 && parts[0] === "meetings" && parts[2] === "annotate") {
     const row = meetings.find((m) => String(m.id) === parts[1]);
     if (!row) return sendJson(res, 404, { detail: "Meeting not found" });
-    const body = await readJsonBody(req);
+    const body = await readAndLogBody(req, logEntry);
     if (typeof body.title === "string") row.data = { ...(row.data || {}), title: body.title };
+    return sendJson(res, 200, row);
+  }
+
+  // PATCH /meetings/<id> {auto_join} — DB-33's Upcoming page's Join / Don't join override. The
+  // dashboard's own allowlist (`upstream.ts`'s `isAutoJoinBody`) only ever forwards this exact
+  // shape, so the stub only needs to answer it. Mirrors `_apply_meeting_patch`
+  // (`meeting_api/collector/app.py`): only the field actually sent is written; a stale
+  // `auto_join_error` from a past attempt is untouched here too — the producer clears it only
+  // from the auto-join sweep itself, on a SUCCESSFUL dispatch, never from this route.
+  if (req.method === "PATCH" && parts.length === 2 && parts[0] === "meetings") {
+    const row = meetings.find((m) => String(m.id) === parts[1]);
+    if (!row) return sendJson(res, 404, { detail: "Meeting not found" });
+    const body = await readAndLogBody(req, logEntry);
+    if (typeof body.auto_join === "boolean") {
+      row.data = { ...(row.data || {}), auto_join: body.auto_join };
+    }
     return sendJson(res, 200, row);
   }
 
@@ -375,7 +435,7 @@ async function handleGateway(req, res) {
     req.method === "POST" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" &&
     parts[2] === "google" && parts[3] === "exchange"
   ) {
-    const body = await readJsonBody(req);
+    const body = await readAndLogBody(req, logEntry);
     if (force.googleExchange) {
       return sendJson(res, force.googleExchange, {
         detail: "Google rejected the authorization code: invalid_grant",
@@ -409,13 +469,80 @@ async function handleGateway(req, res) {
     return sendJson(res, 201, cal);
   }
 
+  // GET /user/calendars/microsoft/authorize — DB-32/DB-33's Microsoft sibling of the Google
+  // authorize route above. Mints a state, records it as issued, and hands back a REAL
+  // login.microsoftonline.com URL carrying it, so the dashboard's own
+  // `isTrustedMicrosoftAuthorizeRedirect` check has something real to accept.
+  if (
+    req.method === "GET" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" &&
+    parts[2] === "microsoft" && parts[3] === "authorize"
+  ) {
+    const seg1 = `e2estate${issuedMicrosoftStates.size + 1}${Math.random().toString(36).slice(2, 10)}`;
+    const seg2 = Math.random().toString(36).slice(2, 12);
+    const state = `${seg1}.${seg2}`;
+    issuedMicrosoftStates.add(state);
+    const authorize_url =
+      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?" +
+      new URLSearchParams({
+        client_id: "e2e-test-client",
+        redirect_uri: "http://127.0.0.1:3100/calendar/microsoft/callback",
+        response_type: "code",
+        response_mode: "query",
+        scope: "https://graph.microsoft.com/Calendars.Read offline_access",
+        prompt: "consent",
+        state,
+      }).toString();
+    return sendJson(res, 200, { authorize_url, state });
+  }
+
+  // POST /user/calendars/microsoft/exchange {code, state} — DB-32/DB-33's callback page. Same
+  // rule as the Google exchange above: `code` is never inspected, only `state`'s issued/used
+  // bookkeeping and `force.microsoftExchange` decide the answer.
+  if (
+    req.method === "POST" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" &&
+    parts[2] === "microsoft" && parts[3] === "exchange"
+  ) {
+    const body = await readAndLogBody(req, logEntry);
+    if (force.microsoftExchange) {
+      return sendJson(res, force.microsoftExchange, {
+        detail: "Microsoft rejected the authorization code: invalid_grant",
+      });
+    }
+    const state = body.state;
+    if (typeof state !== "string" || !issuedMicrosoftStates.has(state)) {
+      return sendJson(res, 400, { detail: "invalid state: unknown, expired, or forged" });
+    }
+    if (usedMicrosoftStates.has(state)) {
+      return sendJson(res, 409, { detail: "this authorization has already been used" });
+    }
+    usedMicrosoftStates.add(state);
+    let cal = calendars.find((c) => c.kind === "microsoft" && c.microsoft_email === E2E_MICROSOFT_EMAIL);
+    if (cal) {
+      cal.reconnect_needed = false;
+    } else {
+      cal = {
+        id: String(nextCalendarId++),
+        kind: "microsoft",
+        name: `Microsoft — ${E2E_MICROSOFT_EMAIL}`,
+        microsoft_email: E2E_MICROSOFT_EMAIL,
+        microsoft_calendar_ids: ["primary"],
+        reconnect_needed: false,
+        auto_join: true,
+        bot_name: "Vexa",
+        enabled: true,
+      };
+      calendars.push(cal);
+    }
+    return sendJson(res, 201, cal);
+  }
+
   // POST /bots
   if (req.method === "POST" && parts.length === 1 && parts[0] === "bots") {
     // DB-72/DB-75: `force.botsQuota` mirrors meeting-api's monthly-quota refusal — an unwrapped
     // 402, no `{"detail": ...}` envelope. The dashboard's paywall must branch on the `error`
     // field this body carries, never on the 402 status alone (see SendBotDialog.tsx).
     if (force.botsQuota) return sendJson(res, 402, QUOTA_EXCEEDED_BODY);
-    const body = await readJsonBody(req);
+    const body = await readAndLogBody(req, logEntry);
     bots.push(body);
     return sendJson(res, 200, { id: 900 + bots.length, status: "requested", ...body });
   }
@@ -426,7 +553,7 @@ async function handleGateway(req, res) {
   // URL on the real `checkout.stripe.com` host — the dashboard's own `isTrustedBillingRedirect`
   // guard checks exactly this host, so the stub must answer a real one, not a fake test domain.
   if (req.method === "POST" && parts.length === 2 && parts[0] === "billing" && parts[1] === "checkout") {
-    const body = await readJsonBody(req);
+    const body = await readAndLogBody(req, logEntry);
     if (!stripeCustomerId) stripeCustomerId = "cus_e2e_test";
     return sendJson(res, 200, {
       url: `https://checkout.stripe.com/c/pay/e2e_test_session#${body.plan}_${body.interval}`,
@@ -444,7 +571,7 @@ async function handleGateway(req, res) {
 
   // POST /user/calendars
   if (req.method === "POST" && parts.length === 2 && parts[0] === "user" && parts[1] === "calendars") {
-    const body = await readJsonBody(req);
+    const body = await readAndLogBody(req, logEntry);
     const cal = {
       id: String(nextCalendarId++),
       name: body.name || "Calendar",
@@ -458,18 +585,35 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, cal);
   }
 
-  // POST /user/calendars/<id>/sync
+  // GET /user/calendars/<id>/sync — DB-34's health read: the connection's last sync stamp, or
+  // `{}` when it has never synced (same as the real route before any sweep/POST has run for it).
+  if (req.method === "GET" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" && parts[3] === "sync") {
+    const cal = calendars.find((c) => c.id === parts[2]);
+    if (!cal) return sendJson(res, 404, { error: "not_found" });
+    return sendJson(res, 200, syncStamps.get(parts[2]) ?? {});
+  }
+
+  // POST /user/calendars/<id>/sync — "sync now" (DB-31's Calendar tab, DB-33's Upcoming page,
+  // DB-34's health page all call this). Answers the SAME stamp shape the GET above reads back,
+  // and stores it, so a spec can drive a real sync and then read its own result off the health
+  // route — meeting-api's own `calendar_connection_sync_run` behaves identically.
   if (req.method === "POST" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" && parts[3] === "sync") {
     const cal = calendars.find((c) => c.id === parts[2]);
     if (!cal) return sendJson(res, 404, { error: "not_found" });
-    return sendJson(res, 200, { synced: true, imported: 0 });
+    const stamp = {
+      last_sync: new Date().toISOString(),
+      last_error: null,
+      counts: { created: 1, updated: 0, cancelled: 0 },
+    };
+    syncStamps.set(parts[2], stamp);
+    return sendJson(res, 200, stamp);
   }
 
   // PATCH /user/calendars/<id>
   if (req.method === "PATCH" && parts.length === 3 && parts[0] === "user" && parts[1] === "calendars") {
     const cal = calendars.find((c) => c.id === parts[2]);
     if (!cal) return sendJson(res, 404, { error: "not_found" });
-    const body = await readJsonBody(req);
+    const body = await readAndLogBody(req, logEntry);
     Object.assign(cal, body);
     return sendJson(res, 200, cal);
   }

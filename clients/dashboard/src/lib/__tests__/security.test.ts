@@ -6,6 +6,7 @@ import {
   isSameOriginWrite,
   isTrustedBillingRedirect,
   isTrustedGoogleAuthorizeRedirect,
+  isTrustedMicrosoftAuthorizeRedirect,
   makeNonce,
   safeNext,
   securityHeaders,
@@ -166,6 +167,40 @@ describe("isTrustedGoogleAuthorizeRedirect (DB-31)", () => {
   it("refuses a malformed or non-URL string outright", () => {
     for (const bad of ["", "not a url", "accounts.google.com", "//accounts.google.com/x"]) {
       expect(isTrustedGoogleAuthorizeRedirect(bad)).toBe(false);
+    }
+  });
+});
+
+describe("isTrustedMicrosoftAuthorizeRedirect (DB-32/DB-33)", () => {
+  it("admits Microsoft's own consent-screen host, over https, any tenant segment", () => {
+    expect(isTrustedMicrosoftAuthorizeRedirect(
+      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=x",
+    )).toBe(true);
+    expect(isTrustedMicrosoftAuthorizeRedirect(
+      "https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/oauth2/v2.0/authorize",
+    )).toBe(true);
+  });
+
+  it("refuses a plausible-looking near-miss host", () => {
+    for (const bad of [
+      "https://login.microsoftonline.com.evil.example.com/x",
+      "https://evil.example.com/login.microsoftonline.com",
+      "https://microsoftonline.com/x",
+      "https://login-microsoftonline.com/x",
+      "https://xn--login-microsoftonlinecom.evil.test/x",
+    ]) {
+      expect(isTrustedMicrosoftAuthorizeRedirect(bad)).toBe(false);
+    }
+  });
+
+  it("refuses a non-https scheme on an otherwise-trusted host", () => {
+    expect(isTrustedMicrosoftAuthorizeRedirect("http://login.microsoftonline.com/common/oauth2/v2.0/authorize")).toBe(false);
+    expect(isTrustedMicrosoftAuthorizeRedirect("javascript://login.microsoftonline.com/%0aalert(1)")).toBe(false);
+  });
+
+  it("refuses a malformed or non-URL string outright", () => {
+    for (const bad of ["", "not a url", "login.microsoftonline.com", "//login.microsoftonline.com/x"]) {
+      expect(isTrustedMicrosoftAuthorizeRedirect(bad)).toBe(false);
     }
   });
 });

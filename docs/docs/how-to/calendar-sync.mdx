@@ -86,13 +86,12 @@ the ICS calendar surface below is completely unaffected.
 
 ## Connect Microsoft 365
 
-The Microsoft Graph connector exists at the API level today
-(`GET`/`POST /user/calendars/microsoft/{authorize,exchange}`, below) — the dashboard's own
-**Connect Microsoft 365** button is a separate, not-yet-shipped piece of dashboard work, so it does
-not appear next to **Connect Google Calendar** on the Calendar tab yet. Once it ships, the flow will
-be the same shape as Google's: one consent screen naming exactly one permission — read-only access
-to your calendar — and a redirect straight back into Vexa, connected. No secret address, no
-copy-paste.
+Open **Add Bot** → the **Calendar** tab, and click **Connect Microsoft 365** — it sits right beside
+**Connect Google Calendar**, the same shape: one consent screen naming exactly one permission —
+read-only access to your calendar — and a redirect straight back into Vexa, connected. No secret
+address, no copy-paste. The redirect lands on `/calendar/microsoft/callback`, which shares its
+implementation with Google's own callback page, so the two providers can never drift on how a
+denied consent, a forged redirect, or the exchange call itself failing is shown.
 
 <Info>
 **What Vexa can see:** the `Calendars.Read` scope (events on your default calendar and any others
@@ -209,9 +208,9 @@ deployment — which ships the API but not the hosted dashboard — connects fee
 `POST /user/calendars`. The API is the complete surface; the examples are below.
 
 Each calendar has its own **Default bot name**, used when that calendar arms an unattended join.
-For a meeting present in several calendars, the first source with auto-join enabled supplies the bot
-name. A dedicated **Upcoming** page grouping auto-joins by source calendar is separate,
-not-yet-shipped dashboard work.
+For a meeting present in several calendars, the first source with auto-join enabled supplies the
+bot name. The dedicated **[Upcoming](#the-upcoming-page)** page groups every planned meeting by
+day and shows which calendar each one came from.
 
 **Connecting runs a sync on the spot** — within seconds the panel answers with the result, not
 silence:
@@ -289,11 +288,9 @@ A masked connection now carries `"kind": "ics"`, `"kind": "google"`, or `"kind":
 Google connection's shape adds `google_email` (the connected account, not a secret),
 `google_calendar_ids` (default `["primary"]`), and `reconnect_needed`; a Microsoft connection adds
 the same shape under `microsoft_email` / `microsoft_calendar_ids`. `reconnect_needed` is `true`
-once the provider reports the grant revoked or expired, `false` otherwise; the dashboard's Calendar
-tab shows **Reconnect needed** and a **Reconnect** action for a Google connection in this state
-today. A Microsoft connection made directly through the API carries the same `reconnect_needed`
-field, but the dashboard's own **Reconnect** control for it ships alongside DB-32's dashboard
-button above.
+once the provider reports the grant revoked or expired, `false` otherwise; the dashboard's Add Bot
+dialog and its [Calendar page](#the-calendar-health-page) both show **Reconnect needed** and a
+**Reconnect** action for either OAuth kind in this state — the same flow, run again.
 
 Imported meeting metadata includes `data.calendar_sources`, an array of source objects with the
 stable connection `id`, display `name`, provider event `uid`, source `auto_join` preference,
@@ -413,6 +410,25 @@ A Google or Microsoft connection shows one more, distinct state rather than a ge
 | State | What it means | Fix |
 |---|---|---|
 | `reconnect_needed: true` (panel: **Reconnect needed**) | The provider reported the grant revoked or expired (`invalid_grant`) — access was removed at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) or [myaccount.microsoft.com](https://myaccount.microsoft.com/), the OAuth client was deleted, or a very long idle period expired it. | Click **Reconnect** — the same consent flow, which clears the flag on success. |
+
+## The Calendar health page
+
+`/calendar` in the dashboard is the health surface for every connection at once: last sync time,
+last error (verbatim, from the table above), how many events the last sync touched, and —for a
+connection whose grant needs it — the same **Reconnect** action described above. A failed feed
+never goes silently stale here: an ICS connection with a `last_error` still offers **Sync now**;
+a Google or Microsoft connection with `reconnect_needed` offers **Reconnect** instead. With
+nothing connected yet, the page points at the Add Bot dialog's Calendar tab rather than
+duplicating its connect flow.
+
+## The Upcoming page
+
+`/upcoming` groups every planned meeting — calendar-synced or scheduled by hand — by day, soonest
+first. Each row shows its source calendar's chip (absent for a hand-scheduled plan), a **Join** /
+**Don't join** switch bound to that meeting's `auto_join`, and, when the auto-join sweep actually
+skipped or failed to dispatch a bot for it, the recorded reason shown verbatim
+(`data.auto_join_error` — never reworded). **Sync now** on this page runs the same
+per-connection sync described above, across every connected calendar, then reloads the list.
 
 ## What imports (and what doesn't)
 

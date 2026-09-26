@@ -25,6 +25,11 @@ export interface LoggedRequest {
   url: string;
   headers: Record<string, string>;
   at: number;
+  /** The parsed JSON body the stub GATEWAY received on this request, for every write route that
+   *  goes through `handleGateway`'s own `readAndLogBody` (every write route added since DB-33) —
+   *  `undefined` on a route that predates it or on a GET. Lets a spec assert the exact payload
+   *  that reached the stub, not just that the route was called. */
+  body?: unknown;
 }
 
 /** Every request the stub GATEWAY has seen since the last reset. */
@@ -94,6 +99,23 @@ export async function forceBotsQuotaExceeded(request: APIRequestContext, on = tr
  *  exchange-failure spec (Google itself rejecting the code, surfaced verbatim). */
 export async function forceGoogleExchange(request: APIRequestContext, status: number | null): Promise<void> {
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { googleExchange: status } });
+}
+
+/** The Microsoft sibling of `forceGoogleExchange` above — DB-32/DB-33's exchange-failure spec. */
+export async function forceMicrosoftExchange(request: APIRequestContext, status: number | null): Promise<void> {
+  await request.post(`${GATEWAY_URL}/__control/force`, { data: { microsoftExchange: status } });
+}
+
+/** Seed one connection's sync stamp directly (`{last_sync, last_error, counts}` — the exact
+ *  shape `GET /user/calendars/<id>/sync` answers) — DB-34's health-page specs prove a failed
+ *  feed and an event count without driving a real sync first. */
+export async function seedSyncStamp(
+  request: APIRequestContext,
+  calendarId: string,
+  stamp: Record<string, unknown>,
+): Promise<void> {
+  const res = await request.post(`${GATEWAY_URL}/__control/seedSyncStamp`, { data: { calendarId, stamp } });
+  if (!res.ok()) throw new Error(`stub seed-sync-stamp failed: ${res.status()}`);
 }
 
 /** Push one raw calendar connection straight into the stub's list — DB-31's reconnect spec seeds

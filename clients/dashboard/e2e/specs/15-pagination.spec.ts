@@ -1,9 +1,9 @@
-/** DB-48 — pagination against the stub's now-25-row `/meetings` fixture (6 named rows + 19
+/** DB-48 — pagination against the stub's now-27-row `/meetings` fixture (8 named rows + 19
  *  "Archived Call N" rows, `../fixtures.mjs`).
  *
  *  Expected:
  *   1. The list loads the first page (20 rows) and shows "Load more"; clicking it appends the
- *      remaining 5 and the button disappears — the stub's `has_more: false` on that response,
+ *      remaining 7 and the button disappears — the stub's `has_more: false` on that response,
  *      read verbatim by `MeetingsView.tsx`, same as the real meeting-api's own field.
  *   2. A meeting that only becomes live AFTER it was loaded via "Load more" (so it sits beyond the
  *      first page) is still shown live once the phase-aware poll re-fetches — proving the poll's
@@ -30,7 +30,7 @@ test("Load more appends the remaining page and then hides itself", async ({ page
   await page.getByRole("button", { name: "Load more" }).click();
 
   await expect(page.getByRole("heading", { name: "Archived Call 19" })).toBeVisible();
-  await expect(page.getByText(/^25 loaded/)).toBeVisible();
+  await expect(page.getByText(/^27 loaded/)).toBeVisible();
   await expect(page.getByText("more available")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
   // The end of the list is stated honestly, not just left blank.
@@ -80,12 +80,12 @@ test("a live row loaded via Load more stays visible once the poll re-fetches the
 test("the poll's own GET /meetings carries limit = the number of rows currently loaded", async ({ page, request }) => {
   await signIn(page, testEmail("pag-poll-window"));
   await page.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText(/^25 loaded/)).toBeVisible();
+  await expect(page.getByText(/^27 loaded/)).toBeVisible();
 
   await expect(async () => {
     const log = await gatewayRequests(request);
     const pollRequest = [...log].reverse().find((r) => r.method === "GET" && r.url.startsWith("/meetings?"));
-    expect(pollRequest?.url).toContain("limit=25");
+    expect(pollRequest?.url).toContain("limit=27");
     expect(pollRequest?.url).toContain("offset=0");
   }).toPass({ timeout: 8_000 });
 });
@@ -99,7 +99,7 @@ test("'Load more' does not resurface once the loaded count happens to equal the 
   // gone.
   await signIn(page, testEmail("pag-no-phantom-more"));
   await page.getByRole("button", { name: "Load more" }).click();
-  await expect(page.getByText(/^25 loaded/)).toBeVisible();
+  await expect(page.getByText(/^27 loaded/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 
   // Give the live-cadence poll (Weekly Sync, id 101, is live and always on page one) more than

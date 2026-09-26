@@ -146,18 +146,18 @@ describe("SendBotDialog", () => {
     ).toBe(true);
   });
 
-  // DB-31: Google Calendar connect is the primary path; Microsoft 365 (DB-32) is not shipped as
-  // a disabled placeholder — AGENTS.md's "never ship a placeholder" rule.
-  it("shows Connect Google Calendar as the primary calendar action, with no Microsoft placeholder", async () => {
+  // DB-31/DB-33: Google Calendar and Microsoft 365 connect are both primary, real actions — never
+  // a disabled "coming soon" placeholder (AGENTS.md's "never ship a placeholder" rule).
+  it("shows both Connect Google Calendar and Connect Microsoft 365 as real, enabled actions", async () => {
     renderDialog({ onClose: () => {}, onBotSent: () => {} });
 
     fireEvent.click(screen.getByRole("button", { name: /^calendar$/i }));
 
-    expect(await screen.findByRole("button", { name: /connect google calendar/i })).not.toBeNull();
-    // Outlook/Microsoft 365 is legitimately named as an ICS-fallback provider in the inline
-    // guide — what must NOT exist is a "Connect Microsoft 365" action of its own (DB-32) or a
-    // disabled "coming soon" placeholder for it.
-    expect(screen.queryByRole("button", { name: /connect microsoft/i })).toBeNull();
+    const google = await screen.findByRole("button", { name: /connect google calendar/i });
+    const microsoft = await screen.findByRole("button", { name: /connect microsoft 365/i });
+    expect(google).not.toBeNull();
+    expect(microsoft).not.toBeNull();
+    expect((microsoft as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText(/coming soon/i)).toBeNull();
   });
 
@@ -188,6 +188,36 @@ describe("SendBotDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /^calendar$/i }));
 
     expect(await screen.findByText(/reconnect needed/i)).not.toBeNull();
+    expect(screen.getByRole("button", { name: /^reconnect$/i })).not.toBeNull();
+  });
+
+  it("shows a Reconnect action for a Microsoft connection whose grant needs reconnecting", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/vexa/meeting/jitsi-hosts")) return jsonResponse({ hosts: [] });
+      if (url.includes("/api/vexa/user/calendars")) {
+        return jsonResponse({
+          calendars: [
+            {
+              id: "cal-m1",
+              kind: "microsoft",
+              name: "Microsoft — person@example.com",
+              microsoft_email: "person@example.com",
+              microsoft_calendar_ids: ["primary"],
+              reconnect_needed: true,
+              auto_join: true,
+              enabled: true,
+            },
+          ],
+        });
+      }
+      return jsonResponse({ error: "unexpected_url", url }, 404);
+    });
+
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
+    fireEvent.click(screen.getByRole("button", { name: /^calendar$/i }));
+
+    expect(await screen.findByText(/reconnect needed.*microsoft/i)).not.toBeNull();
     expect(screen.getByRole("button", { name: /^reconnect$/i })).not.toBeNull();
   });
 });

@@ -9,6 +9,12 @@
   reason; see `components/Shell.tsx`'s header comment for why search lives in the top bar rather
   than a nav-rail entry.
 - `billing/page.tsx` — DB-74's read-only billing page: plan, usage, reset date.
+- `upcoming/page.tsx` — DB-33's `/upcoming`: every planned meeting grouped by day, with the
+  per-meeting Join / Don't join override and "Sync now".
+- `calendar/page.tsx` — DB-34's `/calendar`: per-connection health (last sync, last error, events
+  touched) and Reconnect. `calendar/google/` and `calendar/microsoft/` hold each provider's OAuth
+  `callback/` route (DB-31, DB-32/DB-33) — no nav-rail entry of their own; see that directory's
+  own `README.md`.
 - `login/page.tsx` — the sign-in page. It computes on the SERVER which providers exist, so no OAuth
   identifier is ever sent to the browser.
 - `api/` — the handlers.

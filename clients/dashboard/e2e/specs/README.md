@@ -92,6 +92,26 @@ spec's body is only the property, not the plumbing.
   `billing.stripe.com` is intercepted with `page.route()` and fulfilled locally — this spec never
   leaves the test environment.
 
+- `18-microsoft-calendar.spec.ts` (DB-32/DB-33) — the Google flow's Microsoft sibling: connecting
+  with no text entry at all against `login.microsoftonline.com` (intercepted, never a real
+  navigation), denied consent, a state the stub never issued, the exchange call itself failing,
+  and a connection needing reconnect showing Reconnect and clearing on success — each proven the
+  same way `06-calendar.spec.ts` proves it for Google. Also proves the two providers' busy states
+  are independent: clicking Connect Microsoft 365 never disables Connect Google Calendar.
+- `19-upcoming.spec.ts` (DB-33) — `/upcoming` groups the fixture's scheduled meetings by day,
+  soonest day and soonest meeting within a day first; a calendar-managed row shows its source
+  chip and a hand-scheduled one shows none; a recorded auto-join skip reason renders verbatim;
+  flipping a row's Join / Don't join switch sends exactly `{auto_join: false}` to
+  `PATCH /meetings/<id>` (proven by reading the exact body off the stub's own request log — see
+  `helpers.ts`'s `LoggedRequest.body`); and "Sync now" with no calendars connected says so rather
+  than doing nothing silently.
+- `20-calendar-health.spec.ts` (DB-34) — `/calendar` with nothing connected points at the Add Bot
+  dialog's Calendar tab rather than a placeholder; a healthy ICS connection reads "Never synced"
+  until "Sync now" gives it a real timestamp and an event count; a failed feed shows the
+  producer's `last_error` verbatim with "Sync now" still offered (an ICS feed is never
+  `reconnect_needed`); and a Google connection needing reconnect shows Reconnect instead of
+  Sync now, driving the SAME OAuth flow `06-calendar.spec.ts` proves, and clears on success.
+
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints
 (no new runtime dependency without justification) argue against pulling in just to print one

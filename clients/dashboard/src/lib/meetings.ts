@@ -33,6 +33,22 @@ export interface MeetingRowDTO {
     /** The producer's own join-failure detail (lifecycle/join_evidence.py), verbatim — never
      *  reworded here. Present only when a join attempt actually failed. */
     reason?: string | null;
+    /** Whether the auto-join sweep should dispatch a bot for this planned row when its time
+     *  arrives (`meeting_api/bot_spawn/auto_join.py`) — absent means on, same default the
+     *  producer applies. DB-33's Upcoming page reads and writes this (via `PATCH
+     *  /meetings/<id>`) as the per-meeting Join / Don't join override. */
+    auto_join?: boolean;
+    /** The producer's own reason the LAST auto-join attempt was skipped or failed
+     *  (`data.auto_join_error`, `bot_spawn/auto_join.py`), verbatim — never reworded. Present
+     *  only after an attempt was actually skipped; a row that hasn't been attempted yet, or
+     *  whose last attempt succeeded, carries none. */
+    auto_join_error?: string | null;
+    /** The connected calendar's own display name (`calendars.py`'s `new_google_connection`/
+     *  `new_microsoft_connection`/ICS `name`), stamped onto every row that connection's sync
+     *  imported (`collector/adapters.py`'s `create_planned_meeting`) — absent on a meeting the
+     *  person planned by hand, which has no calendar source to show. */
+    calendar_name?: string | null;
+    calendar_connection_id?: string | null;
   } | null;
 }
 
@@ -69,6 +85,18 @@ export interface Meeting {
   meetingUrl: string | null;
   /** The producer's own join-failure reason, verbatim — null when the bot never failed to join. */
   joinFailureReason: string | null;
+  /** Whether the auto-join sweep will dispatch a bot for this planned row — DB-33's Join /
+   *  Don't join override. Defaults to `true`, the same default the producer applies when the key
+   *  is absent (`data.auto_join`, `bot_spawn/auto_join.py`). Meaningless once a meeting has left
+   *  the "scheduled" phase, but always present so a caller never has to special-case it away. */
+  autoJoin: boolean;
+  /** The producer's own reason the last auto-join attempt was skipped, verbatim — null when none
+   *  was ever attempted or the last attempt succeeded. */
+  autoJoinError: string | null;
+  /** The connected calendar's display name that imported this row, or null for a meeting the
+   *  person planned by hand. */
+  calendarName: string | null;
+  calendarConnectionId: string | null;
 }
 
 /** Statuses where the bot is in, or heading to, the room. */
@@ -128,6 +156,10 @@ export function toMeeting(d: MeetingRowDTO): Meeting {
     nativeId: native,
     meetingUrl: d.constructed_meeting_url ?? null,
     joinFailureReason: d.data?.reason ?? null,
+    autoJoin: d.data?.auto_join !== false,
+    autoJoinError: d.data?.auto_join_error ?? null,
+    calendarName: d.data?.calendar_name ?? null,
+    calendarConnectionId: d.data?.calendar_connection_id ?? null,
   };
 }
 
@@ -164,6 +196,60 @@ export function mergeMeetingsPage(
   const seen = new Set(loaded.map((m) => m.id));
   const added = page.filter((m) => !seen.has(m.id));
   return sortMeetings([...loaded, ...added]);
+}
+
+/** One day's worth of scheduled meetings, soonest day first — the Upcoming page's grouping
+ *  (DB-33). `dayKey` is the meeting's own event time truncated to a calendar day in the VIEWER's
+ *  local timezone (never UTC — a 11pm-UTC meeting and a person eight hours west should not land
+ *  on different days than what their own calendar app would show them), formatted `YYYY-MM-DD` so
+ *  it sorts lexically the same as chronologically. */
+export interface UpcomingDayGroup {
+  dayKey: string;
+  label: string;
+  meetings: Meeting[];
+}
+
+/** The timestamp a scheduled meeting is grouped and sorted by: a calendar-synced row's own event
+ *  time when it has one, else the time the person picked when they scheduled it by hand. Never
+ *  `startTime` — a row that hasn't started yet (every "scheduled" row, by `phaseOf`'s own
+ *  definition) has none. */
+function upcomingWhen(m: Meeting): Date | null {
+  const iso = m.scheduledAt;
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+const DAY_LABEL = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
+
+/** Group already-`"scheduled"`-phase meetings by calendar day, soonest first within each day. A
+ *  row with no resolvable time (should not happen for a "scheduled" row, but a producer's future
+ *  regression must not crash the page) sorts last, under its own "No date" group. */
+export function groupUpcomingByDay(meetings: readonly Meeting[]): UpcomingDayGroup[] {
+  const groups = new Map<string, Meeting[]>();
+  for (const m of meetings) {
+    const when = upcomingWhen(m);
+    const dayKey = when
+      ? `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-${String(when.getDate()).padStart(2, "0")}`
+      : "no-date";
+    const bucket = groups.get(dayKey);
+    if (bucket) bucket.push(m);
+    else groups.set(dayKey, [m]);
+  }
+  const keys = [...groups.keys()].sort((a, b) => {
+    if (a === "no-date") return 1;
+    if (b === "no-date") return -1;
+    return a.localeCompare(b);
+  });
+  return keys.map((dayKey) => {
+    const rows = [...groups.get(dayKey)!].sort((a, b) => {
+      const wa = upcomingWhen(a)?.getTime() ?? Infinity;
+      const wb = upcomingWhen(b)?.getTime() ?? Infinity;
+      return wa - wb;
+    });
+    const label = dayKey === "no-date" ? "No date set" : DAY_LABEL.format(new Date(`${dayKey}T00:00:00`));
+    return { dayKey, label, meetings: rows };
+  });
 }
 
 /** Free-text filter over the fields a person can actually see on a card. */

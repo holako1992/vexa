@@ -141,14 +141,16 @@ export function MeetingsView() {
     };
   }, [load]);
 
-  // DB-31: the Google-connect callback page (`/calendar/google/callback`) sends the browser back
-  // here with `?calendar=connected` (success) or `?calendar=1` (the person clicked "Back to
-  // Calendar" after an error, or wants another attempt) — either way, land back on the Calendar
-  // tab of the SAME dialog they started the OAuth flow from, rather than the meetings list. The
-  // param is stripped immediately after so a refresh doesn't reopen the dialog or re-toast.
-  // `handledCalendarReturn` guards against React's dev-mode double-invoked effect firing this
-  // twice (and so double-toasting) for the SAME landing — `router.replace` below is what actually
-  // makes it not fire again on a later render.
+  // DB-31/DB-32/DB-33: EITHER provider's OAuth callback page (`/calendar/google/callback`,
+  // `/calendar/microsoft/callback`) sends the browser back here with `?calendar=connected
+  // &provider=<google|microsoft>` (success) or `?calendar=1` (the person clicked "Back to
+  // Calendar" after an error, or wants another attempt — no `provider`, since an error already
+  // showed its own message on the callback page and never toasts again here) — either way, land
+  // back on the Calendar tab of the SAME dialog they started the OAuth flow from, rather than the
+  // meetings list. The params are stripped immediately after so a refresh doesn't reopen the
+  // dialog or re-toast. `handledCalendarReturn` guards against React's dev-mode double-invoked
+  // effect firing this twice (and so double-toasting) for the SAME landing — `router.replace`
+  // below is what actually makes it not fire again on a later render.
   const handledCalendarReturn = useRef(false);
   useEffect(() => {
     const calendarParam = searchParams.get("calendar");
@@ -157,7 +159,8 @@ export function MeetingsView() {
     setDialogInitialTab("calendar");
     setDialogOpen(true);
     if (calendarParam === "connected") {
-      toast.push({ tone: "success", title: "Google Calendar connected." });
+      const label = searchParams.get("provider") === "microsoft" ? "Microsoft 365" : "Google Calendar";
+      toast.push({ tone: "success", title: `${label} connected.` });
     }
     router.replace("/", { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps

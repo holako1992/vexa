@@ -24,7 +24,16 @@
   forwards the store's own flag rather than the caller guessing from page length) and
   `mergeMeetingsPage` (the one rule for combining a fetched page with what is already loaded —
   "append" for Load more, "replace" for the phase-aware poll's full-window re-fetch, which is what
-  keeps a live row on a later page from dropping off).
+  keeps a live row on a later page from dropping off). DB-33 adds `autoJoin`/`autoJoinError`/
+  `calendarName` onto `Meeting` (all verbatim off the producer's `data.*`) and
+  `groupUpcomingByDay` — the Upcoming page's one grouping rule, soonest day and soonest meeting
+  within a day first, a row with no resolvable time sorting last under its own group rather than
+  crashing the page.
+- **`calendarOAuth.ts`** — the one place both calendar OAuth providers' shared shape lives:
+  `CalendarOAuthProvider`, `CALENDAR_OAUTH_LABEL`, and `fetchTrustedAuthorizeUrl` (the
+  `GET /user/calendars/<provider>/authorize` call PLUS the authorize-URL host check, so
+  `SendBotDialog`'s connect buttons and `CalendarHealthView`'s Reconnect action can't drift on
+  what "trusted" means for either provider).
 - **`search.ts`** — DB-44's two pure transforms for `/search`: `groupHitsByMeeting` (collects
   `GET /transcripts/search`'s flat hit list into per-meeting groups, in the producer's own rank
   order) and `highlightSnippet` (splits a snippet into plain/matched text segments for the

@@ -10,17 +10,21 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   stub process, `playwright.config.ts`, and every spec agree without importing each other's
   runtime code — the stub runs as a separate OS process, so it can only share plain data, not
   live references.
-- `fixtures.mjs` — the canned world: six named meetings spanning live/scheduled/past (including
+- `fixtures.mjs` — the canned world: named meetings spanning live/scheduled/past (including
   one user-stopped `completed` row for the derived "stopped" status, one completed row with no
-  `summary.md` yet, and one with a `status: skipped` note), plus 19 `ARCHIVED_ROWS` (DB-48) that
-  push the fixture past the dashboard's 20-row page size — 25 total, so pagination has a real
-  second page to load. Two meetings now carry transcripts with offsets (102 and 105, both
-  containing the word "calendar" — DB-44's grouping spec needs a term that hits more than one
-  meeting), a `summary.v1` note per meeting id (`summaryFor`, DB-60), and an invite/speaker roster
-  for the live meeting (`participantsFor`, DB-42). `searchTranscripts()` is a crude substring
-  search over those transcripts, shaped exactly like meeting-api's own `GET /transcripts/search`
-  response. `freshMeetings()` / `freshCalendars()` return deep clones so the stub's mutations
-  during one spec never leak into the next.
+  `summary.md` yet, one with a `status: skipped` note, and DB-33's two additional `"scheduled"`
+  rows — 110, calendar-managed with `data.calendar_name` for the Upcoming page's source chip; 111,
+  hand-scheduled with `auto_join` already off and a recorded `auto_join_error`, on the same day as
+  110 but earlier, for the day-grouping/ordering spec), plus 19 `ARCHIVED_ROWS` (DB-48) that push
+  the fixture past the dashboard's 20-row page size — 25+ total, so pagination has a real second
+  page to load. Two meetings carry transcripts with offsets (102 and 105, both containing the
+  word "calendar" — DB-44's grouping spec needs a term that hits more than one meeting), a
+  `summary.v1` note per meeting id (`summaryFor`, DB-60), and an invite/speaker roster for the
+  live meeting (`participantsFor`, DB-42). `searchTranscripts()` is a crude substring search over
+  those transcripts, shaped exactly like meeting-api's own `GET /transcripts/search` response.
+  `freshMeetings()` / `freshCalendars()` return deep clones so the stub's mutations during one
+  spec never leak into the next. `E2E_GOOGLE_EMAIL` / `E2E_MICROSOFT_EMAIL` are the fixed accounts
+  each provider's OAuth exchange always resolves to (DB-31, DB-32/DB-33).
 - `stub-server.mjs` — the stub backend itself: plain `node:http`, no dependency, because the
   fixtures are the point, not a framework. Runs two listeners in one process (the gateway and
   admin-api) plus a `/__control/*` remote control the specs use to reset state, inspect exactly
@@ -39,14 +43,25 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   reached it (the request log only keeps method/url/headers); portal answers a `billing.stripe.com`
   URL once a customer exists, else the same 409 shape as `create_billing_portal`.
   `/__control/billingCustomer` (`helpers.ts`'s `setStripeCustomer`) sets that customer state
-  directly. See the file's own header comment for the full route table.
+  directly. DB-32/DB-33 add `GET`/`POST /user/calendars/microsoft/{authorize,exchange}` — the
+  Microsoft sibling of the Google pair, with its own issued/used state sets
+  (`issuedMicrosoftStates`/`usedMicrosoftStates`) and `force.microsoftExchange`
+  (`helpers.ts`'s `forceMicrosoftExchange`). DB-34 adds `GET /user/calendars/<id>/sync` (the
+  health read: `{}` until a sync has run) and gives the existing `POST` on the same path a real
+  stamp to store and return, `{last_sync, last_error, counts}` — `/__control/seedSyncStamp`
+  (`helpers.ts`'s `seedSyncStamp`) seeds one directly. DB-33 adds `PATCH /meetings/<id>
+  {auto_join}` — the Upcoming page's Join / Don't join override. Every write route added since
+  DB-33 also records its exact parsed body on its own `gatewayLog` entry
+  (`readAndLogBody`/`LoggedRequest.body`), not just that the route was called — the mechanism
+  `19-upcoming.spec.ts` uses to prove the toggle's PATCH body reaches the stub unchanged. See the
+  file's own header comment for the full route table.
 - `playwright.config.ts` — boots BOTH servers via Playwright's `webServer` (the stub, then
   `next dev` pointed at it with the matching env vars) so `npm run test:e2e` runs everything from
   a cold start with no manual setup. Calls `next dev` directly with a literal `--port` rather than
   `npm run dev` (`next dev --port ${PORT:-3001}`) because npm always runs package scripts through
   `cmd.exe` on Windows regardless of the invoking shell, and that bash-style `${VAR:-default}`
   never expands there.
-- `specs/` — the seventeen specs. See `specs/README.md`.
+- `specs/` — the twenty specs. See `specs/README.md`.
 
 ## Running it
 

@@ -71,19 +71,42 @@ Client components. They receive identity as props (resolved on the server) and f
   /meetings/<platform>/<native>/participants`, shown as chips in the header. Renders nothing when
   the meeting has no native id or the roster is empty — there is no "0 participants" state to get
   wrong.
-- `SendBotDialog` — the dispatch door: paste a meeting link and send a bot, or manage the ICS
-  calendar connections that arm an unattended join. It parses the link in the browser only to
-  decide what to send and what to disable; the platform and id it derives are re-checked at the
-  proxy's write allowlist, which is the boundary that actually refuses. Built on `ui/Dialog` and
-  `ui/Toggle`. Every mutation (send bot, connect/update/sync/remove a calendar) confirms or fails
-  through `ui/Toast`'s `useToast()`, in addition to the inline "Bot is joining the meeting."
-  confirmation `SendBotDialog` already showed (DB-02a fixed that inline confirmation; DB-04 did not
-  touch it, only added the toast alongside it). DB-75's paywall: a read-only remaining-allowance
-  line under Send (`lib/entitlements.ts`'s `formatRemainingAllowance`, informational only — it
-  never disables sending, because a stale client read must not refuse a legitimate one), and a
-  quota-exceeded send branches on the `POST /bots` response body's `error: "quota_exceeded"`
-  field, never on the 402 status alone, showing the reset date and a link to `upgrade_url` (or
-  `/billing` when the producer sent none).
+- `SendBotDialog` — the dispatch door: paste a meeting link and send a bot, or manage the calendar
+  connections that arm an unattended join. It parses the link in the browser only to decide what
+  to send and what to disable; the platform and id it derives are re-checked at the proxy's write
+  allowlist, which is the boundary that actually refuses. Built on `ui/Dialog` and `ui/Toggle`.
+  The Calendar tab's primary path is one OAuth click each for **Connect Google Calendar** (DB-31)
+  and **Connect Microsoft 365** (DB-32/DB-33) — both share `connectOAuth`/`lib/calendarOAuth.ts`'s
+  `fetchTrustedAuthorizeUrl`, which fetches `GET /user/calendars/<provider>/authorize` and checks
+  the returned `authorize_url`'s host before ever navigating there. A connection of either OAuth
+  kind whose grant needs it shows the same Reconnect action (`reconnect_needed`, set/cleared by
+  the core). "Other calendar (ICS)" is the fallback, with an inline guide and the validator errors
+  from `calendars.py` surfaced as field hints. Every mutation (send bot, connect/update/sync/
+  remove a calendar) confirms or fails through `ui/Toast`'s `useToast()`, in addition to the
+  inline "Bot is joining the meeting." confirmation `SendBotDialog` already showed (DB-02a fixed
+  that inline confirmation; DB-04 did not touch it, only added the toast alongside it). DB-75's
+  paywall: a read-only remaining-allowance line under Send (`lib/entitlements.ts`'s
+  `formatRemainingAllowance`, informational only — it never disables sending, because a stale
+  client read must not refuse a legitimate one), and a quota-exceeded send branches on the
+  `POST /bots` response body's `error: "quota_exceeded"` field, never on the 402 status alone,
+  showing the reset date and a link to `upgrade_url` (or `/billing` when the producer sent none).
+- `CalendarOAuthCallback` — the OAuth redirect landing page BOTH providers' callback routes
+  render (`app/calendar/google/callback/` and `app/calendar/microsoft/callback/`, with their own
+  `provider` prop): relays `{code, state}` to `POST /api/vexa/user/calendars/<provider>/exchange`
+  and shows one of three distinct failure shapes (consent denied, a malformed redirect, or the
+  exchange call's own producer-typed `detail`) verbatim — never a squashed generic error. One
+  component, so the two providers' callback pages can never drift on this behaviour.
+- `UpcomingView` — DB-33's `/upcoming`: every `"scheduled"`-phase meeting (from the SAME
+  `GET /meetings` read `MeetingsView`'s own Upcoming tab already filters — never a second source),
+  grouped by day (`lib/meetings.ts`'s `groupUpcomingByDay`) with the source calendar's chip, the
+  Join / Don't join override (a real `Toggle`, `PATCH /meetings/<id> {auto_join}`), and the
+  producer's own auto-join skip/failure reason (`data.auto_join_error`) shown verbatim. "Sync now"
+  runs the existing per-connection sync across every connected calendar.
+- `CalendarHealthView` — DB-34's `/calendar`: per connection, last sync time, last error, how
+  many events the last sync touched (`GET /user/calendars/<id>/sync`'s `{last_sync, last_error,
+  counts}`), and a Reconnect action for a connection whose `reconnect_needed` is set — a failed or
+  reconnect-needed feed shows that action rather than going silently stale. Never duplicates the
+  connect flow; with nothing connected, it points at `SendBotDialog`'s Calendar tab instead.
 - `LoginForm` — the sign-in card. The `next` parameter passes through `safeNext()` from
   `lib/security.ts`, which is why it cannot become an open redirect.
 - `MeetingDetail`'s speaker chips mix one hue into transparent rather than using a frozen pastel,

@@ -1,9 +1,13 @@
 /** Canned gateway data for the stub server — one small, realistic world, reused by every spec.
  *
- *  Four meetings span the three phases the list groups by (`src/lib/meetings.ts`'s `phaseOf`):
- *  one live, one scheduled, and two past (one of them a user-stopped `completed` row so the
- *  "stopped" derived status has a fixture too). The past meeting with a native id keeps a full,
- *  multi-speaker transcript with offsets, for the detail-page and search specs.
+ *  `MEETING_ROWS` spans the three phases the list groups by (`src/lib/meetings.ts`'s `phaseOf`):
+ *  live, past (including a user-stopped `completed` row so the "stopped" derived status has a
+ *  fixture too), and "scheduled" — three of those: 103 (hand-scheduled, no calendar source), and
+ *  DB-33's 110/111 (110 calendar-managed with a `calendar_name` source chip; 111 hand-scheduled,
+ *  auto-join already off, carrying a recorded `auto_join_error`, on the same day as 110 but
+ *  earlier — the Upcoming page's day-grouping/ordering spec needs both a source chip AND a
+ *  same-day ordering case). The past meeting with a native id keeps a full, multi-speaker
+ *  transcript with offsets, for the detail-page and search specs.
  *
  *  `freshMeetings()` / `freshCalendars()` return DEEP clones — the stub server mutates its
  *  working copies (new calendars, bot dispatches don't change meetings here, but calendars do),
@@ -88,13 +92,54 @@ const MEETING_ROWS = [
     constructed_meeting_url: "https://meet.google.com/skip-defg-hij",
     data: { title: "Quick Check-in", attendees: [] },
   },
+  // 110 — scheduled, calendar-managed (imported by a Google connection): DB-33's Upcoming page
+  // reads `data.calendar_name` for the source chip and `data.auto_join` for the Join toggle's
+  // initial state (on, here).
+  {
+    id: 110,
+    platform: "google_meet",
+    native_meeting_id: "gcal-plan-1",
+    status: "scheduled",
+    shared: false,
+    start_time: null,
+    end_time: null,
+    constructed_meeting_url: "https://meet.google.com/gcal-plan-1",
+    data: {
+      title: "Quarterly Review",
+      scheduled_at: "2026-09-28T15:00:00Z",
+      calendar_name: "Work — Google",
+      calendar_connection_id: "cal-g1",
+      auto_join: true,
+      attendees: [],
+    },
+  },
+  // 111 — scheduled by hand (no calendar source, so no chip), on the SAME day as 110 but earlier
+  // — proves within-day ordering — and carrying a recorded auto-join skip reason plus auto_join
+  // already off, DB-33's "surfaced verbatim" acceptance.
+  {
+    id: 111,
+    platform: "unknown",
+    native_meeting_id: null,
+    status: "idle",
+    shared: false,
+    start_time: null,
+    end_time: null,
+    constructed_meeting_url: null,
+    data: {
+      title: "1:1 with Priya",
+      scheduled_at: "2026-09-28T09:00:00Z",
+      auto_join: false,
+      auto_join_error: "another meeting is already active for this bot",
+      attendees: [],
+    },
+  },
 ];
 
 /** DB-48: enough ADDITIONAL rows to force `GET /meetings` past one page at the dashboard's own
  *  page size (20) — `Archived Call 1`..`Archived Call 19`, ids 200..218, oldest-looking first so
- *  they sort after the six named rows above. 6 + 19 = 25 total: page one (limit 20, offset 0)
- *  returns 20 rows (all six named ones plus the first 14 archived ones) with `has_more: true`,
- *  page two (offset 20) returns the remaining 5 with `has_more: false` (no third page). */
+ *  they sort after the eight named rows above. 8 + 19 = 27 total: page one (limit 20, offset 0)
+ *  returns 20 rows (all eight named ones plus the first 12 archived ones) with `has_more: true`,
+ *  page two (offset 20) returns the remaining 7 with `has_more: false` (no third page). */
 const ARCHIVED_ROWS = Array.from({ length: 19 }, (_, i) => {
   const n = i + 1;
   const day = String(20 + (i % 8)).padStart(2, "0"); // spreads across a few August dates
@@ -251,6 +296,9 @@ export function freshCalendars() {
  *  clears `reconnect_needed`), and the state/consent failure paths; a spec that needs a SECOND
  *  distinct Google account is out of this task's scope. */
 export const E2E_GOOGLE_EMAIL = "person@e2e.test";
+
+/** DB-32/DB-33's Microsoft sibling of `E2E_GOOGLE_EMAIL` — same role, same one-identity scope. */
+export const E2E_MICROSOFT_EMAIL = "person@e2e-work.test";
 
 export const JITSI_HOSTS = ["meet.e2e.test"];
 

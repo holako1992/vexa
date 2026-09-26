@@ -35,7 +35,7 @@ import {
   type Entitlements,
   type QuotaExceededBody,
 } from "@/lib/entitlements";
-import { isTrustedGoogleAuthorizeRedirect } from "@/lib/security";
+import { CALENDAR_OAUTH_LABEL, type CalendarOAuthProvider, fetchTrustedAuthorizeUrl } from "@/lib/calendarOAuth";
 import { Button, Dialog, Input, Toggle, useToast } from "./ui";
 
 // ─── types ───────────────────────────────────────────────────────────────────
@@ -44,35 +44,28 @@ interface CalendarConnection {
   id: string;
   /** `masked_connection` (`admin_api/app/calendars.py`) always sets this, defaulting pre-DB-30
    *  rows to `"ics"` server-side — never missing on the wire. */
-  kind: "ics" | "google";
+  kind: "ics" | "google" | "microsoft";
   name: string;
   ics_url_set?: boolean;
   ics_url_masked?: string | null;
-  /** Google-only fields — never present on an `"ics"` row. */
+  /** Google-only fields — never present on any other `kind`. */
   google_email?: string | null;
   google_calendar_ids?: string[];
+  /** Microsoft-only fields (DB-32/DB-33) — never present on any other `kind`. */
+  microsoft_email?: string | null;
+  microsoft_calendar_ids?: string[];
   reconnect_needed?: boolean;
   auto_join: boolean;
   bot_name?: string | null;
   enabled: boolean;
 }
 
-/** `GET /user/calendars/google/authorize`'s response (DB-31). `state` round-trips through
- *  Google's own redirect (it is embedded in `authorize_url` as the `state` query param, and
- *  Google echoes it back verbatim) — this client never stores it separately, and never invents a
- *  second check of it: the core alone signs and verifies it (see `lib/upstream.ts`'s
- *  `isGoogleExchangeBody` comment). */
-interface GoogleAuthorizeResponse {
-  authorize_url: string;
-  state: string;
-}
-
-/** The message a producer error carries verbatim, when it has one — admin-api's Google routes
- *  answer typed, actionable `detail` strings (missing config, Google's own rejection reason, a
- *  connection-limit refusal, …) that are more useful than `presentError`'s generic per-status
- *  copy, so this prefers them. Falls back to `presentError` only for a network failure or a
- *  response with no `detail` at all. */
-function googleErrorMessage(e: unknown): string {
+/** The message a producer error carries verbatim, when it has one — admin-api's calendar OAuth
+ *  routes (Google, Microsoft) answer typed, actionable `detail` strings (missing config, the
+ *  provider's own rejection reason, a connection-limit refusal, …) that are more useful than
+ *  `presentError`'s generic per-status copy, so this prefers them. Falls back to `presentError`
+ *  only for a network failure or a response with no `detail` at all. */
+function oauthErrorMessage(e: unknown): string {
   if (e instanceof ApiError && e.detail) return e.detail;
   return presentError(e);
 }
@@ -274,15 +267,20 @@ interface CalendarRowProps {
   onDelete: (id: string) => void;
   onPatch: (id: string, body: Partial<CalendarConnection>) => void;
   onSync: (id: string) => void;
-  onReconnect: () => void;
+  onReconnect: (cal: CalendarConnection) => void;
   busy: boolean;
   reconnecting: boolean;
 }
 
+/** Both OAuth connection kinds (`"google"`, `"microsoft"`) get the identical reconnect treatment
+ *  — see `masked_connection`/`set_reconnect_needed` (`calendars.py`), which apply the SAME
+ *  `reconnect_needed` flag to either kind. */
+const OAUTH_KINDS = new Set(["google", "microsoft"]);
+
 function CalendarRow({ cal, onDelete, onPatch, onSync, onReconnect, busy, reconnecting }: CalendarRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const needsReconnect = cal.kind === "google" && !!cal.reconnect_needed;
+  const needsReconnect = OAUTH_KINDS.has(cal.kind) && !!cal.reconnect_needed;
 
   return (
     <div className={clsx("rounded-xl border bg-card", needsReconnect ? "border-warn/40" : "border-line")}>
@@ -294,19 +292,30 @@ function CalendarRow({ cal, onDelete, onPatch, onSync, onReconnect, busy, reconn
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{cal.name}</p>
           <p className="text-xs text-ink-3">
-            {cal.kind === "google" ? (cal.google_email ?? "Google Calendar") : (cal.ics_url_masked ? `Feed: ${cal.ics_url_masked}` : "No feed set")}
+            {cal.kind === "google"
+              ? (cal.google_email ?? "Google Calendar")
+              : cal.kind === "microsoft"
+                ? (cal.microsoft_email ?? "Microsoft 365")
+                : (cal.ics_url_masked ? `Feed: ${cal.ics_url_masked}` : "No feed set")}
             {" · "}
             {cal.auto_join ? "Auto-join on" : "Auto-join off"}
           </p>
           {needsReconnect && (
             <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-warn">
-              <AlertTriangle size={11} aria-hidden /> Reconnect needed — Google access was revoked or expired.
+              <AlertTriangle size={11} aria-hidden /> Reconnect needed —{" "}
+              {cal.kind === "microsoft" ? "Microsoft" : "Google"} access was revoked or expired.
             </p>
           )}
         </div>
         <div className="flex items-center gap-1">
           {needsReconnect ? (
-            <Button variant="secondary" size="sm" onClick={onReconnect} loading={reconnecting} disabled={reconnecting}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onReconnect(cal)}
+              loading={reconnecting}
+              disabled={reconnecting}
+            >
               Reconnect
             </Button>
           ) : cal.kind === "ics" && (
@@ -389,7 +398,10 @@ function CalendarTab() {
   const [calendars, setCalendars] = useState<CalendarConnection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // the id being mutated, or "new"
-  const [googleBusy, setGoogleBusy] = useState(false);
+  // Which OAuth provider's connect/reconnect flow is in flight, if any — kept separate per
+  // provider so clicking "Connect Microsoft 365" never disables "Connect Google Calendar" (and
+  // vice versa), and so a row's own "Reconnect" spinner reflects ONLY its own provider.
+  const [oauthBusy, setOauthBusy] = useState<CalendarOAuthProvider | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
@@ -454,34 +466,26 @@ function CalendarTab() {
     }
   }, [load, toast]);
 
-  /** `GET /user/calendars/google/authorize` → validate the host → full-page redirect. Shared by
-   *  the primary "Connect Google Calendar" button and every row's "Reconnect" action — a
-   *  reconnect is exactly the same consent flow, run again; the core matches the returning
-   *  Google account by email and clears `reconnect_needed` on that same connection (`main.py`'s
-   *  `google_calendar_exchange`), so this client never needs to say WHICH connection it's
-   *  reconnecting. */
-  const connectGoogle = useCallback(async () => {
-    setGoogleBusy(true);
+  /** `GET /user/calendars/<provider>/authorize` → validate the host → full-page redirect. Shared
+   *  by the primary "Connect Google Calendar" / "Connect Microsoft 365" buttons AND every row's
+   *  "Reconnect" action — a reconnect is exactly the same consent flow, run again; the core
+   *  matches the returning account by email and clears `reconnect_needed` on that same connection
+   *  (`main.py`'s `google_calendar_exchange` / `microsoft_calendar_exchange`), so this client
+   *  never needs to say WHICH connection it's reconnecting. */
+  const connectOAuth = useCallback(async (provider: CalendarOAuthProvider) => {
+    setOauthBusy(provider);
     setError(null);
+    const label = CALENDAR_OAUTH_LABEL[provider];
     try {
-      const { authorize_url } = await getJson<GoogleAuthorizeResponse>(
-        "/api/vexa/user/calendars/google/authorize",
-      );
-      if (!isTrustedGoogleAuthorizeRedirect(authorize_url)) {
-        const msg = "Google returned an unexpected link. Please try again, or contact support.";
-        setError(msg);
-        toast.push({ tone: "error", title: "Couldn't connect Google Calendar", description: msg });
-        setGoogleBusy(false);
-        return;
-      }
+      const authorize_url = await fetchTrustedAuthorizeUrl(provider);
       window.location.assign(authorize_url);
-      // The page is navigating away — leave `googleBusy` set so the button stays disabled for
+      // The page is navigating away — leave `oauthBusy` set so the button stays disabled for
       // the (brief) remainder of this page's life rather than flashing re-enabled.
     } catch (e) {
-      const msg = googleErrorMessage(e);
+      const msg = oauthErrorMessage(e);
       setError(msg);
-      toast.push({ tone: "error", title: "Couldn't connect Google Calendar", description: msg });
-      setGoogleBusy(false);
+      toast.push({ tone: "error", title: `Couldn't connect ${label}`, description: msg });
+      setOauthBusy(null);
     }
   }, [toast]);
 
@@ -526,17 +530,29 @@ function CalendarTab() {
         </div>
       )}
 
-      {/* DB-31: the primary path — one OAuth click, no address to find or paste. */}
-      <Button
-        variant="primary"
-        onClick={connectGoogle}
-        loading={googleBusy}
-        disabled={googleBusy || !canAdd}
-        icon={<Calendar size={15} aria-hidden />}
-        className="h-10"
-      >
-        {googleBusy ? "Opening Google…" : "Connect Google Calendar"}
-      </Button>
+      {/* DB-31/DB-33: the primary path — one OAuth click each, no address to find or paste. */}
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Button
+          variant="primary"
+          onClick={() => void connectOAuth("google")}
+          loading={oauthBusy === "google"}
+          disabled={oauthBusy === "google" || !canAdd}
+          icon={<Calendar size={15} aria-hidden />}
+          className="h-10 flex-1"
+        >
+          {oauthBusy === "google" ? "Opening Google…" : "Connect Google Calendar"}
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => void connectOAuth("microsoft")}
+          loading={oauthBusy === "microsoft"}
+          disabled={oauthBusy === "microsoft" || !canAdd}
+          icon={<Calendar size={15} aria-hidden />}
+          className="h-10 flex-1"
+        >
+          {oauthBusy === "microsoft" ? "Opening Microsoft…" : "Connect Microsoft 365"}
+        </Button>
+      </div>
 
       {calendars === null && !error && (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-ink-3" role="status">
@@ -549,8 +565,8 @@ function CalendarTab() {
           <Calendar size={24} className="mx-auto mb-2 text-ink-3" aria-hidden />
           <p className="text-sm font-medium text-ink-2">No calendars connected</p>
           <p className="mt-0.5 text-xs text-ink-3">
-            Connect Google Calendar above, or a secret ICS feed below, and Vexa will auto-join
-            meetings for you.
+            Connect Google Calendar or Microsoft 365 above, or a secret ICS feed below, and Vexa
+            will auto-join meetings for you.
           </p>
         </div>
       )}
@@ -564,9 +580,9 @@ function CalendarTab() {
               onDelete={handleDelete}
               onPatch={handlePatch}
               onSync={handleSync}
-              onReconnect={connectGoogle}
+              onReconnect={(row) => void connectOAuth(row.kind === "microsoft" ? "microsoft" : "google")}
               busy={busy === cal.id}
-              reconnecting={googleBusy}
+              reconnecting={oauthBusy === (cal.kind === "microsoft" ? "microsoft" : "google")}
             />
           ))}
         </div>

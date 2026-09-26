@@ -6,6 +6,7 @@ import {
   type MeetingRowDTO,
   filterMeetings,
   formatClock,
+  groupUpcomingByDay,
   initialsOf,
   mergeMeetingsPage,
   sortMeetings,
@@ -45,6 +46,56 @@ describe("toMeeting", () => {
     expect(toMeeting(row({ start_time: start, end_time: "2026-09-01T10:41:30Z" })).durationSeconds).toBe(2490);
     expect(toMeeting(row({ start_time: start })).durationSeconds).toBeNull();
     expect(toMeeting(row({ start_time: start, end_time: "2026-09-01T09:00:00Z" })).durationSeconds).toBeNull();
+  });
+});
+
+describe("toMeeting — auto-join, calendar source (DB-33)", () => {
+  it("defaults autoJoin to true when data.auto_join is absent, honours an explicit false", () => {
+    expect(toMeeting(row({ status: "scheduled" })).autoJoin).toBe(true);
+    expect(toMeeting(row({ status: "scheduled", data: { auto_join: true } })).autoJoin).toBe(true);
+    expect(toMeeting(row({ status: "scheduled", data: { auto_join: false } })).autoJoin).toBe(false);
+  });
+
+  it("carries the producer's auto_join_error and calendar_name verbatim, null when absent", () => {
+    const withError = toMeeting(row({
+      status: "scheduled",
+      data: { auto_join_error: "another meeting is already active", calendar_name: "Work — Google" },
+    }));
+    expect(withError.autoJoinError).toBe("another meeting is already active");
+    expect(withError.calendarName).toBe("Work — Google");
+
+    const plain = toMeeting(row({ status: "scheduled" }));
+    expect(plain.autoJoinError).toBeNull();
+    expect(plain.calendarName).toBeNull();
+  });
+});
+
+describe("groupUpcomingByDay (DB-33)", () => {
+  const scheduled = (id: number, scheduledAt: string | undefined, title: string): Meeting =>
+    toMeeting(row({ id, native_meeting_id: null, platform: "unknown", status: "scheduled", data: { scheduled_at: scheduledAt, title } }));
+
+  it("groups by calendar day, soonest day first, soonest meeting first within a day", () => {
+    const groups = groupUpcomingByDay([
+      scheduled(1, "2026-10-02T14:00:00", "Later on the 2nd"),
+      scheduled(2, "2026-10-01T09:00:00", "Morning on the 1st"),
+      scheduled(3, "2026-10-01T16:00:00", "Afternoon on the 1st"),
+    ]);
+    expect(groups.map((g) => g.dayKey)).toEqual(["2026-10-01", "2026-10-02"]);
+    expect(groups[0]!.meetings.map((m) => m.title)).toEqual(["Morning on the 1st", "Afternoon on the 1st"]);
+    expect(groups[1]!.meetings.map((m) => m.title)).toEqual(["Later on the 2nd"]);
+  });
+
+  it("sorts a row with no resolvable time last, under its own group", () => {
+    const groups = groupUpcomingByDay([
+      scheduled(1, "2026-10-01T09:00:00", "Has a date"),
+      scheduled(2, undefined, "No date"),
+    ]);
+    expect(groups.map((g) => g.dayKey)).toEqual(["2026-10-01", "no-date"]);
+    expect(groups[1]!.label).toBe("No date set");
+  });
+
+  it("returns nothing for an empty list", () => {
+    expect(groupUpcomingByDay([])).toEqual([]);
   });
 });
 
