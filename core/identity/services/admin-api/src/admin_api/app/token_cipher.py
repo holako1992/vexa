@@ -24,11 +24,8 @@ monorepo for ``core/meetings/services/mcp``), not a hand-rolled construction.
     connection of the SAME user, fails AEAD verification rather than decrypting into that other
     row's context.
   * the envelope is version-prefixed (``v2:`` + standard base64 of ``nonce || ciphertext+tag``)
-    so the format is self-describing. ``v2`` is the first and only format this module has ever
-    written — DB-31 (the first caller that could persist a connection) ships after this module,
-    so no ``gcv1:`` envelope (the hand-built HMAC-CTR construction this module replaced) can exist
-    in any deployment's data. ``decrypt`` therefore REJECTS a ``gcv1:`` envelope outright, with a
-    "reconnect" error, rather than carrying legacy decrypt code for a format nothing ever wrote.
+    so the format is self-describing. Any other prefix, including ``gcv1:``, is refused with a
+    "reconnect" error: the user re-consents and a fresh ``v2:`` envelope is written.
 
 The master key is ``CALENDAR_TOKEN_ENCRYPTION_KEY`` (config.v1, part of the ``google_calendar``
 capability — see ``config.v1.json``). Unset, malformed, or the wrong length, ``encrypt``/``decrypt``
@@ -100,7 +97,7 @@ def decrypt(token: str, *, user_id: object, calendar_id: object) -> str:
     :func:`encrypt` was called with — a mismatch (including a ciphertext copied onto another
     row) fails the same way tampering does. Raises :class:`TokenCipherError` on a missing/
     malformed key, a malformed blob, a failed AEAD check (tampering, wrong AD, or the wrong
-    key), or a legacy (``gcv1:``) envelope — NEVER returns a partially-decrypted value."""
+    key), or a non-``v2:`` envelope — NEVER returns a partially-decrypted value."""
     key = _master_key()
     if token.startswith(_LEGACY_PREFIX):
         raise TokenCipherError(
