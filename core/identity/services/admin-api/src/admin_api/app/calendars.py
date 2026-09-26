@@ -103,12 +103,14 @@ def validate_google_calendar_ids(value: Optional[list]) -> list:
     return ids
 
 
-def new_google_connection(*, name: str, google_email: str, refresh_token_enc: str,
-                          google_calendar_ids: Optional[list] = None, auto_join: bool = True,
-                          bot_name: str = "Vexa") -> dict:
+def new_google_connection(*, id: Optional[str] = None, name: str, google_email: str,
+                          refresh_token_enc: str, google_calendar_ids: Optional[list] = None,
+                          auto_join: bool = True, bot_name: str = "Vexa") -> dict:
     """A ``kind: "google"`` connection. ``refresh_token_enc`` is the ALREADY-ENCRYPTED blob
     (``token_cipher.encrypt``) — this function never sees, and this module never stores, a
-    plaintext refresh token."""
+    plaintext refresh token. ``id``, when the caller already minted one to bind as
+    ``token_cipher``'s associated data before encrypting, is used as-is; otherwise one is minted
+    here (the connection's id is stable either way)."""
     cleaned_name = name.strip() or google_email
     if len(cleaned_name) > 100:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="name too long")
@@ -117,7 +119,7 @@ def new_google_connection(*, name: str, google_email: str, refresh_token_enc: st
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="google_email must be a valid address")
     return {
-        "id": str(uuid4()),
+        "id": id or str(uuid4()),
         "kind": "google",
         "name": cleaned_name,
         "google_email": email,

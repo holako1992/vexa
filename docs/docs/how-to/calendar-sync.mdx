@@ -58,13 +58,15 @@ calendar-scope change never touches sign-in.
 GOOGLE_CALENDAR_CLIENT_ID=xxxxxxxxxx.apps.googleusercontent.com
 GOOGLE_CALENDAR_CLIENT_SECRET=xxxxxxxxxx
 GOOGLE_CALENDAR_REDIRECT_URI=https://dashboard.example.com/calendar/google/callback
-CALENDAR_TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)
+CALENDAR_TOKEN_ENCRYPTION_KEY=$(python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())")
 ```
 
-`CALENDAR_TOKEN_ENCRYPTION_KEY` is unrelated to the Google client — it is the key admin-api
-encrypts every stored Google refresh token with (`token_cipher.py`), at rest, never in the clear.
-Losing or rotating it makes every previously-stored Google connection unreadable, which surfaces
-as the same **Reconnect needed** state a revoked grant produces — never a silent failure.
+`CALENDAR_TOKEN_ENCRYPTION_KEY` is unrelated to the Google client — it is the AES-256-GCM key
+admin-api encrypts every stored Google refresh token with (`token_cipher.py`), at rest, never in
+the clear. It must be standard base64 of exactly 32 raw bytes; admin-api refuses to start the
+Google routes on anything shorter, longer, or not valid base64. Losing or rotating it makes every
+previously-stored Google connection unreadable, which surfaces as the same **Reconnect needed**
+state a revoked grant produces — never a silent failure.
 
 Unset any of the four keys and the three Google routes
 (`GET /user/calendars/google/authorize`, `POST /user/calendars/google/exchange`, and the internal
@@ -231,7 +233,7 @@ have separate storage responsibilities:
 | Data | Durable home | Notes |
 |---|---|---|
 | Named calendar connections, secret ICS URLs, per-feed auto-join, per-feed bot name | The user's `data` JSON document in Postgres | User-facing reads mask the feed URL. The full URL crosses only the authenticated internal sync edge. |
-| Google connection's refresh token | The same `data` document, **encrypted at rest** (`token_cipher.py`'s encrypt-then-MAC, keyed by `CALENDAR_TOKEN_ENCRYPTION_KEY`) | Never stored in the clear, never returned by any read, never sent to meeting-api — only admin-api decrypts it, to mint a short-lived access token over its own internal edge. |
+| Google connection's refresh token | The same `data` document, **encrypted at rest** (`token_cipher.py`'s AES-256-GCM, keyed by `CALENDAR_TOKEN_ENCRYPTION_KEY`, bound to the user id and connection id) | Never stored in the clear, never returned by any read, never sent to meeting-api — only admin-api decrypts it, to mint a short-lived access token over its own internal edge. |
 | Imported events | Ordinary rows in the Postgres `meetings` table | A future event is a planned meeting with `status: "scheduled"`. |
 | Event and calendar provenance | The meeting's `data` JSON document | Includes scheduling, attendees, calendar source IDs/names, and provider event UIDs. |
 | Latest sync time, error, and created/updated/cancelled counts | Redis | Operational status under the user/connection sync key; this is not the durable event authority. |

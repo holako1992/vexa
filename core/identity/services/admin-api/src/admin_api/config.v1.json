@@ -248,7 +248,7 @@
    "class": "capability",
    "capability": "google_calendar",
    "secret": true,
-   "description": "the master key token_cipher.py derives the Google refresh-token encrypt/MAC keys from (HMAC-SHA256-based encrypt-then-MAC — see token_cipher.py's module docstring for the construction). Generate with `openssl rand -hex 32`. Without it the Google OAuth routes answer their capability-gated 503 rather than ever writing a refresh token to users.data unencrypted; rotating it makes every previously-stored Google connection's stored blob undecryptable, surfacing as reconnect_needed on next sync (the same visible state a revoked Google grant produces) rather than a silent failure.",
+   "description": "the AES-256-GCM master key token_cipher.py encrypts the Google refresh token with (see token_cipher.py's module docstring for the construction). Standard base64 of exactly 32 raw bytes — generate with `python -c \"import os,base64;print(base64.b64encode(os.urandom(32)).decode())\"`. Without it the Google OAuth routes answer their capability-gated 503 rather than ever writing a refresh token to users.data unencrypted; rotating it makes every previously-stored Google connection's stored blob undecryptable, surfacing as reconnect_needed on next sync (the same visible state a revoked Google grant produces) rather than a silent failure.",
    "targets": ["compose"]
   }
  ],

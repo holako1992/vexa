@@ -5,6 +5,7 @@ google-token edge (reconnect_needed on a revoked grant).
 Same testcontainers-PG harness as test_calendar_config.py (skips without docker, Postgres only —
 no redis, so none of rule 15's redis-testcontainer trap applies here).
 """
+import base64
 import time
 
 import pytest
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from admin_api.app import db as app_db
-from admin_api.app import google_oauth, token_cipher
+from admin_api.app import google_oauth
 from admin_api.app.main import create_app
 from admin_api.schema.models import Base
 from admin_api.schema.sync import ensure_schema_sync
@@ -26,7 +27,8 @@ GOOGLE_ENV = {
     "GOOGLE_CALENDAR_CLIENT_ID": "test-client-id.apps.googleusercontent.com",
     "GOOGLE_CALENDAR_CLIENT_SECRET": "test-client-secret",
     "GOOGLE_CALENDAR_REDIRECT_URI": "https://dashboard.example.com/calendar/google/callback",
-    "CALENDAR_TOKEN_ENCRYPTION_KEY": "test-only-encryption-key-not-a-real-secret",
+    # test-only key — a valid base64-encoded 32 raw bytes, not a real secret.
+    "CALENDAR_TOKEN_ENCRYPTION_KEY": base64.b64encode(b"\x11" * 32).decode(),
 }
 
 
@@ -107,22 +109,9 @@ def test_state_rejects_malformed_token():
         google_oauth.verify_state("not-a-real-token", expected_user_id=42)
 
 
-def test_token_cipher_never_returns_plaintext_without_the_key(monkeypatch):
-    monkeypatch.setenv("CALENDAR_TOKEN_ENCRYPTION_KEY", "a-real-key")
-    blob = token_cipher.encrypt("super-secret-refresh-token")
-    assert "super-secret-refresh-token" not in blob
-    assert token_cipher.decrypt(blob) == "super-secret-refresh-token"
-    monkeypatch.delenv("CALENDAR_TOKEN_ENCRYPTION_KEY", raising=False)
-    with pytest.raises(token_cipher.TokenCipherError):
-        token_cipher.encrypt("x")
-
-
-def test_token_cipher_rejects_tampered_ciphertext(monkeypatch):
-    monkeypatch.setenv("CALENDAR_TOKEN_ENCRYPTION_KEY", "a-real-key")
-    blob = token_cipher.encrypt("refresh-token-value")
-    tampered = blob[:-2] + ("aa" if blob[-2:] != "aa" else "bb")
-    with pytest.raises(token_cipher.TokenCipherError):
-        token_cipher.decrypt(tampered)
+# token_cipher's own round-trip/tamper/AD/key/format spec is pure (no DB, no docker) and lives in
+# test_token_cipher.py so it runs on a host with no docker daemon; this file's blanket
+# ``pytestmark = requires_docker`` would otherwise skip it along with the route tests below.
 
 
 # ── the routes ─────────────────────────────────────────────────────────────────────────────────

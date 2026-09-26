@@ -865,6 +865,8 @@ def create_app() -> FastAPI:
     #     core/identity/routes.v1.json), fronted by the gateway exactly like /user/calendars.
     #     The client secret and the encrypted refresh token both live ONLY in this service; the
     #     dashboard (DB-31) only ever sees the consent URL and relays {code, state} back here. ---
+    from uuid import uuid4
+
     from . import google_oauth, token_cipher
     from .calendars import new_google_connection
 
@@ -963,14 +965,18 @@ def create_app() -> FastAPI:
             # (Google may omit refresh_token on a repeat consent — keep the one already stored)
             # and clear any reconnect_needed the previous grant's revocation had set.
             if refresh_token:
-                existing["google_refresh_token_enc"] = token_cipher.encrypt(refresh_token)
+                existing["google_refresh_token_enc"] = token_cipher.encrypt(
+                    refresh_token, user_id=user.id, calendar_id=existing["id"])
             existing["reconnect_needed"] = False
             created = existing  # mutated in place; already a member of `connections`
         else:
+            new_id = str(uuid4())
             created = new_google_connection(
+                id=new_id,
                 name=f"Google — {google_email}",
                 google_email=google_email,
-                refresh_token_enc=token_cipher.encrypt(refresh_token),
+                refresh_token_enc=token_cipher.encrypt(
+                    refresh_token, user_id=user.id, calendar_id=new_id),
                 bot_name=data.get("calendar_bot_name") or "Vexa",
             )
             connections.append(created)
@@ -1583,7 +1589,8 @@ def create_app() -> FastAPI:
         if not encrypted:
             raise HTTPException(status.HTTP_409_CONFLICT, detail="connection carries no stored refresh token")
         try:
-            refresh_token = token_cipher.decrypt(encrypted)
+            refresh_token = token_cipher.decrypt(
+                encrypted, user_id=user.id, calendar_id=calendar_id)
         except token_cipher.TokenCipherError as e:
             # A key rotation or a corrupted blob is indistinguishable from a revoked grant to the
             # SYNC side — both mean "this connection cannot get a token right now" — so it gets
@@ -1758,6 +1765,14 @@ def create_app() -> FastAPI:
             ),
             "bot_name": data.get("calendar_bot_name") or "Vexa",
         }
+        # The plan's per-meeting minute ceiling (Free 60, Pro/Team 240 — billing/catalog.py).
+        # UNLIKE `quota` below, this is stated whenever the resolved plan names one AT ALL —
+        # Pro/Team have no monthly meeting quota but DO have a per-meeting minute cap, so gating
+        # this on `meetings_per_month` (as `quota` does) would silently drop it for every paid
+        # plan. meeting-api combines it with the caller's own `automatic_leave.max_bot_time` by
+        # minimum and threads the result into the bot's invocation.
+        if plan.limits.max_minutes_per_meeting is not None:
+            resp["max_minutes_per_meeting"] = plan.limits.max_minutes_per_meeting
         if plan.limits.meetings_per_month is not None:
             resp["quota"] = {
                 "meetings_per_month": plan.limits.meetings_per_month,
