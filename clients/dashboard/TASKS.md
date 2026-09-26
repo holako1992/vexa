@@ -433,6 +433,9 @@ the known environmental traps.
 | DB-72b | `2b6b3846` | Bots leave at the plan's per-meeting minute cap (Free 60, Pro/Team 240) |
 | DB-74b | `85cd8d1e` | Upgrade (Stripe Checkout) and Manage subscription (Portal) buttons on `/billing` |
 | Core `has_more` | `25361639` | `GET /meetings` forwards `has_more`; the list shows an honest end state |
+| DB-31 | `568eae0c` | Connect Google Calendar button, `/calendar/google/callback`, Reconnect, ICS fallback with field hints |
+| DB-32 | `0cc927eb` | Microsoft Graph calendar connector, core only (no dashboard button yet) |
+| DB-77 | `ffe05203` + route hardening | `plan_override` and per-period `quota_bonus`; Users tab in the terminal admin panel |
 | e2e fix | see log | Search loading spec holds the stub answer instead of racing a 150ms delay |
 
 ### Decisions waiting on the user
@@ -450,8 +453,9 @@ the known environmental traps.
 
 ### Next, in order
 
-1. ~~DB-30a~~ done (AES-GCM chosen). ~~DB-74b~~, ~~DB-72b~~, ~~has_more~~ done.
-2. **DB-31, DB-33, DB-34:** the Google "Connect" button and callback page (routes:
+1. ~~DB-30a~~ done (AES-GCM chosen). ~~DB-74b~~, ~~DB-72b~~, ~~has_more~~, ~~DB-31~~, ~~DB-32 core~~, ~~DB-77~~ done.
+2. **DB-33, DB-34, plus a Connect Microsoft 365 button** (core routes exist:
+   `/user/calendars/microsoft/{authorize,exchange}`). DB-31's original text: the Google "Connect" button and callback page (routes:
    `GET /user/calendars/google/authorize` → `{authorize_url, state}`;
    `POST /user/calendars/google/exchange {code, state}` → masked connection), the Upcoming page with
    per-meeting join overrides and auto-join skip reasons (`data.auto_join_error`), and calendar
@@ -490,6 +494,10 @@ To run it locally, rebuild `dashboard-next`, `gateway`, `admin-api`, `meeting-ap
   node_modules on that host); its arithmetic was reproduced in a standalone script.
 - e2e ports in `e2e/ports.mjs` are fixed, so two agents running `test:e2e` at once in one container
   collide. Run dashboard e2e from one agent at a time.
+- Never run a workspace-wide `pnpm install`/`turbo` on that host: it moves npm-installed
+  `clients/dashboard` and `clients/terminal` node_modules into `.ignored/`. Recover with `npm ci`
+  inside each client.
+- The terminal admin Users tab (DB-77) has unit coverage only; no browser test.
 
 - No live leg against real Stripe or Google. Everything is mocked or stubbed.
 - `admin-api/tests/test_stack_admin_api.py` and `test_stack_redis.py` hang on this host.
