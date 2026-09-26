@@ -403,14 +403,14 @@ took the suite from 6 passing to 10.
 
 ---
 
-## Status at 2026-09-25 — paused, resume next week
+## Status at 2026-09-26 — paused, resume next week
 
 Work is done by Sonnet agents, one task per agent, verified by a coordinator that re-runs every
 claimed test before pushing. **Every agent reads [`AGENT-RULES.md`](AGENT-RULES.md) first.** It holds
 the rules for sharing one checkout, the route rule, how to run each suite on this Windows host, and
 the known environmental traps.
 
-### Done, verified and pushed to `origin/claude/dashboard-service-modern-xoiy2c`
+### Done, verified and pushed (to `origin/claude/dashboard-service-modern-xoiy2c` through DB-80; everything after, to `origin/claude/compassionate-mendel-qjpmv8`, which contains that branch)
 
 | Task | Commit(s) | What the user sees |
 |---|---|---|
@@ -436,6 +436,8 @@ the known environmental traps.
 | DB-31 | `568eae0c` | Connect Google Calendar button, `/calendar/google/callback`, Reconnect, ICS fallback with field hints |
 | DB-32 | `0cc927eb` | Microsoft Graph calendar connector, core only (no dashboard button yet) |
 | DB-77 | `ffe05203` + route hardening | `plan_override` and per-period `quota_bonus`; Users tab in the terminal admin panel |
+| DB-78 | `615d99db` | One dunning email per failed invoice (flows); Free-plan recording purge sweep (off unless `RETENTION_SWEEP_ENABLED`) |
+| DB-33, DB-34, MS connect | `faec48ca` | `/upcoming` (by day, join toggle, skip reason, sync now), `/calendar` health page, Connect Microsoft 365 | e2e 77/77 twice.
 | e2e fix | see log | Search loading spec holds the stub answer instead of racing a 150ms delay |
 
 ### Decisions waiting on the user
@@ -451,26 +453,49 @@ the known environmental traps.
    Category A but a new compiled dependency. **Do this before DB-31 ships.** Until DB-31 exists,
    nobody can store a Google token.
 
-### Next, in order
+### Next, in order (updated 2026-09-26, paused until next week)
 
-1. ~~DB-30a~~ done (AES-GCM chosen). ~~DB-74b~~, ~~DB-72b~~, ~~has_more~~, ~~DB-31~~, ~~DB-32 core~~, ~~DB-77~~ done.
-2. **DB-33, DB-34, plus a Connect Microsoft 365 button** (core routes exist:
-   `/user/calendars/microsoft/{authorize,exchange}`). DB-31's original text: the Google "Connect" button and callback page (routes:
-   `GET /user/calendars/google/authorize` → `{authorize_url, state}`;
-   `POST /user/calendars/google/exchange {code, state}` → masked connection), the Upcoming page with
-   per-meeting join overrides and auto-join skip reasons (`data.auto_join_error`), and calendar
-   health including `reconnect_needed`.
-3. **DB-74b:** Upgrade and Manage buttons on `/billing`. `POST /billing/checkout {plan, interval}` →
-   `{url}`; `POST /billing/portal` → `{url}`, or 409 when there is no customer yet.
-4. **DB-72b:** per-plan minute cap. meeting-api's `_resolve_automatic_leave` accepts `max_bot_time`
-   but drops it, and the bot only honours the deployment-wide `BOT_MAX_ACTIVE_MS`.
-5. **Core:** `GET /meetings` discards the store's `has_more` (`collector/app.py`). Forward it so
-   the list can show real counts instead of "N loaded".
-6. DB-32 Microsoft Graph · DB-50/51/52 recordings · DB-45 export · DB-46/47/43 sharing, tags,
-   speakers · DB-40/61/62 live transcript, chat, auto-title · DB-10 magic link · DB-11/20/21/12 ·
-   DB-81/82/83 settings · DB-76/77/78 · DB-92/93/95 · DB-90/91 · DB-94 security review last.
-7. **DB-96 plus a wording sweep:** comments added this week carry ticket ids ("DB-72:") and some
-   history narration. AGENTS.md wants the designed present. Remove them in one pass.
+Everything in the old list items 1–5 is done (see the "Done" table). Remaining, in order:
+
+1. **Run the docker-gated suites once on a docker host** before anything else ships. Nothing below
+   has been proven against Postgres/Redis: admin-api `test_google_calendar_oauth.py`,
+   `test_microsoft_calendar_oauth.py`, `test_billing_quota_admission.py` (DB-72b, DB-77 cases),
+   `test_dunning_payment_failed_webhook.py`. Also run `npm test` in `core/meetings/services/bot`
+   (installs its deps) for `max-active-cap.test.ts`, never executed yet.
+2. **Stripe webhook ingress** (decision 1 above, still open — needs the user). Until it exists,
+   DB-73/DB-74b/DB-78 do nothing live: no plan change, no dunning email.
+3. **DB-50/51/52 recordings:** player with range proxy, click-segment-to-seek, download/delete.
+   Dashboard lane.
+4. **DB-45 export** (SRT/VTT/DOCX/PDF, Category-A libs only) and **DB-46 sharing** (`/s/<token>`).
+5. **DB-43 speaker rename** (verify annotate can carry a speaker map; else add a core field) and
+   **DB-47 tags**.
+6. **DB-40 live transcript** (SSE via `/agent/meeting/stream`), **DB-61 chat**, **DB-62 auto-title**.
+7. **DB-10 magic link**, **DB-11 account page**, **DB-20 first-run wizard**, **DB-21 empty/error
+   audit**, **DB-12 identity oracle always on**.
+8. **DB-81/82/83 settings** (webhooks UI, API keys, transcription settings), **DB-76 trial abuse
+   floor**.
+9. **DB-92/93/95**, **DB-90/91**, then **DB-94 security review last**.
+10. **DB-96 plus a wording sweep:** comments added in these waves carry ticket ids ("DB-72:",
+    "DB-32 added …" in `gateway/routes_manifest.py`, `gateway/app.py`, `bot_spawn/*`) and some
+    history narration. AGENTS.md wants the designed present. Remove them in one pass.
+
+Open questions found while working (answer on the issue before building on them):
+
+- **Upcoming "Don't join"** is wired to `PATCH /meetings/{id} {auto_join}`, not
+  `PUT /meetings/{platform}/{native}/intent` as DB-33's text said: `intent` only takes
+  `idle|scheduled` and cannot express skip. The dashboard allowlist admits only the one-key
+  `{auto_join}` body. Confirm this is the intended control.
+- **Dunning grace** is `period_end + 7 days` (DB-70's resolver), not "7 days after the failed
+  payment" as DB-78's text reads. Usually the same day; decide which is the rule.
+- **`quota_bonus`** (DB-77) is stamped to the current period and does not carry over; support
+  re-sends it each month. Confirm.
+- DB-77's text assumed a terminal user-edit form existed; none did. A new Users tab was built in
+  the hidden admin surface (`clients/terminal/src/surfaces/admin.tsx`), unit-tested only.
+
+How the work was run this week (keep doing it): one coordinator, Sonnet sub-agents, at most one
+**dashboard lane** agent at a time (it alone runs `npm run test:e2e`, fixed ports) plus one
+**core-only** agent. The coordinator re-runs every suite before pushing. Agent preamble lives in
+`AGENT-RULES.md` plus the Linux host notes under "Not verified anywhere" below.
 
 ### Product changes already live in the code
 
