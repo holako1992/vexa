@@ -249,6 +249,22 @@ rather than dropped.
 The same patch also accepts a `data` object of platform-billing fields, which the hosted
 deployment's billing integration writes. A self-hosted deployment does not need it.
 
+Two more top-level fields cover a support comp — raising a user above (or setting them aside
+from) their billed plan without touching Stripe: see
+[Support comps (admin overrides)](/how-to/billing#support-comps-admin-overrides) for the full
+contract. In short:
+
+```bash PATCH /admin/users/{user_id}
+curl -X PATCH "$ADMIN/admin/users/1" \
+  -H "X-Admin-API-Key: $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"plan_override": "team", "quota_bonus": 1}'
+```
+
+- `plan_override` — a catalog plan id (`free`/`pro`/`team`), or `null` to clear it. An
+  unrecognized id is **422**.
+- `quota_bonus` — a non-negative integer, extra meetings for the CURRENT resolved billing period
+  only (never carried into the next one); `null` clears it. A negative value is **422**.
+
 Creating accounts and minting keys are covered in [Authentication](/authentication).
 
 ## What is not configurable through the API

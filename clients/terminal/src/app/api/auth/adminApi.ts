@@ -15,6 +15,11 @@ export interface AdminUser {
   name?: string | null;
   max_concurrent_bots?: number;
   created_at?: string;
+  /** The billing fields DB-77's admin overrides live in — `data.plan_override` /
+   *  `data.quota_bonus` / `data.quota_bonus_period_start`, alongside whatever the Stripe
+   *  webhook wrote (subscription_tier, etc). Opaque to this client; the admin overrides panel
+   *  reads only the three DB-77 keys and leaves the rest untouched. */
+  data?: Record<string, unknown>;
 }
 
 export interface AdminResult<T> {
@@ -63,6 +68,25 @@ export function findUserByEmail(email: string): Promise<AdminResult<AdminUser>> 
 
 export function createUser(email: string): Promise<AdminResult<AdminUser>> {
   return adminRequest<AdminUser>(`/admin/users`, { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export function getUserById(userId: string | number): Promise<AdminResult<AdminUser>> {
+  return adminRequest<AdminUser>(`/admin/users/${encodeURIComponent(String(userId))}`, { method: "GET" });
+}
+
+/** DB-77 support comp: the ONLY writer of `plan_override`/`quota_bonus`/`max_concurrent_bots` —
+ *  a thin pass-through to admin-api's `PATCH /admin/users/{id}`, which validates the plan id
+ *  (422 on unknown) and the bonus (422 if negative) and stamps `quota_bonus_period_start` to the
+ *  user's CURRENT resolved period. This client invents nothing: it forwards exactly what the
+ *  admin overrides form sends. */
+export function patchUser(
+  userId: string | number,
+  body: { max_concurrent_bots?: number; plan_override?: string | null; quota_bonus?: number | null },
+): Promise<AdminResult<AdminUser>> {
+  return adminRequest<AdminUser>(`/admin/users/${encodeURIComponent(String(userId))}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
 }
 
 export function createUserToken(userId: string | number): Promise<AdminResult<{ token: string }>> {

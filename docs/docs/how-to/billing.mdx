@@ -99,6 +99,47 @@ hardcodes a `price_...` literal — every plan a deployment sells is one env var
 Leave one unset and that combination simply isn't for sale — `POST /billing/checkout` for it
 answers 503 naming the env var, rather than falling back to a different plan or a wrong price.
 
+## Support comps (admin overrides)
+
+Sometimes support needs to comp a user outright, without touching Stripe: bump them to a plan
+they haven't paid for, or hand them one extra meeting this period. `PATCH /admin/users/{id}`
+(admin tier, `X-Admin-API-Key`) carries two fields for exactly that:
+
+```bash
+curl -X PATCH -H "X-Admin-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"plan_override": "team", "quota_bonus": 1}' \
+  "$ADMIN_API_BASE/admin/users/42"
+```
+
+- **`plan_override`** — a catalog plan id (`free`, `pro`, `team`) that wins over whatever Stripe
+  resolved the user's tier to. Send `null` to clear it and let the Stripe-derived tier decide
+  again. An id `billing/catalog.py`'s `PLANS` doesn't recognize is a **422**.
+- **`quota_bonus`** — a non-negative integer, extra meetings added to `meetings_per_month` for
+  **this resolved period only**. Send `null` to clear a previously-set bonus. A negative value is
+  a **422**. There is no "sticky, renews every period" mode: a bonus is stamped with the period it
+  was granted for (`quota_bonus_period_start`, set automatically to the user's current resolved
+  period when you set `quota_bonus` — you never supply the timestamp yourself) and simply does
+  not apply once that period ends. This is deliberate — the simplest honest design is a comp tied
+  to the period support meant it for, never one that silently keeps giving every month until
+  someone remembers to take it back. Comp a recurring case by re-sending `quota_bonus` each period.
+  A bonus is irrelevant (never added) on a plan whose `meetings_per_month` is already unlimited
+  (Pro, Team, or a plan reached via `plan_override`).
+
+Both fields are applied inside `resolve_plan` — the SAME resolver `GET /user/entitlements`,
+`POST /internal/validate` (the gateway's `x-user-limits`), and `/internal/users/{id}/bot-context`
+(the spawn-time quota check `POST /bots` and calendar auto-join both go through) all call. One
+PATCH is visible everywhere at once: a `plan_override` to `team` immediately raises the user's
+concurrent-bot cap and lifts their monthly meeting quota, and a `quota_bonus` immediately shows up
+in the next spawn attempt's quota check — there is no second place either has to be told about.
+
+`GET /user/entitlements` echoes both back (`plan_override`, `quota_bonus_applied`) so a comped
+user's own page can say why their plan or allowance differs from what Stripe alone would resolve
+to, and `GET /admin/users/{id}` returns the raw stored fields (`data.plan_override`,
+`data.quota_bonus`, `data.quota_bonus_period_start`) for support tooling. The terminal's hidden
+admin panel (Infra → Users tab) wraps this PATCH in a small form: look a user up by email, set the
+two fields (and `max_concurrent_bots`, the pre-billing per-user cap — see
+`billing/catalog.py`'s `effective_concurrent_cap` for how the two combine), save.
+
 ## Deploy this yourself
 
 ### 1. In the Stripe dashboard

@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response, Security, status
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field, field_serializer, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
@@ -255,13 +255,31 @@ class PlatformBillingDataPatch(BaseModel):
 class UserAdminPatch(BaseModel):
     max_concurrent_bots: Optional[int] = Field(default=None, ge=0)
     data: Optional[PlatformBillingDataPatch] = None
+    #: DB-77 support comp: a catalog plan id (`billing.catalog.PLANS`) that wins over the
+    #: Stripe-derived tier in `resolve_plan`, or `None` to clear a previously-set override.
+    #: Whether the field was supplied at all (vs. left out) is read from `model_fields_set`,
+    #: never from this default, so "clear the override" (`{"plan_override": null}`) is
+    #: distinguishable from "leave it alone" (the key omitted entirely).
+    plan_override: Optional[str] = Field(default=None)
+    #: DB-77 support comp: extra meetings added to `meetings_per_month` for the CURRENT resolved
+    #: period only (see `billing/entitlements.py`'s module docstring for why it does not carry
+    #: over). `None` clears a previously-set bonus; a negative value is a 422 via `ge=0`.
+    quota_bonus: Optional[int] = Field(default=None, ge=0)
 
     model_config = {"extra": "forbid"}
+
+    @field_validator("plan_override")
+    @classmethod
+    def _plan_override_must_be_a_known_plan(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in billing_catalog.PLANS:
+            raise ValueError(f"unknown plan id: {value!r}")
+        return value
 
     @model_validator(mode="after")
     def require_change(self):
         has_data = self.data is not None and bool(self.data.model_fields_set)
-        if self.max_concurrent_bots is None and not has_data:
+        has_override = bool({"plan_override", "quota_bonus"} & self.model_fields_set)
+        if self.max_concurrent_bots is None and not has_data and not has_override:
             raise ValueError("at least one user field must be supplied")
         return self
 
@@ -717,11 +735,34 @@ def create_app() -> FastAPI:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
         if patch.max_concurrent_bots is not None:
             user.max_concurrent_bots = patch.max_concurrent_bots
+
+        new_data = dict(user.data or {})
+        data_changed = False
         if patch.data:
-            user.data = {
-                **(user.data or {}),
-                **patch.data.model_dump(exclude_unset=True),
-            }
+            new_data.update(patch.data.model_dump(exclude_unset=True))
+            data_changed = True
+        fields_set = patch.model_fields_set
+        if "plan_override" in fields_set:
+            if patch.plan_override is None:
+                new_data.pop("plan_override", None)
+            else:
+                new_data["plan_override"] = patch.plan_override
+            data_changed = True
+        if "quota_bonus" in fields_set:
+            if patch.quota_bonus is None:
+                new_data.pop("quota_bonus", None)
+                new_data.pop("quota_bonus_period_start", None)
+            else:
+                # Stamp the CURRENT resolved period so the bonus is honest about which period it
+                # comps (billing/entitlements.py: a bonus never carries over) — the admin supplies
+                # only the count, never a timestamp of their own choosing.
+                current_period_start = resolve_plan(new_data, datetime.now(timezone.utc)).period_start
+                new_data["quota_bonus"] = patch.quota_bonus
+                new_data["quota_bonus_period_start"] = int(current_period_start.timestamp())
+            data_changed = True
+        if data_changed:
+            user.data = new_data
+
         await db.commit()
         await db.refresh(user)
         return UserResponse.model_validate(user)
@@ -1304,6 +1345,10 @@ def create_app() -> FastAPI:
                 "meetings_used": resolved.usage.meetings_used,
                 "minutes_used": resolved.usage.minutes_used,
             },
+            # DB-77: surfaced so a comped user's dashboard/terminal can say why their plan or
+            # allowance differs from what Stripe alone would resolve to.
+            "plan_override": plan.plan_override,
+            "quota_bonus_applied": plan.quota_bonus_applied,
         }
 
     # --- user tier: Stripe checkout (DB-73). Creates the Stripe customer on first use (stored on

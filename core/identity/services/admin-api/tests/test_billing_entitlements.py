@@ -202,3 +202,122 @@ def test_resolve_entitlements_uses_supplied_usage_port():
     now = datetime(2026, 9, 15, tzinfo=UTC)
     resolved = asyncio.run(resolve_entitlements({}, now, user_id=7, usage_port=_FakePort()))
     assert resolved.usage == UsageSnapshot(meetings_used=1, minutes_used=42)
+
+
+# ── DB-77 admin overrides ────────────────────────────────────────────────────────────────────────
+
+
+def test_plan_override_wins_over_active_stripe_tier():
+    """A Pro subscriber comped to Team by support resolves to Team, not their paid tier."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    data = {
+        "subscription_status": "active",
+        "subscription_tier": "pro",
+        "plan_override": "team",
+    }
+    plan = resolve_plan(data, now)
+    assert plan.plan_id == "team"
+    assert plan.limits.concurrent_bots == 5
+    assert plan.plan_override == "team"
+    # Overriding the PLAN never invents a subscription — status/period stay Stripe's.
+    assert plan.status == "active"
+
+
+def test_plan_override_wins_over_free_with_no_subscription():
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    plan = resolve_plan({"plan_override": "pro"}, now)
+    assert plan.plan_id == "pro"
+    assert plan.limits.meetings_per_month is None
+    assert plan.plan_override == "pro"
+
+
+def test_clearing_plan_override_falls_back_to_stripe_tier():
+    """`plan_override: None` (or the key simply absent) is "no override" — the Stripe-derived
+    tier decides alone, matching a support agent clearing a comp."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    data = {"subscription_status": "active", "subscription_tier": "pro", "plan_override": None}
+    plan = resolve_plan(data, now)
+    assert plan.plan_id == "pro"
+    assert plan.plan_override is None
+
+
+def test_unrecognized_plan_override_is_ignored_and_logged(caplog):
+    """A stale override naming a retired catalog plan id is logged and ignored — same posture as
+    an unrecognized `subscription_tier` — never crashes spawn-time resolution."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    data = {"subscription_status": "active", "subscription_tier": "pro", "plan_override": "enterprise"}
+    with caplog.at_level("WARNING"):
+        plan = resolve_plan(data, now)
+    assert plan.plan_id == "pro"  # the Stripe tier still decides
+    assert plan.unrecognized_plan_override == "enterprise"
+    assert any("unrecognized plan_override" in r.message for r in caplog.records)
+
+
+def test_unknown_tier_and_override_together_override_still_wins():
+    """A garbage `subscription_tier` (DB-70's "unrecognized tier" case) alongside a VALID
+    `plan_override` — the override still wins; the resolver never lets a garbage Stripe field
+    block a real admin comp."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    data = {
+        "subscription_status": "active",
+        "subscription_tier": "not-a-real-plan",
+        "plan_override": "team",
+    }
+    plan = resolve_plan(data, now)
+    assert plan.plan_id == "team"
+    assert plan.unrecognized_tier == "not-a-real-plan"
+    assert plan.plan_override == "team"
+
+
+def test_quota_bonus_applied_when_period_matches():
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    period_start = datetime(2026, 9, 1, tzinfo=UTC)  # the free plan's calendar-month start
+    data = {"quota_bonus": 2, "quota_bonus_period_start": _unix(period_start)}
+    plan = resolve_plan(data, now)
+    assert plan.plan_id == "free"
+    assert plan.limits.meetings_per_month == 1 + 2
+    assert plan.quota_bonus_applied == 2
+
+
+def test_quota_bonus_does_not_carry_over_to_a_new_period():
+    """A bonus stamped for August does not silently apply once September's calendar month
+    starts — the exact "does it reset per period" behavior DB-77 must decide and document."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    data = {"quota_bonus": 2, "quota_bonus_period_start": _unix(august_start)}
+    plan = resolve_plan(data, now)
+    assert plan.plan_id == "free"
+    assert plan.limits.meetings_per_month == 1  # unchanged — the bonus targeted a period that ended
+    assert plan.quota_bonus_applied == 0
+
+
+def test_quota_bonus_irrelevant_when_plan_is_unlimited():
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    period_start = datetime(2026, 9, 1, tzinfo=UTC)
+    data = {
+        "subscription_status": "active",
+        "subscription_tier": "pro",
+        "quota_bonus": 5,
+        "quota_bonus_period_start": _unix(period_start),
+    }
+    plan = resolve_plan(data, now)
+    assert plan.plan_id == "pro"
+    assert plan.limits.meetings_per_month is None  # still UNLIMITED, never a large int
+    assert plan.quota_bonus_applied == 0
+
+
+def test_quota_bonus_combines_with_plan_override():
+    """Support comps BOTH a plan bump and a bonus meeting in the same patch — both apply, since
+    the override is resolved first and the bonus is added to whatever plan results."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    period_start = datetime(2026, 9, 1, tzinfo=UTC)
+    data = {
+        "plan_override": "free",
+        "quota_bonus": 3,
+        "quota_bonus_period_start": _unix(period_start),
+    }
+    plan = resolve_plan(data, now)
+    assert plan.plan_id == "free"
+    assert plan.limits.meetings_per_month == 1 + 3
+    assert plan.plan_override == "free"
+    assert plan.quota_bonus_applied == 3

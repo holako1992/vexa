@@ -106,10 +106,11 @@ def effective_concurrent_cap(
     `meeting_api.bot_spawn.router._resolve_max_concurrent` enforces (DB-72).
 
     The stored column PREDATES billing: every user carries it, defaulted to
-    `LEGACY_MAX_CONCURRENT_BOTS_DEFAULT`, and until DB-77 ships it is the ONLY per-user cap that
-    exists. DB-77 gives support a real comp/override (`plan_override`, `quota_bonus`); this
-    function does NOT build that — until DB-77 lands, the stored column keeps its pre-billing
-    meaning, an operator-settable HARD CEILING, never a way to raise a user above their plan:
+    `LEGACY_MAX_CONCURRENT_BOTS_DEFAULT`. Raising a user above their plan is DB-77's job
+    (`plan_override`/`quota_bonus`, applied inside `entitlements.resolve_plan` — the `plan_concurrent_bots`
+    this function receives already reflects any override). This function's OWN job stays narrow: the
+    stored column keeps its pre-billing meaning, an operator-settable HARD CEILING that can only
+    narrow a user's cap, never widen it past whatever plan (overridden or not) they resolved to:
 
       * stored value is `None` or still the untouched default → the PLAN decides alone (a paying
         Pro/Team user nobody has ever touched with `PATCH /admin/users/{id}` gets their plan's

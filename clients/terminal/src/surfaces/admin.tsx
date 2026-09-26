@@ -1,5 +1,6 @@
 "use client";
-/** Hidden admin surface — read-only infra observability (workloads + meeting pipeline + probe).
+/** Hidden admin surface — infra observability (workloads + meeting pipeline + probe) plus the
+ *  DB-77 user-overrides form.
  *
  *  HIDDEN: nothing registers at import time. The module probes `/api/admin/me` (server-verified
  *  email allowlist — see app/api/admin/gate.ts); only a 200 registers the "Infra" list + the
@@ -7,9 +8,11 @@
  *  appears. Non-admins never see an entry and every /api/admin/* route answers 404 for them.
  *
  *  Layout: a persistent TRANSCRIPTION GOLDEN PROBE strip (gateway → meeting-api → runtime →
- *  redis carriers → transcript relay; run on demand) above two in-panel tabs — Workloads and
- *  Meeting pipeline — each with client-side filters. Read-only by design (v1): no stop/kill.
- *  Data: GET /api/admin/overview + POST /api/admin/probe → agent-api (internal tier).
+ *  redis carriers → transcript relay; run on demand) above three in-panel tabs — Workloads,
+ *  Meeting pipeline (both read-only, client-side filters) and Users (DB-77's support-comp form:
+ *  look a user up by email, set `plan_override`/`quota_bonus`/`max_concurrent_bots`, save).
+ *  Data: GET /api/admin/overview + POST /api/admin/probe → agent-api (internal tier);
+ *  GET/PATCH /api/admin/users[/[id]] → admin-api's admin tier.
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { registerList, registerTab } from "../contributions";
@@ -17,6 +20,12 @@ import { useService } from "../platform";
 import { LayoutServiceId, type TabDescriptor } from "../workbench/layout";
 import { Icon } from "../ui-kit";
 import { meetingsOnly } from "../app/mode";
+
+// DB-77 admin overrides — the catalog plan ids a support agent may set as `plan_override`.
+// Mirrors `core/identity/services/admin-api/src/admin_api/app/billing/catalog.py`'s `PLANS`
+// keys; admin-api itself is the source of truth and rejects anything else with 422 — this list
+// is only for the dropdown's options, never trusted as validation.
+const CATALOG_PLAN_IDS = ["free", "pro", "team"] as const;
 
 interface StreamStat { len?: number; last_id?: string | null; last_type?: string }
 interface PipelineRow {
@@ -284,12 +293,158 @@ function PipelineTab({ meetings, botStops, error }: { meetings: PipelineRow[]; b
   );
 }
 
+// ── users tab: DB-77 admin overrides (comp a user) ─────────────────────────────────
+interface AdminUserRecord {
+  id: string | number;
+  email: string;
+  max_concurrent_bots?: number;
+  data?: {
+    plan_override?: string | null;
+    quota_bonus?: number | null;
+    subscription_tier?: string | null;
+    subscription_status?: string | null;
+  };
+}
+
+const label: CSSProperties = { fontSize: 12, color: "var(--t2)", display: "block", marginBottom: 4 };
+const field: CSSProperties = { width: "100%", height: 30, fontSize: 13, padding: "0 8px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--panel)", color: "var(--t1)", outline: "none" };
+const primaryBtn: CSSProperties = { fontSize: 12.5, padding: "6px 14px", borderRadius: 6, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)", cursor: "pointer" };
+
+function UsersTab() {
+  const [emailQuery, setEmailQuery] = useState("");
+  const [user, setUser] = useState<AdminUserRecord | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const [maxConcurrentBots, setMaxConcurrentBots] = useState("");
+  const [planOverride, setPlanOverride] = useState<string>("");
+  const [quotaBonus, setQuotaBonus] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<{ text: string; tone: Tone } | null>(null);
+
+  const loadUser = async () => {
+    const email = emailQuery.trim();
+    if (!email) return;
+    setLoading(true);
+    setLoadErr(null);
+    setSaveMsg(null);
+    try {
+      const r = await fetch(`/api/admin/users?email=${encodeURIComponent(email)}`, { cache: "no-store" });
+      const body = await r.json();
+      if (!r.ok) { setUser(null); setLoadErr(body?.error || `lookup failed (${r.status})`); return; }
+      const u = body as AdminUserRecord;
+      setUser(u);
+      setMaxConcurrentBots(String(u.max_concurrent_bots ?? ""));
+      setPlanOverride(u.data?.plan_override ?? "");
+      setQuotaBonus(u.data?.quota_bonus != null ? String(u.data.quota_bonus) : "");
+    } catch (e) {
+      setUser(null);
+      setLoadErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const save = async () => {
+    if (!user) return;
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const body: Record<string, unknown> = {};
+      if (maxConcurrentBots.trim() !== "") {
+        const n = Number(maxConcurrentBots);
+        if (Number.isFinite(n)) body.max_concurrent_bots = n;
+      }
+      // Always sent (never omitted): "" means "clear the override", matching admin-api's
+      // require-explicit-null semantics for plan_override/quota_bonus (see UserAdminPatch).
+      body.plan_override = planOverride === "" ? null : planOverride;
+      body.quota_bonus = quotaBonus.trim() === "" ? null : Number(quotaBonus);
+
+      const r = await fetch(`/api/admin/users/${encodeURIComponent(String(user.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const respBody = await r.json();
+      if (!r.ok) {
+        setSaveMsg({ text: respBody?.error || `save failed (${r.status})`, tone: "danger" });
+        return;
+      }
+      const u = respBody as AdminUserRecord;
+      setUser(u);
+      setMaxConcurrentBots(String(u.max_concurrent_bots ?? ""));
+      setPlanOverride(u.data?.plan_override ?? "");
+      setQuotaBonus(u.data?.quota_bonus != null ? String(u.data.quota_bonus) : "");
+      setSaveMsg({ text: "Saved", tone: "ok" });
+    } catch (e) {
+      setSaveMsg({ text: (e as Error).message, tone: "danger" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: "14px", maxWidth: 460 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <input
+          placeholder="user email…"
+          value={emailQuery}
+          onChange={(e) => setEmailQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void loadUser(); }}
+          style={{ ...searchStyle, width: 260 }}
+        />
+        <button onClick={() => void loadUser()} disabled={loading || !emailQuery.trim()} style={{ ...segBtn(false), opacity: loading ? 0.6 : 1 }}>
+          {loading ? "Loading…" : "Load"}
+        </button>
+      </div>
+      {loadErr && <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 10 }}>{loadErr}</div>}
+      {user && (
+        <div>
+          <div style={{ fontSize: 12.5, color: "var(--t2)", marginBottom: 12 }}>
+            {user.email} — plan: {user.data?.subscription_tier ?? "—"} ({user.data?.subscription_status ?? "no subscription"})
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={label}>Max concurrent bots</label>
+            <input type="number" min={0} value={maxConcurrentBots} onChange={(e) => setMaxConcurrentBots(e.target.value)} style={field} />
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={label}>Plan override (comp)</label>
+            <select value={planOverride} onChange={(e) => setPlanOverride(e.target.value)} style={field}>
+              <option value="">— none (use billed plan) —</option>
+              {CATALOG_PLAN_IDS.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={label}>Quota bonus (extra meetings this period)</label>
+            <input type="number" min={0} placeholder="0" value={quotaBonus} onChange={(e) => setQuotaBonus(e.target.value)} style={field} />
+            <span style={{ fontSize: 11, color: "var(--t3)" }}>
+              Applies to the CURRENT billing/calendar period only — it does not carry over next period.
+            </span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={() => void save()} disabled={saving} style={{ ...primaryBtn, opacity: saving ? 0.6 : 1 }}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+            {saveMsg && <Pill label={saveMsg.text} tone={saveMsg.tone} />}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── the panel: probe strip + tab bar + tables ─────────────────────────────────────
 function AdminPanel({ active }: { id: string; params: Record<string, unknown>; active: boolean }) {
   const [data, setData] = useState<Overview | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [ts, setTs] = useState(0);
-  const [tab, setTab] = useState<"w" | "p">("w");
+  const [tab, setTab] = useState<"w" | "p" | "u">("w");
 
   useEffect(() => {
     if (!active) return;
@@ -337,10 +492,13 @@ function AdminPanel({ active }: { id: string; params: Record<string, unknown>; a
       <div style={{ display: "flex", gap: 2, padding: "8px 14px 0", borderBottom: "1px solid var(--line)" }}>
         <button style={tabBtn(tab === "w")} onClick={() => setTab("w")}>Workloads <span style={{ color: "var(--t3)", fontWeight: 400 }}>{workloads.length}</span></button>
         <button style={tabBtn(tab === "p")} onClick={() => setTab("p")}>Meeting pipeline <span style={{ color: "var(--t3)", fontWeight: 400 }}>{meetings.length}</span></button>
+        <button style={tabBtn(tab === "u")} onClick={() => setTab("u")}>Users</button>
       </div>
       {tab === "w"
         ? <WorkloadsTab workloads={workloads} error={data?.workloads_error} />
-        : <PipelineTab meetings={meetings} botStops={botStops} error={data?.meetings_error} />}
+        : tab === "p"
+          ? <PipelineTab meetings={meetings} botStops={botStops} error={data?.meetings_error} />
+          : <UsersTab />}
     </div>
   );
 }
@@ -351,7 +509,7 @@ function AdminLeft() {
   useEffect(() => { layout.openTab(PANEL); }, [layout]);
   return (
     <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--t3)" }}>
-      Read-only infrastructure panel: transcription golden probe, running bots, agent workers, and per-meeting pipeline state.
+      Infrastructure panel: transcription golden probe, running bots, agent workers, per-meeting pipeline state, and per-user plan overrides.
     </div>
   );
 }

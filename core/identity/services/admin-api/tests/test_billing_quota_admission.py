@@ -9,11 +9,12 @@ Same testcontainers-PG harness as the other identity suites (skips without docke
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 from admin_api.app import db as app_db
 from admin_api.app.main import create_app
@@ -21,7 +22,14 @@ from admin_api.schema.models import Base
 from admin_api.schema.sync import ensure_schema_sync
 
 from conftest import requires_docker
-from test_stack_admin_api import ADMIN_TOKEN, INTERNAL_SECRET, _admin, _dispose_async_engine, _internal
+from test_stack_admin_api import (
+    ADMIN_TOKEN,
+    INTERNAL_SECRET,
+    _admin,
+    _data,
+    _dispose_async_engine,
+    _internal,
+)
 
 pytestmark = requires_docker
 
@@ -166,3 +174,89 @@ def test_bot_context_quota_unknown_usage_on_query_failure(client, monkeypatch):
     r = client.get(f"/internal/users/{user_id}/bot-context", headers=_internal())
     assert r.status_code == 200, r.text
     assert r.json()["quota"]["meetings_used"] is None
+
+
+# ── DB-77 admin overrides: the write path (PATCH), and both doors reflecting it ─────────────────
+
+def test_patch_plan_override_unknown_plan_id_is_422(client):
+    user_id, _token = _create_user_with_token(client, "bad-override@vexa.ai")
+    r = client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"plan_override": "enterprise"})
+    assert r.status_code == 422, r.text
+
+
+def test_patch_quota_bonus_negative_is_422(client):
+    user_id, _token = _create_user_with_token(client, "bad-bonus@vexa.ai")
+    r = client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"quota_bonus": -1})
+    assert r.status_code == 422, r.text
+
+
+def test_patch_plan_override_comps_a_free_user_to_team_everywhere(client):
+    """One PATCH, and BOTH admission doors — /internal/validate's max_concurrent (the gateway's
+    x-user-limits) and /internal/users/{id}/bot-context (meeting-api's quota check) — reflect it
+    at once, because both read through the same `resolve_plan`."""
+    user_id, token = _create_user_with_token(client, "comped-to-team@vexa.ai")
+    patched = client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"plan_override": "team"})
+    assert patched.status_code == 200, patched.text
+
+    validated = client.post("/internal/validate", headers=_internal(), json={"token": token})
+    assert validated.json()["max_concurrent"] == 5  # Team's concurrent_bots
+
+    ctx = client.get(f"/internal/users/{user_id}/bot-context", headers=_internal())
+    assert ctx.json()["max_concurrent"] == 5
+    assert "quota" not in ctx.json()  # Team's meetings_per_month is unlimited
+
+
+def test_patch_clearing_plan_override_reverts_to_the_stripe_tier(client):
+    user_id, token = _create_user_with_token(client, "cleared-override@vexa.ai")
+    client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"plan_override": "team"})
+    cleared = client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"plan_override": None})
+    assert cleared.status_code == 200, cleared.text
+    validated = client.post("/internal/validate", headers=_internal(), json={"token": token})
+    assert validated.json()["max_concurrent"] == 1  # back to the untouched Free user's cap
+
+
+def test_patch_quota_bonus_raises_the_free_monthly_quota_at_bot_context(client):
+    user_id, _token = _create_user_with_token(client, "bonus-meeting@vexa.ai")
+    patched = client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"quota_bonus": 1})
+    assert patched.status_code == 200, patched.text
+    assert _data(patched)["quota_bonus"] == 1
+    assert "quota_bonus_period_start" in _data(patched)
+
+    ctx = client.get(f"/internal/users/{user_id}/bot-context", headers=_internal())
+    assert ctx.json()["quota"]["meetings_per_month"] == 1 + 1  # Free's 1 + the comp
+
+
+def test_patch_quota_bonus_stamped_period_does_not_apply_to_a_stale_stamp(client, pg_url):
+    """A bonus whose stamped period does not match the CURRENT resolved period (simulating one
+    granted last month and never refreshed, or a webhook rolling the Stripe period forward
+    underneath it) is not honoured — it does not carry over. The PATCH endpoint always stamps
+    "now"; a stale stamp can only be simulated with a raw write, which is what this does."""
+    user_id, _token = _create_user_with_token(client, "stale-bonus@vexa.ai")
+    patched = client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"quota_bonus": 1})
+    assert patched.status_code == 200, patched.text
+    ctx_fresh = client.get(f"/internal/users/{user_id}/bot-context", headers=_internal())
+    assert ctx_fresh.json()["quota"]["meetings_per_month"] == 1 + 1  # the bonus is live
+
+    engine = create_engine(pg_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE users SET data = data || CAST(:patch AS jsonb) WHERE id = :user_id"
+            ),
+            {"user_id": user_id, "patch": json.dumps({"quota_bonus_period_start": 1})},  # 1970
+        )
+    engine.dispose()
+
+    ctx_stale = client.get(f"/internal/users/{user_id}/bot-context", headers=_internal())
+    assert ctx_stale.json()["quota"]["meetings_per_month"] == 1  # bonus no longer applies
+
+
+def test_patch_quota_bonus_none_clears_it(client):
+    user_id, _token = _create_user_with_token(client, "cleared-bonus@vexa.ai")
+    client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"quota_bonus": 1})
+    cleared = client.patch(f"/admin/users/{user_id}", headers=_admin(), json={"quota_bonus": None})
+    assert cleared.status_code == 200, cleared.text
+    assert "quota_bonus" not in _data(cleared)
+    assert "quota_bonus_period_start" not in _data(cleared)
+    ctx = client.get(f"/internal/users/{user_id}/bot-context", headers=_internal())
+    assert ctx.json()["quota"]["meetings_per_month"] == 1  # back to Free's bare limit

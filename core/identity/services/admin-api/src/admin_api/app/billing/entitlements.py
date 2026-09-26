@@ -10,11 +10,33 @@ is a table of `resolve_plan(data, now) == expected` assertions, not a fixture-an
 and then asks a `ports.UsagePort` how much of that period is already spent. DB-72 (quota
 enforcement at spawn) is the intended caller of `resolve_entitlements` — see its docstring for the
 exact signature.
+
+**DB-77 admin overrides** are applied inside `resolve_plan`, at the very end, on top of whatever
+the Stripe-derived resolution above produced. There is exactly ONE place a plan is decided
+(`resolve_plan`) and every consumer of overrides — `/user/entitlements`, `/internal/validate`,
+`/internal/users/{id}/bot-context` (meeting-api's quota check) — reads through it, so an admin
+comp is visible everywhere at once with no second code path to keep in sync:
+
+  * `data["plan_override"]` — a catalog plan id (`billing.catalog.PLANS`) that WINS over the
+    Stripe-derived tier outright. `None`/absent leaves the Stripe resolution alone. The write
+    path (`PATCH /admin/users/{id}`) already rejects an unrecognized plan id with 422, but this
+    reader stays defensive: a stale override left over from a retired catalog entry is logged and
+    ignored (same posture as an unrecognized `subscription_tier`) rather than crashing the spawn
+    path.
+  * `data["quota_bonus"]` — a non-negative int, extra meetings added to `meetings_per_month` for
+    ONE period only: `data["quota_bonus_period_start"]` (a unix timestamp) must equal the
+    resolved plan's `period_start` exactly, or the bonus does not apply. This is the simplest
+    honest design: a bonus is tied to the specific period it was granted for, so a comp silently
+    surviving into next month (or applying retroactively to a past one) is impossible — support
+    grants a NEW bonus each period it wants to comp. `PATCH /admin/users/{id}` stamps
+    `quota_bonus_period_start` to the CURRENT resolved period when it sets `quota_bonus`, so the
+    admin only ever supplies the count. A bonus is irrelevant (never added, never reported) when
+    the plan's `meetings_per_month` is already `UNLIMITED` — there is nothing to add to.
 """
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -49,6 +71,18 @@ class ResolvedPlan:
     #: "resolved to free because the stored tier was garbage" — the latter is DB-70's acceptance
     #: row that must be logged, not silently coerced.
     unrecognized_tier: Optional[str] = None
+    #: DB-77: the raw `plan_override`, when it named a catalog plan and won over the
+    #: Stripe-derived tier above (`None` when no override was applied, whether because none was
+    #: stored or because it named a plan `catalog.PLANS` no longer has — see `unrecognized_plan_override`).
+    plan_override: Optional[str] = None
+    #: DB-77: `plan_override` was stored but did not match any entry in `catalog.PLANS` — same
+    #: "log and ignore, never guess" posture as `unrecognized_tier`.
+    unrecognized_plan_override: Optional[str] = None
+    #: DB-77: how many extra meetings `quota_bonus` actually added to this resolution's
+    #: `limits.meetings_per_month` — 0 when no bonus is stored, it targets a different period, or
+    #: the plan's meetings are already unlimited. Reported so a caller can show "+1 comped" rather
+    #: than re-deriving it from the raw stored fields.
+    quota_bonus_applied: int = 0
 
 
 @dataclass(frozen=True)
@@ -108,7 +142,60 @@ def _free_result(
 
 def resolve_plan(data: Dict[str, Any], now: datetime) -> ResolvedPlan:
     """The pure resolution — see module docstring. `data` is the user's `users.data` blob (the
-    `PlatformBillingDataPatch` fields; anything else in the blob is ignored)."""
+    `PlatformBillingDataPatch` fields, plus DB-77's `plan_override`/`quota_bonus`/
+    `quota_bonus_period_start`; anything else in the blob is ignored). DB-77 overrides are the
+    LAST step, applied uniformly on whatever `_resolve_subscription_plan` below produced."""
+    return _apply_admin_overrides(_resolve_subscription_plan(data, now), data)
+
+
+def _apply_admin_overrides(plan: ResolvedPlan, data: Dict[str, Any]) -> ResolvedPlan:
+    """DB-77: `plan_override` wins over the Stripe-derived tier; `quota_bonus` adds to
+    `meetings_per_month` for the one period it was granted for. See module docstring."""
+    plan_id = plan.plan_id
+    limits = plan.limits
+    unrecognized_override: Optional[str] = None
+
+    override = data.get("plan_override")
+    applied_override: Optional[str] = None
+    if override is not None:
+        if override in PLANS:
+            plan_id = override
+            limits = get_plan(override)
+            applied_override = override
+        else:
+            unrecognized_override = override
+            log.warning(
+                "billing.entitlements: unrecognized plan_override=%r — ignoring, resolving as "
+                "if no override were stored", override,
+            )
+
+    quota_bonus_applied = 0
+    raw_bonus = data.get("quota_bonus")
+    bonus_period_start = _from_unix(data.get("quota_bonus_period_start"))
+    if (
+        isinstance(raw_bonus, int)
+        and raw_bonus > 0
+        and bonus_period_start == plan.period_start
+        and limits.meetings_per_month is not None
+    ):
+        quota_bonus_applied = raw_bonus
+        limits = replace(limits, meetings_per_month=limits.meetings_per_month + quota_bonus_applied)
+
+    if applied_override is None and unrecognized_override is None and quota_bonus_applied == 0:
+        return plan
+    return replace(
+        plan,
+        plan_id=plan_id,
+        limits=limits,
+        plan_override=applied_override,
+        unrecognized_plan_override=unrecognized_override,
+        quota_bonus_applied=quota_bonus_applied,
+    )
+
+
+def _resolve_subscription_plan(data: Dict[str, Any], now: datetime) -> ResolvedPlan:
+    """The Stripe-derived resolution, before DB-77's admin overrides (`resolve_plan` applies
+    those). Unchanged from DB-70 except for the rename."""
     now = _as_utc(now)
     status = data.get("subscription_status")
     tier = data.get("subscription_tier")
