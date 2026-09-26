@@ -654,6 +654,27 @@
    "secret": true,
    "description": "operator key for the same edge, sent as X-Flows-Operator-Key (flows' POST /events is authenticated). Declared as part of the edge rather than beside it, on the same terms as identity's admin-api and agent-api's control_plane declare theirs: unset alongside an unset URL is the no-flows profile; unset with a URL set is a deployment whose facts are being refused.",
    "targets": ["compose"]
+  },
+  {
+   "key": "RETENTION_SWEEP_ENABLED",
+   "class": "defaulted",
+   "default": "false",
+   "description": "DB-78: turns on the Free-plan recording retention purge sweep. OFF by default — a self-host must opt in explicitly before any recording is deleted on a timer; unset or false, the sweep loop returns immediately and nothing is ever purged. Deletion (when enabled) goes through the SAME owner-scoped path DELETE /recordings/{id} uses: storage objects removed, then the JSONB row — never a raw row delete that would orphan objects.",
+   "targets": []
+  },
+  {
+   "key": "RETENTION_SWEEP_INTERVAL_S",
+   "class": "defaulted",
+   "default": "3600",
+   "description": "DB-78: retention-purge sweep cadence (s) — how often the oldest terminal meetings are scanned for Free-plan recordings past the catalog's retention ceiling",
+   "targets": []
+  },
+  {
+   "key": "RETENTION_SWEEP_BATCH_LIMIT",
+   "class": "defaulted",
+   "default": "200",
+   "description": "DB-78: MEETING rows scanned per retention-sweep tick, at most — bounds both the DB read and the number of distinct owners' plans resolved through /internal/users/{id}/bot-context in that tick, never the whole meetings table",
+   "targets": []
   }
  ],
  "capabilities": {

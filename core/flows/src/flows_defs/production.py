@@ -109,6 +109,11 @@ FRICTION_REPORTED = EventType("friction.reported")
 #: three fields `{subject, org, seat}`: `subject` is the platform uid and there is NO `uid` key on
 #: this fact, which is why `_subject_uid` below reads both names rather than one.
 ONBOARDED = EventType("onboarding.completed")
+#: PUBLISHED BY IDENTITY, ALONGSIDE `subscription.changed`, ONLY for `invoice.payment_failed` —
+#: `core/identity/services/admin-api/src/admin_api/app/events.py`'s `EVENT_PAYMENT_FAILED`. Its
+#: refs are `{subject, invoice_id}`; see `payment_failed_source_id`'s docstring there for why the
+#: fact's id is keyed to the INVOICE and not the Stripe event id (DB-78).
+PAYMENT_FAILED = EventType("payment.failed")
 
 NUDGE_EVERY_S = 15 * 60
 
@@ -1952,6 +1957,58 @@ def build(reg: Registry, db) -> None:
                    {"u": uid, "s": session, "h": "v1", "t": ctx.clock_now})
         return Done({"message_id": mid, "link": link, "excerpt": bool(excerpt)}, provider_ref=mid)
 
+    # ── dunning: one mail when a payment fails (DB-78) ────────────────────────────────────────
+    @reg.step
+    def email_payment_failed(ctx: StepCtx):
+        """The ONE mail a subscriber gets when a Stripe invoice fails — identity's
+        `invoice.payment_failed` webhook handling re-reads the subscription and moves it to
+        `past_due`, which is `entitlements.resolve_plan`'s own 7-day grace (`grace_until`): the
+        paid plan stays in effect through the grace window, Free limits apply after it, and
+        nobody's data is deleted either way (the retention sweep only ever touches Free-plan
+        recordings). This mail is the one thing that fact needs beyond the resolver: telling the
+        person, once, so the grace window is not silent.
+
+        NO PRICE, NO DUE AMOUNT, NO LEGAL LANGUAGE (AGENTS.md: never invent one outside
+        `billing/catalog.py`, which is not consulted here at all) — the body states only that a
+        payment failed and where to go to fix it. THE LINK is `<VEXA_FLOWS_DASHBOARD_URL>/billing`,
+        the same environment fact `email_owner_ready` reads for `/meetings/<row-id>`; unset, the
+        mail still sends, with no link rather than a guessed one.
+
+        IDEMPOTENT TWICE OVER, the same posture `email_owner_ready` documents: identity's own
+        `payment_failed_source_id` keys admission to the INVOICE, so a redelivered webhook event
+        or a Stripe retry of the same unpaid invoice admits no second reaction here at all; this
+        step ALSO checks `mail_outbox_sent` (session `payment-failed-<invoice_id>`) before it
+        sends, the same belt-and-suspenders a step retry within one admitted reaction needs.
+
+        Reads: refs.{subject,invoice_id} · Effect: at most one notification ·
+        Result: {skipped} or {message_id, link}."""
+        uid = str(ctx.refs.get("subject") or "").strip()
+        if not uid:
+            raise StepError(
+                "payment.failed carried no subject — there is nobody to mail, and every reader "
+                "of this reaction identifies the person by that field.", retryable=False)
+        invoice_id = str(ctx.refs.get("invoice_id") or "").strip()
+        session = f"payment-failed-{invoice_id or ctx.reaction.reaction_id}"
+        if db.execute(
+                "SELECT 1 FROM mail_outbox_sent WHERE subject_uid=:u AND session=:s AND hash=:h",
+                {"u": uid, "s": session, "h": "v1"}):
+            return Done({"skipped": "already sent for this invoice"})
+        email = platform_user_email(uid)
+        if not email:
+            return Done({"skipped": f"no email on file for platform user {uid}"})
+        dash = os.environ.get("VEXA_FLOWS_DASHBOARD_URL", "").strip()
+        link = f"{dash.rstrip('/')}/billing" if dash else None
+        body = (
+            "A payment on your Vexa subscription failed.\n\n"
+            "Your plan and your data are unaffected for now — update your payment method to "
+            "keep it that way.\n"
+        )
+        mid = notify(email, "A payment on your Vexa subscription failed", body, link=link)
+        db.execute("""INSERT INTO mail_outbox_sent (subject_uid, session, hash, sent_at)
+                      VALUES (:u,:s,:h,:t) ON CONFLICT DO NOTHING""",
+                   {"u": uid, "s": session, "h": "v1", "t": ctx.clock_now})
+        return Done({"message_id": mid, "link": link}, provider_ref=mid)
+
     # ── the live call (PRD decision 42.2) ─────────────────────────────────────
     # The two DESK cards that used to sit beside it are `production_agent`'s now: a desk is agent
     # state, so a card on one has nothing to be in a deployment with no agent domain.
@@ -2198,6 +2255,10 @@ def build(reg: Registry, db) -> None:
     # this flow existed it answered a brand-new person with an empty list.
     reg.flow(name="onboarding", version=1, on=ONBOARDED,
              steps=[s["first_meeting"]])
+    # THE DUNNING MAIL (DB-78). One step, the same shape as `onboarding`: a fact identity already
+    # emits exactly once per failed invoice (`payment_failed_source_id`), one reaction, one effect.
+    reg.flow(name="dunning", version=1, on=PAYMENT_FAILED,
+             steps=[s["email_payment_failed"]])
 
     # ── the agent-only half ───────────────────────────────────────────────────
     # `meeting_prep`, `email_chat`, `desk_setup` and `desk_claim` are registered by

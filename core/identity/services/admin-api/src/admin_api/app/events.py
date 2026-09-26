@@ -38,6 +38,16 @@ EVENT_ONBOARDING_COMPLETED = "onboarding.completed"
 #: edge, same best-effort/swallowed contract (see `publish()` below). Identity tells; it does not
 #: ask, here as everywhere else in this module.
 EVENT_SUBSCRIPTION_CHANGED = "subscription.changed"
+#: DB-78 — the Stripe webhook hands this to flows in ADDITION to `subscription.changed`, ONLY for
+#: `invoice.payment_failed`. It exists as its own fact rather than something flows infers from
+#: `subscription.changed`'s `status == "past_due"` because a Stripe subscription can arrive at
+#: `past_due` from more than one delivery (a redelivered `invoice.payment_failed`, a reordered
+#: `customer.subscription.updated` that merely observes the state) and the dunning mail must go
+#: out exactly once per FAILED INVOICE, never once per delivery that happens to observe the same
+#: status. Keying `payment_failed_source_id` on the invoice id (not the Stripe event id) is what
+#: makes that true even across a Stripe retry that mints a brand-new event id for the same unpaid
+#: invoice — see its own docstring.
+EVENT_PAYMENT_FAILED = "payment.failed"
 
 log = logging.getLogger("admin_api.events")
 
@@ -182,3 +192,22 @@ def subscription_changed_refs(subject, tier, status) -> dict:
     """`{subject, tier, status}` — the resolved plan a billing consumer (dunning, seat counting)
     needs, stated here rather than left for flows to re-derive from a Stripe object it never sees."""
     return {"subject": str(subject), "tier": str(tier or ""), "status": str(status or "")}
+
+
+def payment_failed_source_id(user_id, invoice_id) -> str:
+    """The fact's id, keyed to the UNPAID INVOICE — not the Stripe event id.
+
+    Two things must both be true and only this key gives both: a REDELIVERY of the same
+    `invoice.payment_failed` event (same event id, same invoice id) is a no-op, and a Stripe
+    RETRY of the same unpaid invoice (a fresh event id, the SAME invoice id, per Stripe's own
+    dunning schedule) is also a no-op — the dunning mail is a fact about the invoice, sent once,
+    not a fact about a delivery. flows admits on `(source_event_id, flow)`, so this id alone is
+    what makes both cases converge there, with no ledger of already-seen event ids kept anywhere."""
+    return f"payment-failed-{user_id}-{invoice_id}"
+
+
+def payment_failed_refs(subject, invoice_id) -> dict:
+    """`{subject, invoice_id}` — enough for the dunning mail step to compose its own body and its
+    own idempotency key; no price or due amount is carried here (AGENTS.md: never invent a price
+    outside `billing/catalog.py` — this fact is not that source, so it does not repeat one)."""
+    return {"subject": str(subject), "invoice_id": str(invoice_id or "")}

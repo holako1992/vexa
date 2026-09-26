@@ -76,10 +76,12 @@ class InMemoryRecordingRepo:
         self._sessions: dict[str, int] = {}
 
     def seed(
-        self, *, meeting_id: int, user_id: int, session_uid: str, status: str = "active"
+        self, *, meeting_id: int, user_id: int, session_uid: str, status: str = "active",
+        created_at: Optional[str] = None,
     ) -> None:
         self._meetings.setdefault(
-            meeting_id, {"user_id": user_id, "status": status, "recordings": []}
+            meeting_id,
+            {"user_id": user_id, "status": status, "recordings": [], "created_at": created_at},
         )
         self._sessions[session_uid] = meeting_id
 
@@ -131,4 +133,34 @@ class InMemoryRecordingRepo:
             if m.get("user_id") == user_id:
                 for r in m.get("recordings", []):
                     out.append({**r, "meeting_id": mid})
+        return out
+
+    async def list_purge_candidates(self, cutoff, limit: int) -> list[dict]:
+        """Mirrors ``SqlAlchemyRecordingRepo.list_purge_candidates`` (DB-78): oldest terminal
+        meetings first (by ``created_at``, seeded by ``seed(..., created_at=...)``), a
+        candidate's OWN recording ``created_at`` compared against ``cutoff``, bounded by
+        ``limit``."""
+        cutoff_iso = cutoff.isoformat() if hasattr(cutoff, "isoformat") else str(cutoff)
+        meetings = sorted(
+            self._meetings.items(),
+            key=lambda kv: kv[1].get("created_at") or "",
+        )
+        out: list[dict] = []
+        for meeting_id, m in meetings:
+            if m.get("status") not in ("completed", "failed"):
+                continue
+            if (m.get("created_at") or "") > cutoff_iso:
+                continue
+            for r in m.get("recordings", []):
+                if r.get("deletion_pending"):
+                    continue
+                created_at = r.get("created_at")
+                if not created_at or created_at > cutoff_iso:
+                    continue
+                out.append({
+                    "user_id": m.get("user_id"), "meeting_id": meeting_id,
+                    "recording_id": r.get("id"), "created_at": created_at,
+                })
+                if len(out) >= limit:
+                    return out
         return out

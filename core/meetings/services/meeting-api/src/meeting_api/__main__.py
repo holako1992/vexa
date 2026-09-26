@@ -253,6 +253,7 @@ def build_production_app():
         system_webhook_sink=system_webhook_sink,
         session_factory=session_factory,
         storage=storage,
+        recording_repo=recording_repo,
     )
     return app
 
@@ -269,6 +270,7 @@ def _minio_endpoint_url() -> str:
 def _attach_background_loops(
     app, transcript_store, segment_bus, redis_client, meeting_repo=None, runtime=None,
     service_authority=None, system_webhook_sink=None, session_factory=None, storage=None,
+    recording_repo=None,
 ) -> None:
     """Register the FastAPI lifespan that starts/stops the control-plane poll loops.
 
@@ -693,6 +695,51 @@ def _attach_background_loops(
                 log.exception("signal tape janitor tick failed")
             await asyncio.sleep(signal_janitor_interval)
 
+    # Free-plan recording retention purge (DB-78). OFF by default — a self-host with no operator
+    # decision made here must not start deleting recordings the day this ships; explicit opt-in
+    # (`RETENTION_SWEEP_ENABLED=true`) is the same "capability degrade, not silently on" posture
+    # `calendar_sync`/`auto_join` already take on their own missing-config paths, just spelled as
+    # a flag instead of an absent URL because this one has real product consequences either way.
+    retention_sweep_enabled = (os.getenv("RETENTION_SWEEP_ENABLED", "false").strip().lower()
+                               in ("1", "true", "yes"))
+    retention_interval = float(os.getenv("RETENTION_SWEEP_INTERVAL_S", "3600"))
+    retention_batch_limit = int(os.getenv("RETENTION_SWEEP_BATCH_LIMIT", "200"))
+
+    async def _retention_sweep_loop() -> None:
+        if not retention_sweep_enabled:
+            return
+        if storage is None or recording_repo is None:
+            return  # no object store / recording repo wired (Lite without MinIO) — nothing to purge
+        if not (admin_api_url and internal_secret):
+            return  # no identity edge configured — cannot resolve a single plan, so no-op
+        from .sweeps.retention import (fetch_free_plan_retention_days, fetch_user_plan_id,
+                                       run_retention_sweep)
+
+        async def _plan_lookup(user_id: int):
+            return await fetch_user_plan_id(admin_api_url, internal_secret, user_id)
+
+        async def _tick():
+            retention_days = await fetch_free_plan_retention_days(admin_api_url, internal_secret)
+            if retention_days is None:
+                log.warning("retention sweep: could not read the Free plan's retention ceiling "
+                           "from identity — skipping this tick")
+                return
+            await run_retention_sweep(
+                recording_repo, storage, plan_lookup=_plan_lookup,
+                retention_days=retention_days, batch_limit=retention_batch_limit,
+            )
+
+        while True:
+            try:
+                # #637: single-flight. The sweep both SCANS a batch of meeting rows and DELETES
+                # storage objects; two replicas racing would double both.
+                await _guarded("retention-purge", _tick)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("retention sweep tick failed")
+            await asyncio.sleep(retention_interval)
+
     async def _ensure_fts_index_once() -> None:
         """F191 / MIGRATION-0006 — ``ensure_fts_index`` (adapters.py, ``SqlAlchemyTranscriptStore``)
         built the transcript FTS GIN index and was never called from anywhere: it shipped defined,
@@ -747,6 +794,7 @@ def _attach_background_loops(
             asyncio.create_task(_auto_join_loop(), name="auto-join"),
             asyncio.create_task(_calendar_sync_loop(), name="calendar-sync"),
             asyncio.create_task(_signal_tape_janitor_loop(), name="signal-tape-janitor"),
+            asyncio.create_task(_retention_sweep_loop(), name="retention-purge"),
             asyncio.create_task(_ensure_fts_index_once(), name="ensure-fts-index"),
         ]
         log.info("meeting-api background loops started: %s", [t.get_name() for t in tasks])

@@ -103,3 +103,19 @@ class RecordingRepo(Protocol):
     async def list_meeting_recordings(self, user_id: int) -> list[dict]:
         """Every recording across the user's meetings (for ``GET /recordings``)."""
         ...
+
+    async def list_purge_candidates(self, cutoff, limit: int) -> list[dict]:
+        """A BOUNDED batch for the Free-plan retention sweep (DB-78) — at most ``limit`` MEETING
+        rows scanned (the oldest ``completed``/``failed`` ones first, by the indexed
+        ``Meeting.created_at``), never the whole ``meetings`` table and never a JSONB scan with no
+        bound at all. Within those rows, every recording whose OWN ``created_at`` is at or before
+        ``cutoff`` and that is not already ``deletion_pending`` (another tick's delete is already
+        in flight for it) is a candidate.
+
+        Plan-AGNOSTIC on purpose: this port has no billing concept and must not grow one — the
+        sweep decides who is actually Free through the existing entitlements edge, per distinct
+        owner in the returned batch, bounded by the same ``limit``.
+
+        Returns ``[{user_id, meeting_id, recording_id, created_at}]``, oldest first.
+        """
+        ...

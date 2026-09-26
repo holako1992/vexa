@@ -67,3 +67,23 @@ the Free plan's `concurrent_bots` (1) the moment this ships — see
   source lines it's built from. `MeetingsUsagePort` is the thin per-request `UsagePort` wrapper
   `GET /user/entitlements` passes to `resolve_entitlements`; DB-72 (spawn-time enforcement)
   reuses `meetings_usage_for_period` itself, unmodified.
+
+## DB-78 — the two doors meeting-api's retention sweep reads
+
+Two more calls into `resolve_plan`/`catalog.py`, for the Free-plan recording retention purge —
+neither adds a THIRD place a plan is decided; both read through the one resolver above.
+
+- **`/internal/users/{id}/bot-context`'s new `plan_id` field** (`main.py`) — the resolved plan
+  the sweep needs per candidate recording's OWNER: is this person still actually on Free right
+  now (an admin override, a completed upgrade, or a lapsed `past_due` grace can all move that
+  answer)? Reused rather than duplicated because the sweep's calls here are bounded — at most one
+  per DISTINCT owner in a tick's candidate batch, the same bound `calendar_sync`'s per-user loop
+  already relies on.
+- **`/internal/billing/free-plan-retention`** (`main.py`, new) — the Free plan's CURRENT
+  `recording_retention_days`, read straight off `catalog.get_plan(DEFAULT_PLAN_ID)`. Called ONCE
+  per sweep TICK (a deployment-wide constant every Free user shares), not per user and not per
+  recording — the justification for a small dedicated door instead of asking every candidate's
+  owner to resolve their whole `bot-context` just to read a number they'd all get the same answer
+  to. See `core/meetings/services/meeting-api/src/meeting_api/sweeps/README.md` for the sweep
+  itself, and `docs/docs/how-to/billing.mdx#dunning-and-grace-a-payment-fails` for the product
+  picture (grace window, the one dunning email, and what the purge does and does not touch).

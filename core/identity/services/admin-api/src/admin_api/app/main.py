@@ -1499,6 +1499,20 @@ def create_app() -> FastAPI:
             )
         except Exception:  # noqa: BLE001 — a publish edge is not a dependency
             pass
+
+        # DB-78 — ONE dunning mail per failed invoice, same fire-and-forget contract, keyed to the
+        # invoice (not this event id) so a Stripe retry of the SAME unpaid invoice is also a
+        # no-op on the flows side — see `events_mod.payment_failed_source_id`'s own docstring.
+        if event_type == "invoice.payment_failed":
+            invoice_id = event_object.get("id") or ""
+            try:
+                await events_mod.publish(
+                    events_mod.EVENT_PAYMENT_FAILED,
+                    events_mod.payment_failed_source_id(target_user.id, invoice_id),
+                    events_mod.payment_failed_refs(target_user.id, invoice_id),
+                )
+            except Exception:  # noqa: BLE001 — a publish edge is not a dependency
+                pass
         return {"received": True, "handled": True}
 
     # --- internal tier: the gateway's authz oracle (FAIL-CLOSED) ---
@@ -2026,6 +2040,12 @@ def create_app() -> FastAPI:
                 plan.limits.concurrent_bots, user.max_concurrent_bots,
             ),
             "bot_name": data.get("calendar_bot_name") or "Vexa",
+            # DB-78: the RESOLVED plan id (Stripe tier, grace, admin override — the ONE resolver,
+            # `entitlements.resolve_plan` — all already applied). meeting-api's retention sweep
+            # reads this per candidate recording's owner rather than re-deriving "is this user
+            # Free" from `subscription_status`/`plan_override` itself, which would be a second
+            # place that decision lives.
+            "plan_id": plan.plan_id,
         }
         # The plan's per-meeting minute ceiling (Free 60, Pro/Team 240 — billing/catalog.py).
         # UNLIKE `quota` below, this is stated whenever the resolved plan names one AT ALL —
@@ -2087,6 +2107,25 @@ def create_app() -> FastAPI:
             )
             resp["transcription"] = transcription
         return resp
+
+    # --- internal tier: the Free plan's retention ceiling, read live from the catalog (DB-78) ---
+    @app.get("/internal/billing/free-plan-retention", include_in_schema=False)
+    async def get_free_plan_retention(request: Request):
+        """ONE call per meeting-api retention-sweep TICK — not per user, not per recording — so
+        the sweep never hardcodes the Free plan's `recording_retention_days` (AGENTS.md: never
+        invent a number outside `billing/catalog.py`) and never has to resolve a whole user's
+        entitlements just to read a deployment-wide constant. Per-owner "is THIS recording's
+        owner actually still on Free" is a separate, bounded question the sweep answers through
+        the existing `/internal/users/{id}/bot-context` edge's `plan_id` — this endpoint answers
+        only "what is Free's retention ceiling right now", which every candidate shares.
+        """
+        _check_internal(request)
+        plan = billing_catalog.get_plan(billing_catalog.DEFAULT_PLAN_ID)
+        return {
+            "plan_id": plan.plan_id,
+            "recording_retention_days": plan.recording_retention_days,
+            "catalog_version": billing_catalog.CATALOG_VERSION,
+        }
 
     # --- internal tier: platform-wide settings (the DB layer under per-user prefs) — written by
     #     the terminal's ADMIN-GATED settings editor over this edge, read by agent-api/meeting-api.

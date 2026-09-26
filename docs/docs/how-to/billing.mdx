@@ -63,6 +63,41 @@ leaves with `completion_reason: max_bot_time_exceeded` when it hits the cap eith
 [completion reasons](/troubleshooting/completion-reasons#the-per-plan-minute-cap) for how the two
 combine and what to do about it.
 
+## Dunning and grace (a payment fails)
+
+`invoice.payment_failed` moves a subscription to `subscription_status: past_due`. `resolve_plan`
+(`billing/entitlements.py`) still resolves it to its **paid** tier for a **7-day grace window**
+— `grace_until`, `period_end` plus `PAST_DUE_GRACE_DAYS` — so a card that failed once does not
+immediately drop the account to Free. `GET /user/entitlements` reports `status: "past_due"` and
+`grace_until` for the whole window; after `grace_until` passes with no successful payment, the
+SAME resolver falls back to Free limits automatically — nothing deletes the account's existing
+meetings, recordings or transcripts either way; only the plan's limits change.
+
+The webhook sends **one email** per failed invoice, through the flows mailbox, to the address on
+the account: a plain notice that a payment failed and a link to `/billing` on your dashboard
+(`VEXA_FLOWS_DASHBOARD_URL`, the same env var [the meeting-ready mail](/how-to/post-meeting-report)
+already reads) — no price, no due amount, no legal language, because `billing/catalog.py` is not
+consulted for it. It is idempotent on the **invoice**, not the Stripe event id: a redelivered
+webhook event and a fresh Stripe retry of the same unpaid invoice both resolve to the same fact
+id on the flows side, so however many times Stripe redelivers or retries, exactly one mail goes
+out per failed invoice. A deployment with no flows domain configured sends no mail and drops
+nothing else — the plan resolution above is unaffected either way.
+
+### Retention purge for a lapsed Free-plan recording
+
+Free's `recording_retention_days` (`billing/catalog.py` — 7 days today) is enforced by an
+opt-in background sweep on **meeting-api**, `RETENTION_SWEEP_ENABLED=true`
+(`meeting_api/sweeps/retention.py`). Each tick reads the Free plan's current retention ceiling
+live off admin-api's catalog (never hardcoded on meeting-api), scans the oldest terminal meetings
+in a bounded batch (`RETENTION_SWEEP_BATCH_LIMIT`, default 200), and — for each candidate
+recording whose owner is **currently** resolved to Free (checked per distinct owner through the
+same `/internal/users/{id}/bot-context` edge `POST /bots` already calls) and whose own age is
+past the ceiling — deletes it through the exact same owner-scoped path a person's own
+`DELETE /recordings/{id}` uses: storage objects first, then the JSONB row. A Pro/Team recording,
+or a Free user still inside their `past_due` grace window (which resolves to the PAID plan, not
+Free — see above), is left alone. Disabled by default; see `config.v1.json` on meeting-api for
+`RETENTION_SWEEP_ENABLED` / `RETENTION_SWEEP_INTERVAL_S` / `RETENTION_SWEEP_BATCH_LIMIT`.
+
 ## How the webhook keeps this true
 
 `POST /billing/webhook` is the **only** writer of a user's Stripe fields. It never trusts a

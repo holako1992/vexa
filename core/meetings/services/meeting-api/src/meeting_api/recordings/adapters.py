@@ -248,6 +248,44 @@ class SqlAlchemyRecordingRepo:
                     out.append({**r, "meeting_id": m.id})
             return out
 
+    async def list_purge_candidates(self, cutoff, limit):
+        from sqlalchemy import select
+
+        from ..sessions.models import Meeting
+
+        cutoff_iso = cutoff.isoformat()
+        async with self._session_factory() as db:
+            # Bounded by `Meeting.created_at` (indexed) — oldest terminal meetings first. A
+            # recording's OWN `created_at` (set at upload, inside `meeting.data`) can lag the
+            # meeting's, so the per-recording cutoff check below is against that field, not this
+            # one; ordering by the meeting's is still the right bound because a meeting cannot
+            # finish recording before it starts.
+            rows = (
+                await db.execute(
+                    select(Meeting)
+                    .where(Meeting.status.in_(("completed", "failed")))
+                    .where(Meeting.created_at <= cutoff)
+                    .order_by(Meeting.created_at.asc())
+                    .limit(limit)
+                )
+            ).scalars().all()
+            out: list[dict] = []
+            for m in rows:
+                data = m.data if isinstance(m.data, dict) else {}
+                for r in data.get("recordings") or []:
+                    if r.get("deletion_pending"):
+                        continue
+                    created_at = r.get("created_at")
+                    if not created_at or created_at > cutoff_iso:
+                        continue
+                    out.append({
+                        "user_id": m.user_id, "meeting_id": m.id,
+                        "recording_id": r.get("id"), "created_at": created_at,
+                    })
+                    if len(out) >= limit:
+                        return out
+            return out
+
 
 def build_production_router(*, database_url: Optional[str] = None):
     """Construct the recordings router with real MinIO/S3 + SQLAlchemy adapters from env."""

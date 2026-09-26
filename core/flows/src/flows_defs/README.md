@@ -13,7 +13,7 @@ anything when the **agent domain is not deployed** (PRD decisions 40.6/40.7).
 
 | | Flows | With no agent domain |
 |---|---|---|
-| `production.py` | `invite_intake` · `post_meeting` · `live_meeting` | they still run — the invite is accepted, the bot joins, the meeting is recorded, and the agent-reaching steps answer `agent:not_present` |
+| `production.py` | `invite_intake` · `post_meeting` · `live_meeting` · `friction_log` · `onboarding` · `dunning` | they still run — the invite is accepted, the bot joins, the meeting is recorded, and the agent-reaching steps answer `agent:not_present` |
 | `production_agent.py` | `meeting_prep` · `email_chat` · `desk_setup` · `desk_claim` | **not registered at all** — a conversation with an agent and two cards on a desk have nothing to degrade to |
 
 `production.build()` calls `production_agent.build()` last, and only when
@@ -47,3 +47,15 @@ calendar invite's organiser; an ad hoc bot (the dashboard's "Send Bot", MCP's
 setting `email_minutes` honours; a clean no-op when an organiser IS on the meeting, since that
 mail already went out. See `docs/docs/how-to/post-meeting-report.mdx#email-when-its-ready-db-80`
 and `core/flows/tests/test_meeting_ready_email.py` for the property list.
+
+## DB-78 — the dunning mail (`dunning` flow, `email_payment_failed`)
+
+A ONE-STEP flow, the same shape as `onboarding`, reacting to `payment.failed` — identity's Stripe
+webhook publishes this fact, alongside `subscription.changed`, ONLY for `invoice.payment_failed`,
+keyed to the INVOICE rather than the Stripe event id (`admin_api/app/events.py`'s
+`payment_failed_source_id`) so a redelivered webhook event or a Stripe retry of the same unpaid
+invoice admits no second reaction here. The step itself carries the same `mail_outbox_sent`
+belt-and-suspenders `email_owner_ready` documents, mails a plain notice with a `/billing` link
+(`VEXA_FLOWS_DASHBOARD_URL`) and no price or legal language, and skips cleanly when the platform
+user has no email on file. See `docs/docs/how-to/billing.mdx#dunning-and-grace-a-payment-fails`
+and `core/flows/tests/test_dunning_email.py` for the property list.
