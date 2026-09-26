@@ -66,6 +66,22 @@
     },
     {
       "method": "GET",
+      "path": "/user/calendars/microsoft/authorize",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/calendars/microsoft/exchange",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/user/entitlements",
       "scopes": [
         "bot",

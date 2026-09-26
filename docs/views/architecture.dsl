@@ -83,6 +83,9 @@ system system-webhook-system  # optional operator-owned terminal-event consumer;
 system google-calendar-system  # DB-30: external, optional — a deployment with no GOOGLE_CALENDAR_CLIENT_ID/SECRET configured never calls it and the ICS calendar-connect surface is unaffected (config.v1 capability google_calendar)
   service google-calendar-api
 
+system microsoft-calendar-system  # DB-32: external, optional — a deployment with no MICROSOFT_CALENDAR_CLIENT_ID/SECRET configured never calls it and the ICS calendar-connect surface (and the Google connector) is unaffected (config.v1 capability microsoft_calendar)
+  service microsoft-calendar-api
+
 system platform  # shared infra backing the services
   service redis
   database postgres
@@ -127,6 +130,9 @@ edges:
   meeting-api -req-> admin-api  # DB-30: POST /internal/calendars/{id}/google-token mints a short-lived Google access token for a google-kind connection's sync; meeting-api never reads identity's tables or the encrypted refresh token directly (the core owns its contracts)
   meeting-api -req-> google-calendar-api  # DB-30: GET calendar/v3/calendars/{id}/events (singleEvents=true, paginated) with the access token minted above — the Google adapter beside the ICS one, producing identical planned-meeting rows for an equivalent event (parity)
   admin-api -req-> google-calendar-api  # DB-30: OAuth code/refresh-token exchange (oauth2.googleapis.com/token) and account-email lookup (oauth2/v3/userinfo) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard
+  meeting-api -req-> admin-api  # DB-32: POST /internal/calendars/{id}/microsoft-token mints a short-lived Microsoft Graph access token for a microsoft-kind connection's sync; meeting-api never reads identity's tables or the encrypted refresh token directly (the core owns its contracts)
+  meeting-api -req-> microsoft-calendar-api  # DB-32: GET /me/calendarView (or /me/calendars/{id}/calendarView, paginated via @odata.nextLink) with the access token minted above — the Microsoft adapter beside the ICS and Google ones, producing identical planned-meeting rows for an equivalent event (parity)
+  admin-api -req-> microsoft-calendar-api  # DB-32: OAuth code/refresh-token exchange (login.microsoftonline.com/{tenant}/oauth2/v2.0/token) and account-email lookup (graph.microsoft.com/v1.0/me) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard
   meeting-api -req-> service-authority  # optional signed service-authority.v1 admit/continue decision; unset is explicit OSS allow-all, configured failure is closed
   meeting-api -req-> system-webhook  # optional signed terminal webhook.v1 delivery to a boot-frozen operator destination; customer webhook SSRF policy remains separate
   agent-api -read-> segments-stream  # XREADGROUP agent_copilot (proactive watcher)

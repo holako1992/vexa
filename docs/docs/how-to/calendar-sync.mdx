@@ -1,6 +1,6 @@
 ---
 title: "Calendar sync"
-description: "Connect a Google calendar in one consent screen, or any calendar with a secret ICS address — upcoming meetings import automatically and retain their source."
+description: "Connect a Google or Microsoft 365 calendar in one consent screen, or any calendar with a secret ICS address — upcoming meetings import automatically and retain their source."
 ---
 
 Connect your calendars once and Vexa keeps your **Upcoming** meetings in sync: every calendar event
@@ -8,16 +8,18 @@ with a Meet/Zoom/Teams link becomes a [planned meeting](/core/meetings#the-lifec
 and the bot [auto-joins](/core/meetings#auto-join--scheduled-means-the-bot-comes) each one at start
 time.
 
-Two ways to connect a calendar:
+Three ways to connect a calendar:
 
 - **Google Calendar (recommended)** — one consent screen, read-only, no secret address to find.
   See [Connect Google Calendar](#connect-google-calendar) below.
-- **Any other calendar (ICS)** — Outlook/Microsoft 365, or a Google account an admin has not
-  enabled OAuth for — off a **secret ICS address** your calendar provides. See
+- **Microsoft 365 / Outlook.com (recommended)** — one consent screen against Microsoft Graph,
+  read-only, no secret address to find. See [Connect Microsoft 365](#connect-microsoft-365) below.
+- **Any other calendar (ICS)** — a Google or Microsoft account an admin has not enabled OAuth for,
+  or any other provider — off a **secret ICS address** your calendar provides. See
   [Connect with a secret ICS address](#connect-with-a-secret-ics-address) below.
 
-You can connect up to **ten** calendars total (Google + ICS combined), each with its own auto-join
-policy and bot name — see the [Calendar API](/api/calendar) for the endpoints.
+You can connect up to **ten** calendars total (Google + Microsoft + ICS combined), each with its
+own auto-join policy and bot name — see the [Calendar API](/api/calendar) for the endpoints.
 
 ## Connect Google Calendar
 
@@ -73,10 +75,62 @@ Unset any of the four keys and the three Google routes
 `POST /internal/calendars/{id}/google-token`) answer a typed `503` naming exactly what's missing;
 the ICS calendar surface below is completely unaffected.
 
+## Connect Microsoft 365
+
+On the dashboard's **Calendar** page, click **Connect Microsoft 365**. Microsoft shows its own
+consent screen naming exactly one permission — read-only access to your calendar — and returns you
+to Vexa already connected, syncing within seconds. No secret address, no copy-paste.
+
+<Info>
+**What Vexa can see:** the `Calendars.Read` scope (events on your default calendar and any others
+you name) — never write access, never another person's free/busy, never any Microsoft 365 product
+besides Calendar. Remove Vexa's access anytime from
+[myaccount.microsoft.com](https://myaccount.microsoft.com/); Vexa detects the revocation on the
+next sync and shows **Reconnect needed** instead of failing silently.
+</Info>
+
+### Self-hosting: Azure app registration setup
+
+DB-32's OAuth flow needs its own Azure app registration — a **different** one from any dashboard
+sign-in client (a different consent: this one asks for calendar access, sign-in asks for none).
+
+1. [Azure Portal → App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
+   → **New registration**.
+2. **Supported account types:** pick **Accounts in any organizational directory and personal
+   Microsoft accounts** unless your deployment is restricted to one Azure AD tenant — this is what
+   lets `MICROSOFT_CALENDAR_TENANT_ID` stay at its default, `common`.
+3. Under **Redirect URI**, platform **Web**, add your dashboard's callback page — exactly the value
+   you will set as `MICROSOFT_CALENDAR_REDIRECT_URI` (below), e.g.
+   `https://dashboard.example.com/calendar/microsoft/callback`. Microsoft refuses the consent
+   screen if these do not match byte-for-byte.
+4. Under **API permissions**, add **Microsoft Graph → Delegated permissions → `Calendars.Read`**
+   and **`offline_access`** (offline_access is what earns a refresh token — without it Microsoft's
+   v2 endpoint issues an access token only, and Vexa can never sync again once it expires).
+5. Under **Certificates & secrets**, create a **client secret** and copy its value immediately —
+   Azure never shows it again.
+6. Copy the **Application (client) ID** and the client secret into admin-api's environment:
+
+```bash
+MICROSOFT_CALENDAR_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+MICROSOFT_CALENDAR_CLIENT_SECRET=xxxxxxxxxx
+MICROSOFT_CALENDAR_REDIRECT_URI=https://dashboard.example.com/calendar/microsoft/callback
+```
+
+`CALENDAR_TOKEN_ENCRYPTION_KEY` (set once, above, for Google) is shared — the same AES-256-GCM key
+`token_cipher.py` encrypts every stored Google **and** Microsoft refresh token with, bound to the
+user id and connection id; a deployment with no Google connection still needs it set for Microsoft
+to connect.
+
+Unset any of the three Microsoft keys and the three Microsoft routes
+(`GET /user/calendars/microsoft/authorize`, `POST /user/calendars/microsoft/exchange`, and the
+internal `POST /internal/calendars/{id}/microsoft-token`) answer a typed `503` naming exactly
+what's missing; the ICS calendar surface and the Google connector are completely unaffected.
+
 ## Connect with a secret ICS address
 
-Outlook/Microsoft 365, or any calendar whose provider does not support DB-30's OAuth flow, connects
-off its **secret ICS address** instead — no OAuth, no calendar permissions.
+Any calendar whose provider does not support the Google or Microsoft OAuth flows above — or a
+Google/Microsoft account an admin has not enabled OAuth for — connects off its **secret ICS
+address** instead: no OAuth, no calendar permissions.
 
 ### 1. Find your secret ICS address
 
@@ -205,20 +259,24 @@ curl -X PUT "$API_BASE/user/calendar" \
 
 | Operation | Endpoint | Result |
 |---|---|---|
-| List connections | `GET /user/calendars` | Every connection (ICS and Google), masked: an ICS row never returns its feed URL, a Google row never returns its refresh token. |
+| List connections | `GET /user/calendars` | Every connection (ICS, Google, and Microsoft), masked: an ICS row never returns its feed URL, a Google/Microsoft row never returns its refresh token. |
 | Connect (ICS) | `POST /user/calendars` | Creates one ICS connection from `name`, `ics_url`, `auto_join`, and optional `bot_name`. |
 | Get Google consent URL | `GET /user/calendars/google/authorize` | Returns `{"authorize_url": "...", "state": "..."}` — redirect the browser to `authorize_url`. |
 | Complete Google connect | `POST /user/calendars/google/exchange` | Body `{"code", "state"}` from Google's redirect (DB-31's callback page relays these). Exchanges the code, stores the connection, returns it masked. |
+| Get Microsoft consent URL | `GET /user/calendars/microsoft/authorize` | Returns `{"authorize_url": "...", "state": "..."}` — redirect the browser to `authorize_url`. |
+| Complete Microsoft connect | `POST /user/calendars/microsoft/exchange` | Body `{"code", "state"}` from Microsoft's redirect (the dashboard's callback page relays these). Exchanges the code, stores the connection, returns it masked. |
 | Rename or configure | `PATCH /user/calendars/{calendar_id}` | Updates `name`, `auto_join`, `bot_name`, `enabled` (+ `ics_url` for an ICS connection) for only that connection. |
 | Disconnect | `DELETE /user/calendars/{calendar_id}` | Removes that source without changing other connections. |
 | Read sync state | `GET /user/calendars/{calendar_id}/sync` | Returns that connection's latest sync stamp. |
 | Sync now | `POST /user/calendars/{calendar_id}/sync` | Fetches and reconciles only that connection immediately. |
 
-A masked connection now carries `"kind": "ics"` or `"kind": "google"`. A Google connection's shape
-adds `google_email` (the connected account, not a secret), `google_calendar_ids` (default
-`["primary"]`), and `reconnect_needed` — `true` once Google reports the grant revoked or expired,
-`false` otherwise; the panel shows **Reconnect needed** for that connection instead of a generic
-sync failure, and reconnecting (repeating the consent flow for the same account) clears it.
+A masked connection now carries `"kind": "ics"`, `"kind": "google"`, or `"kind": "microsoft"`. A
+Google connection's shape adds `google_email` (the connected account, not a secret),
+`google_calendar_ids` (default `["primary"]`), and `reconnect_needed`; a Microsoft connection adds
+the same shape under `microsoft_email` / `microsoft_calendar_ids`. `reconnect_needed` is `true`
+once the provider reports the grant revoked or expired, `false` otherwise; the panel shows
+**Reconnect needed** for that connection instead of a generic sync failure, and reconnecting
+(repeating the consent flow for the same account) clears it.
 
 Imported meeting metadata includes `data.calendar_sources`, an array of source objects with the
 stable connection `id`, display `name`, provider event `uid`, source `auto_join` preference,
@@ -233,7 +291,7 @@ have separate storage responsibilities:
 | Data | Durable home | Notes |
 |---|---|---|
 | Named calendar connections, secret ICS URLs, per-feed auto-join, per-feed bot name | The user's `data` JSON document in Postgres | User-facing reads mask the feed URL. The full URL crosses only the authenticated internal sync edge. |
-| Google connection's refresh token | The same `data` document, **encrypted at rest** (`token_cipher.py`'s AES-256-GCM, keyed by `CALENDAR_TOKEN_ENCRYPTION_KEY`, bound to the user id and connection id) | Never stored in the clear, never returned by any read, never sent to meeting-api — only admin-api decrypts it, to mint a short-lived access token over its own internal edge. |
+| Google or Microsoft connection's refresh token | The same `data` document, **encrypted at rest** (`token_cipher.py`'s AES-256-GCM, keyed by `CALENDAR_TOKEN_ENCRYPTION_KEY`, bound to the user id and connection id) | Never stored in the clear, never returned by any read, never sent to meeting-api — only admin-api decrypts it, to mint a short-lived access token over its own internal edge. |
 | Imported events | Ordinary rows in the Postgres `meetings` table | A future event is a planned meeting with `status: "scheduled"`. |
 | Event and calendar provenance | The meeting's `data` JSON document | Includes scheduling, attendees, calendar source IDs/names, and provider event UIDs. |
 | Latest sync time, error, and created/updated/cancelled counts | Redis | Operational status under the user/connection sync key; this is not the durable event authority. |
@@ -333,11 +391,11 @@ can show:
 | `the feed is too large (over 2 MB)` | Unusually huge feed. | Sync a specific calendar rather than an aggregate. |
 | `couldn't reach the URL (unreachable, timed out, or a blocked/internal address)` | Network failure, or the address points somewhere the server-side guard refuses (internal hosts). | Verify the URL opens from a browser; use the calendar provider's public host. |
 
-A Google connection shows one more, distinct state rather than a generic failure:
+A Google or Microsoft connection shows one more, distinct state rather than a generic failure:
 
 | State | What it means | Fix |
 |---|---|---|
-| `reconnect_needed: true` (panel: **Reconnect needed**) | Google reported the grant revoked or expired (`invalid_grant`) — access was removed at [myaccount.google.com/permissions](https://myaccount.google.com/permissions), the OAuth client was deleted, or a very long idle period expired it. | Click **Reconnect** — the same consent flow, which clears the flag on success. |
+| `reconnect_needed: true` (panel: **Reconnect needed**) | The provider reported the grant revoked or expired (`invalid_grant`) — access was removed at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) or [myaccount.microsoft.com](https://myaccount.microsoft.com/), the OAuth client was deleted, or a very long idle period expired it. | Click **Reconnect** — the same consent flow, which clears the flag on success. |
 
 ## What imports (and what doesn't)
 

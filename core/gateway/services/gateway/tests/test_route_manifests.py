@@ -7,7 +7,7 @@ flows + identity).
 
 What these tests hold down, in the order they matter:
 
-  1. the FULL profile is byte-for-byte what shipped — 71 scoped rows and 2 unscoped, and every one
+  1. the FULL profile is byte-for-byte what shipped — 75 scoped rows and 2 unscoped, and every one
      of them still matched to a route that exists;
   2. without the agent domain the table lacks EXACTLY its seven rows and nothing else;
   3. an absent domain's routes are absent from the APP too, so a request 404s rather than 403s;
@@ -39,13 +39,13 @@ AGENT_ROWS = frozenset({
     ("PATCH", "/agent/{path:path}"),
     ("DELETE", "/agent/{path:path}"),
 })
-#: What shipped. A count, not a copy of the table: a second copy of 73 rows is a second thing to
+#: What shipped. A count, not a copy of the table: a second copy of 75 rows is a second thing to
 #: keep in step, and `test_the_assembled_table_matches_the_app_exactly` is what proves the
 #: CONTENT — against the routes themselves, which is a stronger anchor than a literal.
-FULL_SCOPED, FULL_UNSCOPED = 73, 2
+FULL_SCOPED, FULL_UNSCOPED = 75, 2
 #: What THIS BUILD publishes — the full profile, less the agent rows when the build omits them.
 #: DERIVED, so the count stays exact in either build rather than softening to a range or a
-#: subset check. 73 on the line; 66 in a build with no agent manifest.
+#: subset check. 75 on the line; 68 in a build with no agent manifest.
 CARRIED_SCOPED = FULL_SCOPED - (0 if AGENT_CARRIED else len(AGENT_ROWS))
 
 
@@ -56,7 +56,7 @@ def _app(**kw):
 # ── 1 · the full profile is unchanged ────────────────────────────────────────────────────────────
 
 def test_the_published_table_is_exactly_what_this_build_serves():
-    """An exact count either way: five domains publish 71 scoped rows, four publish 64. The
+    """An exact count either way: five domains publish 75 scoped rows, four publish 68. The
     expectation is derived from what the build carries, never relaxed to accommodate it."""
     assert (len(ROUTE_SCOPES), len(UNSCOPED_ROUTES)) == (CARRIED_SCOPED, FULL_UNSCOPED)
 
@@ -86,10 +86,10 @@ def test_the_assembled_table_matches_the_app_exactly():
 @needs_agent
 def test_every_domain_declares_its_own_and_only_its_own():
     a = routes_manifest.load({"gateway", "meetings", "identity", "mcp", "agent"})
-    # 7+2+17+12+37 = 75 rows, less the edge's own 2 unscoped = 73 = FULL_SCOPED above. Both
+    # 7+2+19+12+37 = 77 rows, less the edge's own 2 unscoped = 75 = FULL_SCOPED above. Both
     # numbers derive from the same manifests and must agree: when a domain gains a route, they
     # move together or this test is what says so.
-    assert a.domains == {"agent": 7, "gateway": 2, "identity": 17, "mcp": 12, "meetings": 37}
+    assert a.domains == {"agent": 7, "gateway": 2, "identity": 19, "mcp": 12, "meetings": 37}
     assert {k for k, d in a.owner_of.items() if d == "agent"} == AGENT_ROWS
     # The EDGE declares two routes and they are its own — /health and /auth/me forward nothing.
     assert {k for k, d in a.owner_of.items() if d == "gateway"} == set(UNSCOPED_ROUTES)
@@ -227,7 +227,7 @@ def test_a_domain_this_cut_does_not_ship_is_simply_absent(tmp_path):
     """The bug at the assembly layer: this raised, so the package could not be imported at all.
 
     Independent of which build is running it — the cut is generated here from the real manifests
-    of the four domains, so it asserts 64 rows on the line and in the open-core build alike."""
+    of the four domains, so it asserts 68 rows on the line and in the open-core build alike."""
     a = routes_manifest.load_carried(_OSS_CUT + ("agent",), repo_root=_cut(tmp_path, _OSS_CUT))
     assert (len(a.scopes), len(a.unscoped)) == (FULL_SCOPED - len(AGENT_ROWS), FULL_UNSCOPED)
     assert not [k for k in a.scopes if k[1].startswith("/agent")]

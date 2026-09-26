@@ -434,6 +434,148 @@ def parse_google_events(events: list[dict], *, now: datetime,
     return {"events": out_events, "cancelled_uids": cancelled}
 
 
+def _microsoft_event_start(ev: dict) -> Optional[datetime]:
+    """A Microsoft Graph ``calendarView`` event's ``start`` → tz-aware UTC datetime.
+
+    ``fetch_microsoft_events`` always asks with ``Prefer: outlook.timezone="UTC"``, so
+    ``start.dateTime`` is already UTC regardless of the account's own timezone — no timezone-name
+    resolution needed, unlike a Graph response fetched without that header. Graph's ``dateTime`` is
+    an ISO-ish string WITHOUT a ``Z``/offset suffix (e.g. ``2026-07-08T15:00:00.0000000``), so it is
+    parsed as naive and then stamped UTC directly, mirroring ``_google_event_start``'s two-shape
+    fold for the same PlannedEvent field. An all-day event (``isAllDay: true``) carries a
+    midnight-of-day ``dateTime`` already, so no separate date-only branch is needed."""
+    start = ev.get("start") or {}
+    raw = start.get("dateTime")
+    if not raw:
+        return None
+    text = str(raw).split(".")[0]  # drop Graph's fractional-second tail — datetime.fromisoformat
+                                    # only accepts 0/3/6 digits, and Graph sends 7
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def _microsoft_link(ev: dict) -> Optional[tuple[str, str, str]]:
+    """The joinable link for one Graph event: ``onlineMeeting.joinUrl`` first (Teams meeting
+    auto-attached to the event, or a Zoom/Meet add-on that populates the same field), then
+    ``location.displayName``, then the event body — reusing the SAME ``find_meeting_link`` the
+    ICS/Google paths use (parity: an identical link in any provider's text resolves identically)."""
+    candidates: list[str] = []
+    online_meeting = ev.get("onlineMeeting") or {}
+    if online_meeting.get("joinUrl"):
+        candidates.append(str(online_meeting["joinUrl"]))
+    location = ev.get("location") or {}
+    if location.get("displayName"):
+        candidates.append(str(location["displayName"]))
+    body = ev.get("body") or {}
+    if body.get("content"):
+        candidates.append(str(body["content"]))
+    elif ev.get("bodyPreview"):
+        candidates.append(str(ev["bodyPreview"]))
+    for source in candidates:
+        link = find_meeting_link(source)
+        if link:
+            return link
+    return None
+
+
+def _microsoft_attendees(ev: dict) -> list[dict]:
+    """Mirrors ICS/Google ``_attendees``: normalized email, optional display name, participation
+    status. Resources/rooms (``type: "resource"``) are dropped, same rule as CUTYPE=RESOURCE|ROOM
+    and Google's ``resource: true``."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    # Graph's responseStatus.response vocabulary → the same partstat vocabulary ICS/Google use.
+    # "organizer" has implicitly accepted their own event; "none" is the true unanswered state.
+    _STATUS_MAP = {"none": "needs-action", "notresponded": "needs-action",
+                  "tentativelyaccepted": "tentative", "organizer": "accepted"}
+    for a in ev.get("attendees") or []:
+        if not isinstance(a, dict) or str(a.get("type") or "").lower() == "resource":
+            continue
+        address = a.get("emailAddress") or {}
+        email = str(address.get("address") or "").strip().lower()
+        if "@" not in email or email in seen:
+            continue
+        seen.add(email)
+        entry: dict = {"email": email}
+        name = str(address.get("name") or "").strip()
+        if name and name.lower() != email:
+            entry["name"] = name
+        status = str((a.get("status") or {}).get("response") or "").strip().lower()
+        if status:
+            entry["partstat"] = _STATUS_MAP.get(status, status)
+        out.append(entry)
+    return out
+
+
+def parse_microsoft_events(events: list[dict], *, now: datetime,
+                           horizon_days: int = DEFAULT_HORIZON_DAYS,
+                           lookback_s: float = DEFAULT_LOOKBACK_S) -> dict:
+    """Microsoft Graph ``calendarView`` items → the SAME ``{"events": [PlannedEvent],
+    "cancelled_uids": [uid]}`` shape ``parse_ics``/``parse_google_events`` produce, so
+    ``sync_user`` drives all three providers through one code path and an equivalent event from
+    any one of them yields an identical planned-meeting row (the same parity DB-30 established
+    for Google, DB-32 extends to Microsoft).
+
+    ``calendarView`` already expands a recurring series into one item per occurrence inside the
+    requested window, each instance carrying ``seriesMasterId`` (absent on a one-off event, which
+    uses its own ``id``) — the same "already expanded, group and keep the earliest" shape Google's
+    ``singleEvents=true`` produces, so this mirrors ``parse_google_events`` grouping/selection
+    exactly, substituting ``seriesMasterId`` for ``recurringEventId``.
+
+    An ``isCancelled: true`` item retires its uid the same way an ICS ``STATUS:CANCELLED`` VEVENT
+    or a Google ``status: "cancelled"`` item does — UNLESS a live instance of the same uid is also
+    present in this window, mirroring ``parse_google_events``'s moved-occurrence rule.
+    """
+    window_start = now - timedelta(seconds=lookback_s)
+    window_end = now + timedelta(days=horizon_days)
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for ev in events:
+        uid = str(ev.get("seriesMasterId") or ev.get("id") or "").strip()
+        if not uid:
+            continue
+        if uid not in groups:
+            groups[uid] = []
+            order.append(uid)
+        groups[uid].append(ev)
+
+    out_events: list[dict] = []
+    cancelled: list[str] = []
+    for uid in order:
+        instances = groups[uid]
+        live = [e for e in instances if not e.get("isCancelled")]
+        if not live:
+            cancelled.append(uid)
+            continue
+        candidates = [
+            (start, ev) for ev in live
+            if (start := _microsoft_event_start(ev)) is not None and window_start <= start <= window_end
+        ]
+        if not candidates:
+            continue
+        occurrence, ev = min(candidates, key=lambda t: t[0])
+        link = _microsoft_link(ev)
+        platform, native_id, url = link if link else (None, None, None)
+        out_events.append({
+            "uid": uid,
+            "title": str(ev.get("subject") or "").strip() or None,
+            "scheduled_at": occurrence.isoformat(),
+            "platform": platform,
+            "native_meeting_id": native_id,
+            "meeting_url": url,
+            "attendees": _microsoft_attendees(ev),
+            "metadata": {
+                "resolved_start": occurrence.isoformat(),
+                "provider": "microsoft",
+                "event": {k: v for k, v in ev.items() if k not in ("attendees",)},
+            },
+        })
+    return {"events": out_events, "cancelled_uids": cancelled}
+
+
 def _calendar_sources(data: dict) -> list[dict]:
     raw = data.get("calendar_sources")
     return [dict(source) for source in raw if isinstance(source, dict) and source.get("id")] \

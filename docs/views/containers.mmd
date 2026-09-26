@@ -31,6 +31,9 @@ flowchart LR
   subgraph google_calendar_system["Google Calendar"]
     google_calendar_api["Google Calendar API"]
   end
+  subgraph microsoft_calendar_system["Microsoft Graph Calendar"]
+    microsoft_calendar_api["Microsoft Graph Calendar API"]
+  end
   subgraph platform["platform"]
     redis["redis"]
     postgres["postgres"]
@@ -55,6 +58,9 @@ flowchart LR
   meeting_api -->|"HTTPS"| admin_api
   meeting_api -->|"HTTPS"| google_calendar_api
   admin_api -->|"HTTPS"| google_calendar_api
+  meeting_api -->|"HTTPS"| admin_api
+  meeting_api -->|"HTTPS"| microsoft_calendar_api
+  admin_api -->|"HTTPS"| microsoft_calendar_api
   meeting_api -->|"HTTPS"| service_authority
   meeting_api -->|"HTTP(S)"| system_webhook
   agent_api -->|"HTTPS"| runtime

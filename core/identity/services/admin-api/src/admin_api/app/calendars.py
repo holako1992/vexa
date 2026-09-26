@@ -11,6 +11,13 @@ and it crosses ``masked_connection`` and ``internal_connections`` alike NEVER �
 ``main.py``'s internal google-token edge reads it, decrypts it, and immediately discards the
 plaintext after the refresh call). Every connection dict now carries ``kind`` (``"ics"`` is the
 default for every row written before DB-30, so existing connections keep working unchanged).
+
+DB-32 adds a THIRD kind, ``"microsoft"`` (Microsoft Graph, ``Calendars.Read`` + ``offline_access``),
+the same shape as ``"google"``: ``microsoft_email``, ``microsoft_calendar_ids`` (default
+``["primary"]``), and ``microsoft_refresh_token_enc`` — encrypted the same way, by the same
+``token_cipher.py`` (its AEAD associated data is already provider-agnostic: user id + calendar id),
+gated behind its own internal token edge in ``main.py`` and never crossing ``masked_connection`` or
+``internal_connections``.
 """
 from __future__ import annotations
 
@@ -22,6 +29,8 @@ from fastapi import HTTPException, status
 
 MAX_CALENDAR_CONNECTIONS = 10
 DEFAULT_GOOGLE_CALENDAR_IDS = ["primary"]
+DEFAULT_MICROSOFT_CALENDAR_IDS = ["primary"]
+OAUTH_KINDS = ("google", "microsoft")
 
 
 def validate_bot_name(value: str) -> str:
@@ -93,14 +102,22 @@ def new_connection(*, name: str, ics_url: str, auto_join: bool = True,
     }
 
 
-def validate_google_calendar_ids(value: Optional[list]) -> list:
-    ids = [str(v).strip() for v in (value or DEFAULT_GOOGLE_CALENDAR_IDS) if str(v).strip()]
+def _validate_calendar_ids(value: Optional[list], default: list, *, provider: str) -> list:
+    ids = [str(v).strip() for v in (value or default) if str(v).strip()]
     if not ids:
-        ids = list(DEFAULT_GOOGLE_CALENDAR_IDS)
+        ids = list(default)
     if len(ids) > 25:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail="at most 25 calendar ids per Google connection")
+                            detail=f"at most 25 calendar ids per {provider} connection")
     return ids
+
+
+def validate_google_calendar_ids(value: Optional[list]) -> list:
+    return _validate_calendar_ids(value, DEFAULT_GOOGLE_CALENDAR_IDS, provider="Google")
+
+
+def validate_microsoft_calendar_ids(value: Optional[list]) -> list:
+    return _validate_calendar_ids(value, DEFAULT_MICROSOFT_CALENDAR_IDS, provider="Microsoft")
 
 
 def new_google_connection(*, id: Optional[str] = None, name: str, google_email: str,
@@ -125,6 +142,33 @@ def new_google_connection(*, id: Optional[str] = None, name: str, google_email: 
         "google_email": email,
         "google_calendar_ids": validate_google_calendar_ids(google_calendar_ids),
         "google_refresh_token_enc": refresh_token_enc,
+        "reconnect_needed": False,
+        "auto_join": bool(auto_join),
+        "bot_name": validate_bot_name(bot_name),
+        "enabled": True,
+    }
+
+
+def new_microsoft_connection(*, id: Optional[str] = None, name: str, microsoft_email: str,
+                             refresh_token_enc: str, microsoft_calendar_ids: Optional[list] = None,
+                             auto_join: bool = True, bot_name: str = "Vexa") -> dict:
+    """A ``kind: "microsoft"`` connection (DB-32) — same shape as ``new_google_connection``, same
+    rule: ``refresh_token_enc`` is the ALREADY-ENCRYPTED blob, and this module never stores a
+    plaintext refresh token."""
+    cleaned_name = name.strip() or microsoft_email
+    if len(cleaned_name) > 100:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="name too long")
+    email = (microsoft_email or "").strip()
+    if not email or "@" not in email:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="microsoft_email must be a valid address")
+    return {
+        "id": id or str(uuid4()),
+        "kind": "microsoft",
+        "name": cleaned_name,
+        "microsoft_email": email,
+        "microsoft_calendar_ids": validate_microsoft_calendar_ids(microsoft_calendar_ids),
+        "microsoft_refresh_token_enc": refresh_token_enc,
         "reconnect_needed": False,
         "auto_join": bool(auto_join),
         "bot_name": validate_bot_name(bot_name),
@@ -164,6 +208,15 @@ def masked_connection(connection: dict) -> dict:
         base.update({
             "google_email": connection.get("google_email"),
             "google_calendar_ids": connection.get("google_calendar_ids") or list(DEFAULT_GOOGLE_CALENDAR_IDS),
+            "reconnect_needed": bool(connection.get("reconnect_needed", False)),
+        })
+        return base
+    if kind == "microsoft":
+        # Same rule as "google" above, for the Microsoft Graph refresh token (DB-32).
+        base.update({
+            "microsoft_email": connection.get("microsoft_email"),
+            "microsoft_calendar_ids": connection.get("microsoft_calendar_ids")
+                                     or list(DEFAULT_MICROSOFT_CALENDAR_IDS),
             "reconnect_needed": bool(connection.get("reconnect_needed", False)),
         })
         return base
@@ -211,8 +264,8 @@ def internal_connections(data: dict, user_id: int) -> list[dict]:
         if connection["id"] == legacy_id:
             entry["legacy"] = True
         kind = connection.get("kind") or "ics"
-        if kind == "google":
-            entry["kind"] = "google"
+        if kind in OAUTH_KINDS:
+            entry["kind"] = kind
         if connection.get("deleted"):
             out.append({**entry, "deleted": True})
         elif not connection.get("enabled", True):
@@ -228,6 +281,16 @@ def internal_connections(data: dict, user_id: int) -> list[dict]:
                 "auto_join": bool(connection.get("auto_join", True)),
                 "reconnect_needed": bool(connection.get("reconnect_needed", False)),
             })
+        elif kind == "microsoft":
+            # Same rule as "google" above (DB-32): the refresh token never crosses this hop —
+            # meeting-api mints a fresh access token over the internal microsoft-token edge.
+            out.append({
+                **entry,
+                "microsoft_calendar_ids": connection.get("microsoft_calendar_ids")
+                                         or list(DEFAULT_MICROSOFT_CALENDAR_IDS),
+                "auto_join": bool(connection.get("auto_join", True)),
+                "reconnect_needed": bool(connection.get("reconnect_needed", False)),
+            })
         elif connection.get("ics_url"):
             out.append({
                 **entry,
@@ -238,13 +301,14 @@ def internal_connections(data: dict, user_id: int) -> list[dict]:
 
 
 def set_reconnect_needed(connections: list[dict], calendar_id: str, needed: bool) -> list[dict]:
-    """Flip a Google connection's ``reconnect_needed`` flag (the internal google-token edge calls
-    this: ``invalid_grant`` sets it True, a subsequent successful refresh clears it back to
-    False). A no-op list (returns ``connections`` unchanged) when the id names no live Google
-    connection — the caller does not need to special-case "not found"."""
+    """Flip an OAuth connection's (``"google"`` or ``"microsoft"``) ``reconnect_needed`` flag (the
+    internal google-token / microsoft-token edge calls this: ``invalid_grant`` sets it True, a
+    subsequent successful refresh clears it back to False). A no-op list (returns ``connections``
+    unchanged) when the id names no live OAuth connection — the caller does not need to
+    special-case "not found"."""
     out = []
     for connection in connections:
-        if connection.get("id") == calendar_id and (connection.get("kind") or "ics") == "google" \
+        if connection.get("id") == calendar_id and (connection.get("kind") or "ics") in OAUTH_KINDS \
                 and not connection.get("deleted"):
             connection = {**connection, "reconnect_needed": bool(needed)}
         out.append(connection)

@@ -140,6 +140,17 @@ services:
       - GOOGLE_CALENDAR_CLIENT_SECRET=${GOOGLE_CALENDAR_CLIENT_SECRET:-}
       - GOOGLE_CALENDAR_REDIRECT_URI=${GOOGLE_CALENDAR_REDIRECT_URI:-}
       - CALENDAR_TOKEN_ENCRYPTION_KEY=${CALENDAR_TOKEN_ENCRYPTION_KEY:-}
+      # ── DB-32 Microsoft Graph Calendar OAuth (config.v1 capability `microsoft_calendar`) ────
+      # Empty by default — GET/POST /user/calendars/microsoft/{authorize,exchange} and the
+      # internal /internal/calendars/{id}/microsoft-token edge then answer a typed 503 naming
+      # what's missing; the ICS calendar surface and the Google connector are unaffected. A
+      # DIFFERENT Azure app registration than the dashboard's own sign-in MICROSOFT_CLIENT_ID —
+      # see docs/docs/how-to/calendar-sync.mdx for the exact Azure app-registration steps.
+      # CALENDAR_TOKEN_ENCRYPTION_KEY above is shared with the Google connector.
+      - MICROSOFT_CALENDAR_CLIENT_ID=${MICROSOFT_CALENDAR_CLIENT_ID:-}
+      - MICROSOFT_CALENDAR_CLIENT_SECRET=${MICROSOFT_CALENDAR_CLIENT_SECRET:-}
+      - MICROSOFT_CALENDAR_REDIRECT_URI=${MICROSOFT_CALENDAR_REDIRECT_URI:-}
+      - MICROSOFT_CALENDAR_TENANT_ID=${MICROSOFT_CALENDAR_TENANT_ID:-common}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
       interval: 10s

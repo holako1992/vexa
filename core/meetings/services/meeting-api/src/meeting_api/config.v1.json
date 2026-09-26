@@ -514,7 +514,7 @@
    "key": "ADMIN_API_URL",
    "class": "defaulted",
    "default": "(unset — calendar sync no-ops and the auto-join sweep cannot resolve the per-user cap, so it fails closed and refuses to spawn unless AUTO_JOIN_ALLOW_UNCAPPED=1)",
-   "description": "admin-api base URL for the internal edges the background sweeps call (/internal/users/{id}/bot-context, /internal/calendar-configs, and DB-30's /internal/calendars/{id}/google-token — meeting-api never reads identity's tables or a stored refresh token directly, it asks this edge for a fresh access token). Required on every deploy surface so calendar sync runs and auto-join spawns stay capped (#656).",
+   "description": "admin-api base URL for the internal edges the background sweeps call (/internal/users/{id}/bot-context, /internal/calendar-configs, DB-30's /internal/calendars/{id}/google-token, and DB-32's /internal/calendars/{id}/microsoft-token — meeting-api never reads identity's tables or a stored refresh token directly, it asks this edge for a fresh access token). Required on every deploy surface so calendar sync runs and auto-join spawns stay capped (#656).",
    "targets": [
     "compose",
     "helm",

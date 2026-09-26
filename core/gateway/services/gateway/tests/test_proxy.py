@@ -411,6 +411,22 @@ def test_google_calendar_oauth_routes_forward_to_admin_api():
     assert downstream.last["url"] == "http://admin-api/user/calendars/google/exchange"
 
 
+def test_microsoft_calendar_oauth_routes_forward_to_admin_api():
+    """DB-32: same shape as the Google pair above — both routes are identity's."""
+    client, downstream = _client()
+    r = client.get("/user/calendars/microsoft/authorize", headers=AUTH)
+    assert r.status_code == 200
+    assert downstream.last["method"] == "GET"
+    assert downstream.last["url"] == "http://admin-api/user/calendars/microsoft/authorize"
+    assert downstream.last["headers"]["x-user-id"] == "7"
+
+    r = client.post("/user/calendars/microsoft/exchange", headers=AUTH,
+                    json={"code": "abc", "state": "xyz"})
+    assert r.status_code == 200
+    assert downstream.last["method"] == "POST"
+    assert downstream.last["url"] == "http://admin-api/user/calendars/microsoft/exchange"
+
+
 def test_calendar_id_is_re_encoded_into_one_downstream_segment():
     """Starlette hands the handler a DECODED param, so a raw interpolation would let the caller
     graft a query string onto the downstream hop: `x%3Fdebug%3D1` must stay one literal segment."""

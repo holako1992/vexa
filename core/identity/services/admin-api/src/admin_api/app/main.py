@@ -133,6 +133,35 @@ def _require_google_calendar() -> dict:
     return _google_calendar_env()
 
 
+def _microsoft_calendar_env() -> dict:
+    return {
+        "client_id": os.environ.get("MICROSOFT_CALENDAR_CLIENT_ID", ""),
+        "client_secret": os.environ.get("MICROSOFT_CALENDAR_CLIENT_SECRET", ""),
+        "redirect_uri": os.environ.get("MICROSOFT_CALENDAR_REDIRECT_URI", ""),
+        # not a capability key (it has a working default) — see MICROSOFT_CALENDAR_TENANT_ID's
+        # config.v1 entry: "common" serves both multi-tenant orgs and personal Microsoft accounts.
+        "tenant": os.environ.get("MICROSOFT_CALENDAR_TENANT_ID", "").strip() or "common",
+    }
+
+
+def _require_microsoft_calendar() -> dict:
+    """Fail loud with a typed 503 — never a 500 — when DB-32's Microsoft OAuth config is
+    incomplete. Mirrors ``_require_google_calendar`` exactly: every Microsoft-calendar route calls
+    this FIRST, so an unconfigured deployment's three routes are uniformly unavailable while
+    ``/user/calendars`` (ICS) and the Google connector are completely unaffected."""
+    state = config_preflight.capability_state("microsoft_calendar")
+    if state != config_preflight.CONFIGURED:
+        missing = config_preflight.missing_capability_keys("microsoft_calendar")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Microsoft Calendar is not configured on this deployment"
+                + (f" — missing: {', '.join(missing)}" if missing else f" ({state})")
+            ),
+        )
+    return _microsoft_calendar_env()
+
+
 def _require_stripe_billing() -> None:
     """Fail loud with a typed, actionable 503 — never a 500 — when DB-73's config is incomplete.
     Every one of checkout/portal/webhook calls this FIRST, so an unconfigured deployment's
@@ -349,6 +378,21 @@ class GoogleExchangeRequest(BaseModel):
 
 class GoogleTokenRequest(BaseModel):
     """The internal google-token edge's body — names which user's connection to mint a token
+    for (the caller supplies both this and the ``calendar_id`` path param)."""
+    user_id: int
+    model_config = {"extra": "forbid"}
+
+
+class MicrosoftExchangeRequest(BaseModel):
+    """DB-32's callback page relays exactly these two fields from Microsoft's redirect."""
+    code: str
+    state: str
+
+    model_config = {"extra": "forbid"}
+
+
+class MicrosoftTokenRequest(BaseModel):
+    """The internal microsoft-token edge's body — names which user's connection to mint a token
     for (the caller supplies both this and the ``calendar_id`` path param)."""
     user_id: int
     model_config = {"extra": "forbid"}
@@ -872,18 +916,21 @@ def create_app() -> FastAPI:
 
     _NONCE_PRUNE_AGE_S = google_oauth.STATE_TTL_S * 3
 
-    def _consume_oauth_nonce(data: dict, nonce: str, *, now: float) -> bool:
+    def _consume_oauth_nonce(data: dict, nonce: str, *, now: float,
+                             field: str = "google_oauth_nonces") -> bool:
         """Record ``nonce`` as spent on THIS user's row, pruning entries older than the state TTL
         could ever still be valid for. Returns False (refuse) when the nonce was already recorded
         — the single-use half of the state's CSRF protection; signature+expiry+ownership is
-        ``google_oauth.verify_state``'s half."""
-        seen = data.get("google_oauth_nonces")
+        ``google_oauth.verify_state``'s (or ``microsoft_oauth.verify_state``'s) half. ``field``
+        keeps each provider's spent-nonce ledger separate — a state minted for one flow can never
+        be mistaken for a replay of the other's."""
+        seen = data.get(field)
         entries = [e for e in seen if isinstance(e, dict) and e.get("nonce")] if isinstance(seen, list) else []
         entries = [e for e in entries if now - float(e.get("at", 0)) < _NONCE_PRUNE_AGE_S]
         if any(e["nonce"] == nonce for e in entries):
             return False
         entries.append({"nonce": nonce, "at": now})
-        data["google_oauth_nonces"] = entries
+        data[field] = entries
         return True
 
     @app.get("/user/calendars/google/authorize")
@@ -984,6 +1031,113 @@ def create_app() -> FastAPI:
         # `data` carries the consumed-nonce write; `_save_calendar_connections` reads it back via
         # `user.data` and layers `calendar_connections` on top (store_connections merges, not
         # replaces), so the nonce record and the new/updated connection commit together.
+        user.data = data
+        await _save_calendar_connections(user, db, connections)
+        return masked_connection(created)
+
+    # --- user tier: Microsoft Graph Calendar OAuth connect (DB-32) — same shape as the Google
+    #     pair above, two routes, scopes bot,tx (see core/identity/routes.v1.json), fronted by the
+    #     gateway identically. The client secret and the encrypted refresh token both live ONLY in
+    #     this service; the dashboard only ever sees the consent URL and relays {code, state}
+    #     back here. ---
+    from . import microsoft_oauth
+    from .calendars import new_microsoft_connection
+
+    @app.get("/user/calendars/microsoft/authorize")
+    async def microsoft_calendar_authorize(user: User = Depends(get_current_user)):
+        """The Microsoft consent-screen URL, carrying a fresh signed state bound to the caller."""
+        env = _require_microsoft_calendar()
+        state = microsoft_oauth.sign_state(user.id)
+        url = microsoft_oauth.build_authorize_url(
+            client_id=env["client_id"], redirect_uri=env["redirect_uri"], state=state,
+            tenant=env["tenant"],
+        )
+        return {"authorize_url": url, "state": state}
+
+    @app.post("/user/calendars/microsoft/exchange", status_code=status.HTTP_201_CREATED)
+    async def microsoft_calendar_exchange(body: MicrosoftExchangeRequest,
+                                          user: User = Depends(get_current_user_for_update),
+                                          db: AsyncSession = Depends(get_db)):
+        """The dashboard's callback page relays Microsoft's ``code``+``state`` here. Verifies the
+        state (signature, TTL, bound to THIS caller, single-use), exchanges the code at Microsoft's
+        token endpoint, encrypts the refresh token at rest, stores (or re-connects) the connection,
+        and returns its masked shape — same response contract as ``POST /user/calendars/google/exchange``."""
+        env = _require_microsoft_calendar()
+        try:
+            nonce = microsoft_oauth.verify_state(body.state, expected_user_id=user.id)
+        except microsoft_oauth.OAuthStateError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"invalid state: {e}") from e
+
+        data = dict(user.data or {})
+        import time as _time
+        if not _consume_oauth_nonce(data, nonce, now=_time.time(), field="microsoft_oauth_nonces"):
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail="this authorization has already been used")
+
+        try:
+            tokens = await microsoft_oauth.exchange_code(
+                code=body.code, client_id=env["client_id"], client_secret=env["client_secret"],
+                redirect_uri=env["redirect_uri"], tenant=env["tenant"],
+            )
+        except microsoft_oauth.MicrosoftOAuthError as e:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                                detail=f"Microsoft rejected the authorization code: {e.reason}") from e
+
+        refresh_token = tokens.get("refresh_token")
+        access_token = tokens.get("access_token")
+        if not access_token:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                                detail="Microsoft's token response carried no access_token")
+        try:
+            userinfo = await microsoft_oauth.fetch_userinfo(access_token=access_token)
+        except microsoft_oauth.MicrosoftOAuthError as e:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                                detail=f"could not read the Microsoft account's email: {e.reason}") from e
+        microsoft_email = (userinfo.get("mail") or userinfo.get("userPrincipalName") or "").strip()
+        if not microsoft_email:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                                detail="Microsoft did not return an account email")
+
+        connections = connections_from_data(data, user.id, include_deleted=True)
+        live = [c for c in connections if not c.get("deleted")]
+        existing = next((c for c in live if (c.get("kind") or "ics") == "microsoft"
+                         and c.get("microsoft_email") == microsoft_email), None)
+
+        if not refresh_token and existing is None:
+            # prompt=consent + offline_access should always grant one on a FIRST connection; if
+            # Microsoft still withheld it there is nothing durable to store — fail loud rather
+            # than create a connection that can never sync past its first access token's expiry.
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail=("Microsoft did not grant a refresh token — remove Vexa's access at "
+                        "https://myaccount.microsoft.com/ and reconnect"),
+            )
+
+        if len(live) >= MAX_CALENDAR_CONNECTIONS and existing is None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"at most {MAX_CALENDAR_CONNECTIONS} calendars can be connected")
+
+        if existing is not None:
+            # Re-consent for an already-connected Microsoft account: refresh the stored credential
+            # (Microsoft may omit refresh_token on a repeat consent — keep the one already stored)
+            # and clear any reconnect_needed the previous grant's revocation had set.
+            if refresh_token:
+                existing["microsoft_refresh_token_enc"] = token_cipher.encrypt(
+                    refresh_token, user_id=user.id, calendar_id=existing["id"])
+            existing["reconnect_needed"] = False
+            created = existing  # mutated in place; already a member of `connections`
+        else:
+            new_id = str(uuid4())
+            created = new_microsoft_connection(
+                id=new_id,
+                name=f"Microsoft — {microsoft_email}",
+                microsoft_email=microsoft_email,
+                refresh_token_enc=token_cipher.encrypt(
+                    refresh_token, user_id=user.id, calendar_id=new_id),
+                bot_name=data.get("calendar_bot_name") or "Vexa",
+            )
+            connections.append(created)
+
         user.data = data
         await _save_calendar_connections(user, db, connections)
         return masked_connection(created)
@@ -1606,6 +1760,69 @@ def create_app() -> FastAPI:
                 client_secret=env["client_secret"],
             )
         except google_oauth.GoogleOAuthError as e:
+            if e.invalid_grant:
+                connections = set_reconnect_needed(connections, calendar_id, True)
+                await _save_calendar_connections(user, db, connections)
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    detail=f"reconnect_needed: {e.reason}") from e
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=e.reason) from e
+        finally:
+            refresh_token = None  # the plaintext credential goes out of scope the instant it is used
+
+        if target.get("reconnect_needed"):
+            connections = set_reconnect_needed(connections, calendar_id, False)
+            await _save_calendar_connections(user, db, connections)
+
+        return {"access_token": tokens.get("access_token"), "expires_in": tokens.get("expires_in")}
+
+    # --- internal tier: Microsoft access-token mint (DB-32) — meeting-api's sync calls this
+    #     instead of ever reading identity's tables or an encrypted blob directly. Same shape as
+    #     the google-token edge above. ---
+    @app.post("/internal/calendars/{calendar_id}/microsoft-token", include_in_schema=False)
+    async def internal_microsoft_access_token(calendar_id: str, body: MicrosoftTokenRequest,
+                                               request: Request, db: AsyncSession = Depends(get_db)):
+        _check_internal_no_dev_bypass(request)
+        from . import microsoft_oauth, token_cipher
+        from .calendars import connections_from_data, set_reconnect_needed
+
+        env = _microsoft_calendar_env()
+        if not all(env[k] for k in ("client_id", "client_secret", "redirect_uri")):
+            missing = config_preflight.missing_capability_keys("microsoft_calendar")
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail=f"Microsoft Calendar is not configured — missing: {', '.join(missing)}")
+
+        user = (await db.execute(
+            select(User).where(User.id == body.user_id).with_for_update()
+        )).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="user not found")
+        data = dict(user.data or {})
+        connections = connections_from_data(data, user.id, include_deleted=True)
+        target = next((c for c in connections if c.get("id") == calendar_id
+                       and (c.get("kind") or "ics") == "microsoft" and not c.get("deleted")), None)
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="microsoft calendar connection not found")
+        encrypted = target.get("microsoft_refresh_token_enc")
+        if not encrypted:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail="connection carries no stored refresh token")
+        try:
+            refresh_token = token_cipher.decrypt(
+                encrypted, user_id=user.id, calendar_id=calendar_id)
+        except token_cipher.TokenCipherError as e:
+            # A key rotation or a corrupted blob is indistinguishable from a revoked grant to the
+            # SYNC side — both mean "this connection cannot get a token right now" — so it gets
+            # the same visible reconnect_needed state rather than a bare 500 (same rule as Google).
+            connections = set_reconnect_needed(connections, calendar_id, True)
+            await _save_calendar_connections(user, db, connections)
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"reconnect_needed: stored credential unreadable ({e})") from e
+
+        try:
+            tokens = await microsoft_oauth.refresh_access_token(
+                refresh_token=refresh_token, client_id=env["client_id"],
+                client_secret=env["client_secret"], tenant=env["tenant"],
+            )
+        except microsoft_oauth.MicrosoftOAuthError as e:
             if e.invalid_grant:
                 connections = set_reconnect_needed(connections, calendar_id, True)
                 await _save_calendar_connections(user, db, connections)

@@ -90,6 +90,8 @@ CASES = [
     ("POST", "/user/calendars/work-1/sync", "/user/calendars/{calendar_id}/sync"),
     ("GET", "/user/calendars/google/authorize", "/user/calendars/google/authorize"),
     ("POST", "/user/calendars/google/exchange", "/user/calendars/google/exchange"),
+    ("GET", "/user/calendars/microsoft/authorize", "/user/calendars/microsoft/authorize"),
+    ("POST", "/user/calendars/microsoft/exchange", "/user/calendars/microsoft/exchange"),
 
     ("GET", "/user/webhook", "/user/webhook"),
     ("PUT", "/user/webhook", "/user/webhook"),

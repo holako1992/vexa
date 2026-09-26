@@ -773,6 +773,17 @@ def create_app(
     async def google_calendar_exchange(request: Request):
         return await _forward("POST", _admin("/user/calendars/google/exchange"), request)
 
+    # ---- DB-32: Microsoft Graph Calendar OAuth connect. Same shape as the Google pair above —
+    # identity owns the client secret and the encrypted refresh token (see core/identity's
+    # calendars.py/microsoft_oauth.py); scoped bot,tx per routes.v1.json. ----
+    @app.get("/user/calendars/microsoft/authorize")
+    async def microsoft_calendar_authorize(request: Request):
+        return await _forward("GET", _admin("/user/calendars/microsoft/authorize"), request)
+
+    @app.post("/user/calendars/microsoft/exchange")
+    async def microsoft_calendar_exchange(request: Request):
+        return await _forward("POST", _admin("/user/calendars/microsoft/exchange"), request)
+
     @app.get("/user/calendars/{calendar_id}/sync")
     async def get_calendar_connection_sync(calendar_id: str, request: Request):
         segment, error = _path_segment(calendar_id)
