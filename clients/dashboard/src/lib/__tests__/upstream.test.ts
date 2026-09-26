@@ -1,7 +1,7 @@
 /** The allowlist is the dashboard's whole attack surface towards the gateway, so it is tested as
  *  a table: what it admits, and — the part that matters — what it refuses. */
 import { describe, expect, it } from "vitest";
-import { filterQuery, resolveUpstream, resolveWriteUpstream } from "../upstream";
+import { filterQuery, resolveUpstream, resolveWriteUpstream, validateBody } from "../upstream";
 
 describe("resolveUpstream", () => {
   it("admits the four read paths the product has", () => {
@@ -262,6 +262,86 @@ describe("resolveWriteUpstream — rename via annotate, and delete (DB-42)", () 
     expect(resolveWriteUpstream("DELETE", ["meetings", "104", "extra"])).toBeNull();
     expect(resolveWriteUpstream("PATCH", ["meetings", "104"])).toBeNull();
     expect(resolveWriteUpstream("GET", ["meetings", "104"])).toBeNull();
+  });
+});
+
+describe("resolveWriteUpstream — billing checkout/portal (DB-74b)", () => {
+  it("admits POST /billing/checkout and POST /billing/portal", () => {
+    expect(resolveWriteUpstream("POST", ["billing", "checkout"])).toEqual({
+      path: "/billing/checkout",
+      body: expect.any(Function),
+    });
+    expect(resolveWriteUpstream("POST", ["billing", "portal"])).toEqual({
+      path: "/billing/portal",
+      body: expect.any(Function),
+    });
+  });
+
+  it("refuses method/path near-misses", () => {
+    for (const [method, path] of [
+      ["GET", ["billing", "checkout"]],
+      ["PATCH", ["billing", "checkout"]],
+      ["DELETE", ["billing", "checkout"]],
+      ["GET", ["billing", "portal"]],
+      ["POST", ["billing", "checkouts"]],
+      ["POST", ["billings", "checkout"]],
+      ["POST", ["billing"]],
+      ["POST", ["billing", "checkout", "extra"]],
+      ["POST", ["billing", "webhook"]], // Stripe's own route — signature-authenticated, never a
+      // user-tier write this allowlist should ever admit.
+    ] as const) {
+      expect(resolveWriteUpstream(method, path)).toBeNull();
+    }
+  });
+});
+
+describe("validateBody — billing/checkout, billing/portal (DB-74b)", () => {
+  const checkout = resolveWriteUpstream("POST", ["billing", "checkout"])!;
+  const portal = resolveWriteUpstream("POST", ["billing", "portal"])!;
+
+  it("admits exactly {plan, interval} with a real catalog plan and interval", () => {
+    expect(validateBody(checkout, JSON.stringify({ plan: "pro", interval: "month" }))).toBe(true);
+    expect(validateBody(checkout, JSON.stringify({ plan: "team", interval: "year" }))).toBe(true);
+  });
+
+  it("refuses a plan outside the paid catalog, including the free plan", () => {
+    for (const plan of ["free", "Pro", "enterprise", "pro ", "", "PRO"]) {
+      expect(validateBody(checkout, JSON.stringify({ plan, interval: "month" }))).toBe(false);
+    }
+  });
+
+  it("refuses an interval that isn't exactly 'month' or 'year'", () => {
+    for (const interval of ["monthly", "yearly", "Month", "annual", "", "year "]) {
+      expect(validateBody(checkout, JSON.stringify({ plan: "pro", interval }))).toBe(false);
+    }
+  });
+
+  it("refuses extra keys, missing keys, wrong types, and non-object bodies", () => {
+    expect(validateBody(checkout, JSON.stringify({ plan: "pro", interval: "month", extra: 1 }))).toBe(false);
+    expect(validateBody(checkout, JSON.stringify({ plan: "pro" }))).toBe(false);
+    expect(validateBody(checkout, JSON.stringify({ plan: 1, interval: "month" }))).toBe(false);
+    expect(validateBody(checkout, JSON.stringify(["pro", "month"]))).toBe(false);
+    expect(validateBody(checkout, JSON.stringify("pro"))).toBe(false);
+    expect(validateBody(checkout, JSON.stringify(null))).toBe(false);
+  });
+
+  it("refuses an empty body and malformed JSON on checkout", () => {
+    expect(validateBody(checkout, "")).toBe(false);
+    expect(validateBody(checkout, "{not json")).toBe(false);
+  });
+
+  it("admits only an empty body on portal, refusing anything sent at all", () => {
+    expect(validateBody(portal, "")).toBe(true);
+    expect(validateBody(portal, JSON.stringify({}))).toBe(false);
+    expect(validateBody(portal, JSON.stringify({ plan: "pro" }))).toBe(false);
+    expect(validateBody(portal, "{not json")).toBe(false);
+  });
+
+  it("a route with no body validator admits any body unchanged (pre-DB-74b routes)", () => {
+    const bots = resolveWriteUpstream("POST", ["bots"])!;
+    expect(validateBody(bots, JSON.stringify({ anything: "goes", nested: { a: 1 } }))).toBe(true);
+    expect(validateBody(bots, "")).toBe(true);
+    expect(validateBody(bots, "not even json")).toBe(true);
   });
 });
 

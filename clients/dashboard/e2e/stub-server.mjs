@@ -57,6 +57,11 @@ let force = { meetings: null, meetingDetail: null, botsQuota: false, search: nul
  *  `/__control/entitlements` (`helpers.ts`'s `setEntitlements`), reset to the free-plan default
  *  on every `/__control/reset`. */
 let entitlements = freeEntitlements();
+/** Mirrors `users.data.stripe_customer_id` on the real core (DB-74b): `null` until the account's
+ *  first `POST /billing/checkout`, which is exactly when `POST /billing/portal` starts answering
+ *  a session instead of 409. `/__control/billingCustomer` lets a spec set it directly, to prove
+ *  the Manage button's success path without first driving a real checkout. */
+let stripeCustomerId = null;
 
 let users = new Map(); // email -> { id, email, name }
 let nextUserId = 1;
@@ -72,6 +77,7 @@ function resetAll() {
   adminLog.length = 0;
   force = { meetings: null, meetingDetail: null, botsQuota: false, search: null };
   entitlements = freeEntitlements();
+  stripeCustomerId = null;
   users = new Map();
   nextUserId = 1;
   tokens.clear();
@@ -129,6 +135,13 @@ async function handleGateway(req, res) {
   if (url.pathname === "/__control/entitlements" && req.method === "POST") {
     entitlements = await readJsonBody(req);
     return sendJson(res, 200, { ok: true, entitlements });
+  }
+  // DB-74b: set/clear whether this account has a Stripe customer on file — see `stripeCustomerId`
+  // above. `helpers.ts`'s `setStripeCustomer(request, present)`.
+  if (url.pathname === "/__control/billingCustomer" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    stripeCustomerId = body.present ? "cus_e2e_test" : null;
+    return sendJson(res, 200, { ok: true, stripeCustomerId });
   }
   // DB-48's "a live row on a later page stays visible" spec: flip one fixture meeting's status
   // without going through a real bot lifecycle, so the spec can prove the POLL's re-fetch window
@@ -289,6 +302,28 @@ async function handleGateway(req, res) {
     const body = await readJsonBody(req);
     bots.push(body);
     return sendJson(res, 200, { id: 900 + bots.length, status: "requested", ...body });
+  }
+
+  // POST /billing/checkout {plan, interval} — DB-74b's Upgrade button. Mirrors
+  // `create_billing_checkout` (`admin_api/app/main.py`) closely enough for the dashboard's own
+  // spec: mints a Stripe customer on first use (idempotent after), and returns a Checkout Session
+  // URL on the real `checkout.stripe.com` host — the dashboard's own `isTrustedBillingRedirect`
+  // guard checks exactly this host, so the stub must answer a real one, not a fake test domain.
+  if (req.method === "POST" && parts.length === 2 && parts[0] === "billing" && parts[1] === "checkout") {
+    const body = await readJsonBody(req);
+    if (!stripeCustomerId) stripeCustomerId = "cus_e2e_test";
+    return sendJson(res, 200, {
+      url: `https://checkout.stripe.com/c/pay/e2e_test_session#${body.plan}_${body.interval}`,
+    });
+  }
+
+  // POST /billing/portal — DB-74b's Manage-subscription button. 409 with no body when there is no
+  // Stripe customer yet, exactly like `create_billing_portal`'s `HTTPException(409, ...)`.
+  if (req.method === "POST" && parts.length === 2 && parts[0] === "billing" && parts[1] === "portal") {
+    if (!stripeCustomerId) {
+      return sendJson(res, 409, { detail: "No Stripe customer on file yet — checkout (POST /billing/checkout) first" });
+    }
+    return sendJson(res, 200, { url: "https://billing.stripe.com/p/session/e2e_test_session" });
   }
 
   // POST /user/calendars

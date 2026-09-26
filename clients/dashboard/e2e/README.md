@@ -32,15 +32,21 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   /agent/workspace/file?path=meetings/<id>/summary.md` (DB-60), `GET /bots/status` and `DELETE
   /bots/<platform>/<native>` (DB-41), `GET /meetings/<platform>/<native>/participants`, `POST
   /meetings/<id>/annotate`, `DELETE /meetings/<id>` (DB-42), and `GET /transcripts/search` (DB-44,
-  with a small artificial delay so the loading state is actually observable). See the file's own
-  header comment for the full route table.
+  with a small artificial delay so the loading state is actually observable). DB-74b adds `POST
+  /billing/checkout` and `POST /billing/portal`: checkout mints a stub Stripe customer on first
+  use (mirroring `create_billing_checkout`) and answers a `checkout.stripe.com` URL that encodes
+  the `{plan, interval}` it received into its fragment, specifically so a spec can prove the body
+  reached it (the request log only keeps method/url/headers); portal answers a `billing.stripe.com`
+  URL once a customer exists, else the same 409 shape as `create_billing_portal`.
+  `/__control/billingCustomer` (`helpers.ts`'s `setStripeCustomer`) sets that customer state
+  directly. See the file's own header comment for the full route table.
 - `playwright.config.ts` — boots BOTH servers via Playwright's `webServer` (the stub, then
   `next dev` pointed at it with the matching env vars) so `npm run test:e2e` runs everything from
   a cold start with no manual setup. Calls `next dev` directly with a literal `--port` rather than
   `npm run dev` (`next dev --port ${PORT:-3001}`) because npm always runs package scripts through
   `cmd.exe` on Windows regardless of the invoking shell, and that bash-style `${VAR:-default}`
   never expands there.
-- `specs/` — the sixteen specs. See `specs/README.md`.
+- `specs/` — the seventeen specs. See `specs/README.md`.
 
 ## Running it
 

@@ -14,6 +14,11 @@
  *  rewrite them. */
 export type QueryValidator = (value: string) => boolean;
 
+/** A whole-body shape check for a write route: `raw` is the parsed JSON body (`undefined` for an
+ *  empty request body), and returning `false` refuses the request with a 400 before it ever
+ *  reaches the gateway. See `validateBody` below for how an empty/unparseable body is handled. */
+export type BodyValidator = (parsed: unknown) => boolean;
+
 export interface UpstreamRoute {
   /** The gateway path this request maps to, with its segments already encoded. */
   path: string;
@@ -21,6 +26,12 @@ export interface UpstreamRoute {
    *  the route takes no query at all — see `filterQuery`'s header comment for why this is declared
    *  per route rather than once globally. */
   query?: Record<string, QueryValidator>;
+  /** For a write route: when present, the request body MUST satisfy this to be forwarded. Absent
+   *  means this route takes no body check at all — every write route that predates DB-74b (bots,
+   *  user/calendars, annotate, …) forwards its body unchecked, exactly as before; only the two
+   *  billing routes below declare one, so `validateBody`/`route.ts` never change behavior for the
+   *  routes that don't opt in. */
+  body?: BodyValidator;
 }
 
 /** Platform ids meeting-api accepts. A transcript path is only built for one of these — an
@@ -173,8 +184,42 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
 /** Safe calendar-id shape: printable, no path separators, bounded. */
 const SAFE_CAL_ID = /^[^/?#\s]{1,128}$/;
 
+/** The two paid plan ids `POST /billing/checkout` sells — exactly admin-api's own
+ *  `CheckoutRequest.validate_choice` (`main.py`): `free` needs no checkout, and any id outside the
+ *  catalog (`billing/catalog.py`'s `PLANS`) is not a real plan to buy. Kept as its own set here
+ *  rather than importing the catalog (this file is dependency-free by design, see the module
+ *  docstring) — a plan added to the catalog without a matching update here simply can't be bought
+ *  from the dashboard yet, which fails closed, never open. */
+const CHECKOUT_PLAN_IDS = new Set(["pro", "team"]);
+
+/** `billing/catalog.py`'s `PLAN_INTERVALS` — the only two interval strings Stripe checkout is
+ *  ever created for. Not `monthly`/`yearly`: this is the wire shape the core contract actually
+ *  uses (`CheckoutRequest.interval`), verified against `core/identity/services/admin-api/src/
+ *  admin_api/app/main.py` and `billing/catalog.py` before wiring this up. */
+const CHECKOUT_INTERVALS = new Set(["month", "year"]);
+
+/** `POST /billing/checkout`'s body, exactly: two keys, nothing else, `plan` and `interval` each a
+ *  real catalog value — never a raw Stripe price id or an arbitrary string forwarded to the core
+ *  unchecked. */
+function isCheckoutBody(parsed: unknown): boolean {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+  const keys = Object.keys(parsed as Record<string, unknown>);
+  if (keys.length !== 2) return false;
+  const { plan, interval } = parsed as Record<string, unknown>;
+  return typeof plan === "string" && CHECKOUT_PLAN_IDS.has(plan)
+    && typeof interval === "string" && CHECKOUT_INTERVALS.has(interval);
+}
+
+/** `POST /billing/portal` takes no body at all (`create_billing_portal` in `main.py` has no
+ *  request model) — the caller is identified entirely by their session. Refusing anything but an
+ *  empty body here is exact-match in the other direction: nothing a browser sends on this route
+ *  is ever forwarded unread. */
+function isEmptyBody(parsed: unknown): boolean {
+  return parsed === undefined;
+}
+
 /** Resolve a write (POST / PATCH / DELETE) request against the closed write-path allowlist.
- *  Only the three write surfaces the dashboard exposes are admitted; everything else is null. */
+ *  Only the write surfaces the dashboard exposes are admitted; everything else is null. */
 export function resolveWriteUpstream(method: string, segments: readonly string[]): UpstreamRoute | null {
   if (method === "POST") {
     // POST /bots — dispatch a bot to a live meeting
@@ -202,6 +247,18 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
       /^\d{1,20}$/.test(segments[1])
     ) {
       return { path: `/meetings/${encodeURIComponent(segments[1])}/annotate` };
+    }
+    // POST /billing/checkout {plan, interval} — DB-74b's Upgrade button. `_require_stripe_billing`
+    // on the core answers 503 when Stripe isn't configured on this deployment; that is the core's
+    // decision to make, not this allowlist's — the check here is only the wire shape.
+    if (segments.length === 2 && segments[0] === "billing" && segments[1] === "checkout") {
+      return { path: "/billing/checkout", body: isCheckoutBody };
+    }
+    // POST /billing/portal — DB-74b's Manage-subscription button. 409 with no body when the
+    // caller has never checked out (`create_billing_portal`, `main.py`) — the dashboard shows that
+    // as a toast pointing back at Upgrade, never a generic error.
+    if (segments.length === 2 && segments[0] === "billing" && segments[1] === "portal") {
+      return { path: "/billing/portal", body: isEmptyBody };
     }
   }
   if (method === "PATCH") {
@@ -235,6 +292,25 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     }
   }
   return null;
+}
+
+/** Check a write route's raw request body text against the shape it declared (see `body` on
+ *  `UpstreamRoute`). A route with no `body` validator admits anything, unchanged from before
+ *  DB-74b. An empty string parses as `undefined` (no body sent) rather than throwing — the two
+ *  routes that DO check a body (checkout, portal) each decide for themselves whether an empty
+ *  body is acceptable (`isEmptyBody` says yes; `isCheckoutBody` says no, since `undefined` is not
+ *  an object with the right two keys). Malformed JSON on a route that checks its body is refused,
+ *  never forwarded on the hope the upstream will reject it instead. */
+export function validateBody(route: UpstreamRoute, raw: string): boolean {
+  if (!route.body) return true;
+  if (raw === "") return route.body(undefined);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  return route.body(parsed);
 }
 
 /** Filter an incoming query string down to the ONE route's own declared `query` shape, preserving

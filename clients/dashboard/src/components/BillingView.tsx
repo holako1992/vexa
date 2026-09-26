@@ -1,19 +1,48 @@
 "use client";
-/** DB-74's read-only half: `/billing` — plan, usage meters, reset date, and any past-due /
- *  cancel-at-period-end state, read from `GET /api/vexa/user/entitlements`.
+/** `/billing`: plan, usage meters, reset date, and any past-due / cancel-at-period-end state,
+ *  read from `GET /api/vexa/user/entitlements` (DB-74) — plus the two write controls DB-74b adds:
  *
- *  No checkout or portal controls here — DB-73's Stripe endpoint contract on core is not final,
- *  so this view leaves a labelled, empty slot rather than building buttons against an API that
- *  could still change shape (a later task fills it once `billing/checkout` and `billing/portal`
- *  land on the allowlist).
+ *   - **Upgrade** on a plan card → `POST /billing/checkout {plan, interval}` → redirect to the
+ *     returned Stripe Checkout URL.
+ *   - **Manage subscription** → `POST /billing/portal` → redirect to the returned Stripe Customer
+ *     Portal URL, or (409, no Stripe customer yet) a toast explaining there's nothing to manage
+ *     yet, with a link to Upgrade instead of a generic error.
+ *
+ *  Both responses are `{url}` straight from Stripe (see `core/identity/services/admin-api/src/
+ *  admin_api/app/billing/stripe_gateway.py`) — `isTrustedBillingRedirect` (`lib/security.ts`)
+ *  checks it is `https://` and a real Stripe host before this ever calls
+ *  `window.location.assign()`, so a malformed or wrong-shaped response fails closed instead of
+ *  taking the browser to an arbitrary origin.
  */
 import { useEffect, useState } from "react";
 import { AlertTriangle, CreditCard } from "lucide-react";
-import { getJson, presentError } from "@/lib/api";
+import { getJson, mutateJson, presentError, ApiError } from "@/lib/api";
 import { formatDayMonth, formatMeetingsUsage, formatMinutesUsage, planStatusLabel, type Entitlements } from "@/lib/entitlements";
+import { isTrustedBillingRedirect } from "@/lib/security";
+import { Button, Tab, Tabs, useToast } from "./ui";
 import { ErrorState, LoadingState } from "./EmptyState";
 
 const PLAN_LABELS: Record<string, string> = { free: "Free", pro: "Pro", team: "Team" };
+
+type Interval = "month" | "year";
+
+/** The paid plans a card can offer to upgrade TO. Prices are never shown here — Stripe's own
+ *  Checkout page is the one place a price is ever displayed, so this never risks inventing or
+ *  staling one (AGENTS.md: never invent prices beyond `billing/catalog.py`, which this client has
+ *  no read access to anyway). */
+// Neither blurb below uses the word "unlimited" — the usage meters above already render that
+// exact word for a plan with no ceiling (`formatMeetingsUsage`), and `getByText` matches
+// case-insensitive substrings, so repeating it here would make that meter's own assertion
+// ambiguous between two elements on the page (found the hard way, via 14-billing-paywall.spec.ts's
+// "pro plan is unlimited, regardless of usage").
+const UPGRADE_PLANS: { id: "pro" | "team"; label: string; blurb: string }[] = [
+  { id: "pro", label: "Pro", blurb: "No monthly meeting cap, longer recordings, and AI summaries on every meeting." },
+  { id: "team", label: "Team", blurb: "Everything in Pro, plus more concurrent bots and permanent recording retention." },
+];
+
+/** Where a checkout/portal `{url}` response failed `isTrustedBillingRedirect` — always a bug or a
+ *  misconfigured deployment, never something the person did, hence one shared message. */
+const UNTRUSTED_REDIRECT_MESSAGE = "Billing returned an unexpected link. Please try again, or contact support.";
 
 type ViewState =
   | { kind: "loading" }
@@ -30,7 +59,12 @@ function Meter({ label, value }: { label: string; value: string }) {
 }
 
 export function BillingView() {
+  const toast = useToast();
   const [state, setState] = useState<ViewState>({ kind: "loading" });
+  const [billingInterval, setBillingInterval] = useState<Interval>("month");
+  // Which single control is in flight, if any — "portal" or a plan id ("pro"/"team"). Only one
+  // redirect can be in progress at a time, and every button on the page disables while it is.
+  const [pending, setPending] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +105,51 @@ export function BillingView() {
   const resetDay = formatDayMonth(data.period.end);
   const statusNote = planStatusLabel(data);
 
+  function redirectTo(url: string): boolean {
+    if (!isTrustedBillingRedirect(url)) {
+      toast.push({ tone: "error", title: "Couldn't open billing", description: UNTRUSTED_REDIRECT_MESSAGE });
+      return false;
+    }
+    window.location.assign(url);
+    return true;
+  }
+
+  async function upgrade(plan: "pro" | "team") {
+    setPending(plan);
+    try {
+      const { url } = await mutateJson<{ url: string }>("POST", "/api/vexa/billing/checkout", {
+        plan,
+        interval: billingInterval,
+      });
+      if (!redirectTo(url)) setPending(null);
+      // On success the page is about to navigate away — leave `pending` set so the button stays
+      // disabled for the (brief) remainder of this page's life rather than flashing re-enabled.
+    } catch (e) {
+      toast.push({ tone: "error", title: "Couldn't start checkout", description: presentError(e) });
+      setPending(null);
+    }
+  }
+
+  async function manage() {
+    setPending("portal");
+    try {
+      const { url } = await mutateJson<{ url: string }>("POST", "/api/vexa/billing/portal");
+      if (!redirectTo(url)) setPending(null);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        toast.push({
+          tone: "info",
+          title: "No subscription to manage yet",
+          description: "You haven't subscribed to a paid plan — upgrade first to get a billing portal.",
+          duration: 0,
+        });
+      } else {
+        toast.push({ tone: "error", title: "Couldn't open the billing portal", description: presentError(e) });
+      }
+      setPending(null);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h1 className="mb-1 text-xl font-semibold">Billing</h1>
@@ -99,10 +178,46 @@ export function BillingView() {
           />
         </dl>
 
-        {/* Upgrade / manage-billing controls land here once core's Stripe endpoint contract
-            (DB-73: billing/checkout, billing/portal) is final. Deliberately empty — not a
-            "coming soon" placeholder, just a structured slot a later task fills. */}
-        <div aria-hidden="true" className="mt-5 border-t border-line pt-4" />
+        <div className="mt-5 flex justify-end border-t border-line pt-4">
+          <Button
+            variant="secondary"
+            onClick={() => void manage()}
+            loading={pending === "portal"}
+            disabled={pending !== null && pending !== "portal"}
+          >
+            Manage subscription
+          </Button>
+        </div>
+      </section>
+
+      <section aria-label="Plans" className="mt-6">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Upgrade your plan</h2>
+          <Tabs value={billingInterval} onChange={(v) => setBillingInterval(v as Interval)} label="Billing interval">
+            <Tab value="month">Monthly</Tab>
+            <Tab value="year">Yearly</Tab>
+          </Tabs>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {UPGRADE_PLANS.map((plan) => {
+            const isCurrent = data.plan_id === plan.id;
+            return (
+              <div key={plan.id} className="flex flex-col rounded-card border border-line bg-card p-5">
+                <h3 className="text-sm font-semibold">{plan.label}</h3>
+                <p className="mt-1 flex-1 text-sm text-ink-3">{plan.blurb}</p>
+                <Button
+                  className="mt-4"
+                  onClick={() => void upgrade(plan.id)}
+                  loading={pending === plan.id}
+                  disabled={isCurrent || (pending !== null && pending !== plan.id)}
+                >
+                  {isCurrent ? "Current plan" : "Upgrade"}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
       </section>
     </div>
   );

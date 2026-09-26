@@ -13,7 +13,7 @@
  *     write allowlist and never overlap with the read allowlist.
  */
 import type { NextRequest } from "next/server";
-import { resolveUpstream, resolveWriteUpstream, filterQuery } from "@/lib/upstream";
+import { resolveUpstream, resolveWriteUpstream, filterQuery, validateBody } from "@/lib/upstream";
 import { sessionToken } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -74,6 +74,11 @@ async function forwardWrite(req: NextRequest, ctx: { params: Promise<{ path: str
 
   const url = `${GATEWAY_URL}${route.path}`;
   const body = method !== "DELETE" ? await req.text() : undefined;
+
+  // A route that declares a `body` shape (currently only billing/checkout, billing/portal — see
+  // upstream.ts) gets it checked before anything is forwarded; a route with no shape declared
+  // admits any body unchanged, exactly as before DB-74b.
+  if (!validateBody(route, body ?? "")) return json({ error: "invalid_body" }, 400);
 
   let upstream: Response;
   try {

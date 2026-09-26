@@ -13,7 +13,10 @@ spec's body is only the property, not the plumbing.
   `forceBotsQuotaExceeded()` (make `POST /bots` answer the unwrapped 402 `quota_exceeded` body).
   DB-44/DB-48 add `forceSearch()` (same shape, for `GET /transcripts/search`) and
   `setMeetingStatus()` (flip one fixture meeting's status directly, so the pagination-poll spec
-  doesn't need a real bot lifecycle to prove a live row stays visible).
+  doesn't need a real bot lifecycle to prove a live row stays visible). DB-74b adds
+  `setStripeCustomer()` (set/clear whether the stub account has a Stripe customer on file, so
+  `17-billing-upgrade-manage.spec.ts` can reach `POST /billing/portal`'s success path directly,
+  without first driving a real checkout).
 - `01-gate.spec.ts` — an anonymous page request redirects to `/login`; an anonymous
   `/api/vexa/*` request is a 401, not a redirect (a fetch caller can't follow one).
 - `02-signin.spec.ts` — the email door lands on the meetings list and sets both session cookies.
@@ -78,6 +81,16 @@ spec's body is only the property, not the plumbing.
   "no meetings"); a forced failure renders the error state with retry; the loading state is shown
   while the request is in flight; and a request-log proof that `q` never reaches `GET /meetings`
   while it does reach `GET /transcripts/search` intact.
+
+- `17-billing-upgrade-manage.spec.ts` (DB-74b) — clicking Upgrade on a plan card sends the exact
+  `{plan, interval}` the card and the monthly/yearly toggle say (proven by the returned Checkout
+  URL, which the stub encodes the received body into — see `stub-server.mjs`) and the browser
+  navigates there; Manage subscription redirects to the Portal when the account has a Stripe
+  customer on file, and shows an explanatory toast (never a generic error) with a live Upgrade
+  button still on the page when the core answers 409 because it doesn't; every button on the page
+  disables while its own request is in flight. Every navigation to `checkout.stripe.com`/
+  `billing.stripe.com` is intercepted with `page.route()` and fulfilled locally — this spec never
+  leaves the test environment.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

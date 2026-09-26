@@ -79,6 +79,15 @@ export async function forceBotsQuotaExceeded(request: APIRequestContext, on = tr
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { botsQuota: on } });
 }
 
+/** Set or clear whether the stub's account has a Stripe customer on file (DB-74b) — governs
+ *  whether `POST /billing/portal` answers a session or a 409. `POST /billing/checkout` sets this
+ *  itself on first use, same as the real core; call this to reach the portal's success path
+ *  directly, without driving a checkout first. */
+export async function setStripeCustomer(request: APIRequestContext, present: boolean): Promise<void> {
+  const res = await request.post(`${GATEWAY_URL}/__control/billingCustomer`, { data: { present } });
+  if (!res.ok()) throw new Error(`stub set-stripe-customer failed: ${res.status()}`);
+}
+
 /** One counter for the whole run — each call gets its own fake source IP, so the login route's
  *  rate limiter (5 attempts / 10 minutes per client, `lib/rateLimit.ts`) sees every spec's
  *  sign-in as a different client instead of exhausting one shared "direct" bucket. Requires

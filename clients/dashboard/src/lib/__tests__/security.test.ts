@@ -1,7 +1,14 @@
 /** The security posture is policy, and policy that isn't asserted drifts. These tests pin the
  *  properties an operator is entitled to rely on. */
 import { describe, expect, it } from "vitest";
-import { contentSecurityPolicy, isSameOriginWrite, makeNonce, safeNext, securityHeaders } from "../security";
+import {
+  contentSecurityPolicy,
+  isSameOriginWrite,
+  isTrustedBillingRedirect,
+  makeNonce,
+  safeNext,
+  securityHeaders,
+} from "../security";
 import { hit, resetRateLimits } from "../rateLimit";
 
 describe("contentSecurityPolicy", () => {
@@ -99,6 +106,36 @@ describe("safeNext", () => {
   it("collapses every off-origin shape to the root", () => {
     for (const bad of ["//evil.example.com", "/\\evil.example.com", "https://evil.example.com", "evil", null, ""]) {
       expect(safeNext(bad)).toBe("/");
+    }
+  });
+});
+
+describe("isTrustedBillingRedirect (DB-74b)", () => {
+  it("admits Stripe's own Checkout and Portal hosts, over https", () => {
+    expect(isTrustedBillingRedirect("https://checkout.stripe.com/c/pay/cs_test_abc")).toBe(true);
+    expect(isTrustedBillingRedirect("https://billing.stripe.com/p/session/xyz")).toBe(true);
+  });
+
+  it("refuses a plausible-looking near-miss host", () => {
+    for (const bad of [
+      "https://checkout.stripe.com.evil.example.com/x",
+      "https://evil.example.com/checkout.stripe.com",
+      "https://stripe.com/x",
+      "https://checkout-stripe.com/x",
+      "https://xn--checkout-stripecom.evil.test/x",
+    ]) {
+      expect(isTrustedBillingRedirect(bad)).toBe(false);
+    }
+  });
+
+  it("refuses a non-https scheme on an otherwise-trusted host", () => {
+    expect(isTrustedBillingRedirect("http://checkout.stripe.com/c/pay/cs_test_abc")).toBe(false);
+    expect(isTrustedBillingRedirect("javascript://checkout.stripe.com/%0aalert(1)")).toBe(false);
+  });
+
+  it("refuses a malformed or non-URL string outright", () => {
+    for (const bad of ["", "not a url", "checkout.stripe.com", "//checkout.stripe.com/x"]) {
+      expect(isTrustedBillingRedirect(bad)).toBe(false);
     }
   });
 });

@@ -111,3 +111,29 @@ export function safeNext(raw: string | null | undefined): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
   return raw;
 }
+
+/** The exact hosts Stripe serves Checkout Sessions and Customer Portal sessions from
+ *  (`stripe_gateway.py`'s `create_checkout_session`/`create_portal_session` — both real Stripe
+ *  API calls, never mocked in production). */
+const STRIPE_REDIRECT_HOSTS = new Set(["checkout.stripe.com", "billing.stripe.com"]);
+
+/** Is a `{url}` from `POST /billing/checkout` or `POST /billing/portal` safe to send the browser
+ *  to with `window.location.assign()`?
+ *
+ *  `safeNext()` above answers the opposite question (is this INTERNAL) — this one exists because
+ *  billing's whole point is an EXTERNAL redirect, to Stripe's own hosted UI. admin-api's
+ *  `CheckoutResponse`/`PortalResponse` are typed as `url: str` with no shape check of their own
+ *  (`main.py`), and that URL is Stripe's `session["url"]` verbatim — trusted in the ordinary case,
+ *  but this client still checks it before navigating rather than assuming a 200 body is safe to
+ *  hand a full-page redirect to. A malformed response, a misbehaving upstream, or a future
+ *  regression that returns the wrong field all fail closed here instead of taking the signed-in
+ *  user's browser to an arbitrary origin. */
+export function isTrustedBillingRedirect(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" && STRIPE_REDIRECT_HOSTS.has(parsed.hostname);
+}
