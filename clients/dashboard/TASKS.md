@@ -429,6 +429,11 @@ the known environmental traps.
 | DB-73 | `45763c17` | Stripe checkout, portal and webhook handler (ingress pending, see below) |
 | DB-74 (read-only), DB-75 | `7e4b3aeb` | Billing page, remaining-allowance line, paywall message |
 | DB-80 | `31e3e89f`, `1ca636f8` | "Your meeting is ready" email to the owner, with a dashboard link |
+| DB-30a | `86db7793`, `8b20edaa` | Calendar refresh tokens sealed with AES-256-GCM, bound to user + connection |
+| DB-72b | `2b6b3846` | Bots leave at the plan's per-meeting minute cap (Free 60, Pro/Team 240) |
+| DB-74b | `85cd8d1e` | Upgrade (Stripe Checkout) and Manage subscription (Portal) buttons on `/billing` |
+| Core `has_more` | `25361639` | `GET /meetings` forwards `has_more`; the list shows an honest end state |
+| e2e fix | see log | Search loading spec holds the stub answer instead of racing a 150ms delay |
 
 ### Decisions waiting on the user
 
@@ -437,7 +442,7 @@ the known environmental traps.
    and every service binds 127.0.0.1. The options are: (1) a reverse-proxy rule forwarding exactly
    `/billing/webhook` to admin-api; (2) a new signature-gated route class in the gateway; (3) a small
    ingress service. The coordinator recommends (1). See `docs/docs/how-to/billing.mdx`.
-2. **Calendar token encryption.** `admin_api/app/token_cipher.py` is a sound but hand-built
+2. ~~**Calendar token encryption.**~~ Decided 2026-09-26: AES-256-GCM (`cryptography`), shipped. `admin_api/app/token_cipher.py` is a sound but hand-built
    HMAC-CTR plus encrypt-then-MAC. Either harden it (enforce a minimum key length; bind the user id
    and calendar id as associated data) or replace it with AES-GCM from `cryptography`, which is
    Category A but a new compiled dependency. **Do this before DB-31 ships.** Until DB-31 exists,
@@ -445,7 +450,7 @@ the known environmental traps.
 
 ### Next, in order
 
-1. **DB-30a:** token-cipher decision above, then implement it.
+1. ~~DB-30a~~ done (AES-GCM chosen). ~~DB-74b~~, ~~DB-72b~~, ~~has_more~~ done.
 2. **DB-31, DB-33, DB-34:** the Google "Connect" button and callback page (routes:
    `GET /user/calendars/google/authorize` → `{authorize_url, state}`;
    `POST /user/calendars/google/exchange {code, state}` → masked connection), the Upcoming page with
@@ -478,6 +483,13 @@ text for DB-93 · `DASHBOARD_NEXT_URL` for email links.
 To run it locally, rebuild `dashboard-next`, `gateway`, `admin-api`, `meeting-api` and `flows-worker`.
 
 ### Not verified anywhere
+
+- Docker-gated suites (admin-api testcontainers, incl. the Google OAuth route tests exercising the
+  new cipher call sites) were not run on the 2026-09-26 Linux host: no docker daemon there.
+- `core/meetings/services/bot` `max-active-cap.test.ts` is committed but unexecuted (no bot
+  node_modules on that host); its arithmetic was reproduced in a standalone script.
+- e2e ports in `e2e/ports.mjs` are fixed, so two agents running `test:e2e` at once in one container
+  collide. Run dashboard e2e from one agent at a time.
 
 - No live leg against real Stripe or Google. Everything is mocked or stubbed.
 - `admin-api/tests/test_stack_admin_api.py` and `test_stack_redis.py` hang on this host.
