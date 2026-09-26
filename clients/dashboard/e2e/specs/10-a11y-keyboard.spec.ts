@@ -77,7 +77,7 @@ test("calendar auto-join is a real switch, operable with the keyboard", async ({
   await page.getByRole("button", { name: "Connect a calendar" }).click();
   await page.getByLabel("Name").fill("Keyboard calendar");
   await page.getByLabel("Secret ICS address").fill("https://calendar.example.com/secret/kbd.ics");
-  await page.getByRole("button", { name: "Connect" }).click();
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(page.getByText("Keyboard calendar")).toBeVisible();
 
   await page.getByRole("button", { name: "Expand" }).click();

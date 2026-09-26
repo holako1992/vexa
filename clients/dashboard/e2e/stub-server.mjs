@@ -36,6 +36,7 @@ import {
   JITSI_HOSTS,
   freeEntitlements,
   QUOTA_EXCEEDED_BODY,
+  E2E_GOOGLE_EMAIL,
 } from "./fixtures.mjs";
 
 const RUNNING_STATUSES = new Set(["requested", "joining", "awaiting_admission", "needs_help", "active", "stopping"]);
@@ -52,7 +53,15 @@ const adminLog = [];
 /** Forced response overrides, keyed by a short name a spec asks for. Cleared on reset.
  *  `botsQuota: true` makes `POST /bots` answer DB-72's unwrapped 402 `quota_exceeded` body
  *  instead of dispatching — spec 14's paywall proof. */
-let force = { meetings: null, meetingDetail: null, botsQuota: false, search: null };
+let force = { meetings: null, meetingDetail: null, botsQuota: false, search: null, googleExchange: null };
+/** DB-31 — the state tokens `GET /user/calendars/google/authorize` has issued, and which of
+ *  those have already been consumed by an exchange. Mirrors just enough of the core's real
+ *  behaviour (`google_oauth.sign_state`/`verify_state`) for the e2e specs: an unknown or
+ *  already-used state is refused with the same `"invalid state: …"` shape the real 400 carries,
+ *  without reimplementing HMAC signing in a test double that exists to prove the DASHBOARD's
+ *  handling of that refusal, not the core's crypto. */
+let issuedGoogleStates = new Set();
+let usedGoogleStates = new Set();
 /** `GET /user/entitlements`'s current answer (DB-74/DB-75) — swapped per spec via
  *  `/__control/entitlements` (`helpers.ts`'s `setEntitlements`), reset to the free-plan default
  *  on every `/__control/reset`. */
@@ -84,7 +93,9 @@ function resetAll() {
   bots.length = 0;
   gatewayLog.length = 0;
   adminLog.length = 0;
-  force = { meetings: null, meetingDetail: null, botsQuota: false, search: null };
+  force = { meetings: null, meetingDetail: null, botsQuota: false, search: null, googleExchange: null };
+  issuedGoogleStates = new Set();
+  usedGoogleStates = new Set();
   entitlements = freeEntitlements();
   stripeCustomerId = null;
   releaseSearchHold();
@@ -168,6 +179,16 @@ async function handleGateway(req, res) {
   // DB-48's "a live row on a later page stays visible" spec: flip one fixture meeting's status
   // without going through a real bot lifecycle, so the spec can prove the POLL's re-fetch window
   // rule rather than the bot-spawn path (already covered elsewhere).
+  // DB-31: seed one raw calendar connection directly (e.g. a pre-existing Google connection with
+  // `reconnect_needed: true`) — a shortcut around driving a real connect first, the same role
+  // `/__control/setMeetingStatus` plays for meetings below. An id is minted if the caller didn't
+  // give one.
+  if (url.pathname === "/__control/seedCalendar" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const cal = { id: String(nextCalendarId++), ...body };
+    calendars.push(cal);
+    return sendJson(res, 200, { ok: true, calendar: cal });
+  }
   if (url.pathname === "/__control/setMeetingStatus" && req.method === "POST") {
     const body = await readJsonBody(req);
     const row = meetings.find((m) => String(m.id) === String(body.id));
@@ -312,6 +333,80 @@ async function handleGateway(req, res) {
   // GET /user/calendars
   if (req.method === "GET" && parts.length === 2 && parts[0] === "user" && parts[1] === "calendars") {
     return sendJson(res, 200, { calendars });
+  }
+
+  // GET /user/calendars/google/authorize — DB-31. Mints a state, records it as issued (never
+  // signs it — see `issuedGoogleStates`'s comment above), and hands back a REAL
+  // accounts.google.com URL carrying it, exactly like `google_oauth.build_authorize_url`, so the
+  // dashboard's own `isTrustedGoogleAuthorizeRedirect` check has something real to accept.
+  if (
+    req.method === "GET" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" &&
+    parts[2] === "google" && parts[3] === "authorize"
+  ) {
+    // Two dot-separated segments, matching the SHAPE `google_oauth.sign_state` always produces
+    // (a base64url body, a dot, a base64url signature) — the dashboard's own allowlist
+    // (`lib/upstream.ts`'s `isGoogleExchangeBody`) checks exactly this shape before ever
+    // forwarding an exchange body, so the stub must issue a state that shape describes, even
+    // though (unlike the real core) it signs nothing.
+    const seg1 = `e2estate${issuedGoogleStates.size + 1}${Math.random().toString(36).slice(2, 10)}`;
+    const seg2 = Math.random().toString(36).slice(2, 12);
+    const state = `${seg1}.${seg2}`;
+    issuedGoogleStates.add(state);
+    const authorize_url =
+      "https://accounts.google.com/o/oauth2/v2/auth?" +
+      new URLSearchParams({
+        client_id: "e2e-test-client",
+        redirect_uri: "http://127.0.0.1:3100/calendar/google/callback",
+        response_type: "code",
+        scope: "https://www.googleapis.com/auth/calendar.readonly",
+        access_type: "offline",
+        prompt: "consent",
+        state,
+      }).toString();
+    return sendJson(res, 200, { authorize_url, state });
+  }
+
+  // POST /user/calendars/google/exchange {code, state} — DB-31's callback page. `code` is never
+  // inspected (the stub has no real Google token endpoint to call) — only `state`'s issued/used
+  // bookkeeping and `force.googleExchange` decide the answer, which is exactly the seam the
+  // dashboard's own specs need: THIS client's handling of a state refusal or an upstream failure,
+  // not Google's token endpoint.
+  if (
+    req.method === "POST" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" &&
+    parts[2] === "google" && parts[3] === "exchange"
+  ) {
+    const body = await readJsonBody(req);
+    if (force.googleExchange) {
+      return sendJson(res, force.googleExchange, {
+        detail: "Google rejected the authorization code: invalid_grant",
+      });
+    }
+    const state = body.state;
+    if (typeof state !== "string" || !issuedGoogleStates.has(state)) {
+      return sendJson(res, 400, { detail: "invalid state: unknown, expired, or forged" });
+    }
+    if (usedGoogleStates.has(state)) {
+      return sendJson(res, 409, { detail: "this authorization has already been used" });
+    }
+    usedGoogleStates.add(state);
+    let cal = calendars.find((c) => c.kind === "google" && c.google_email === E2E_GOOGLE_EMAIL);
+    if (cal) {
+      cal.reconnect_needed = false;
+    } else {
+      cal = {
+        id: String(nextCalendarId++),
+        kind: "google",
+        name: `Google — ${E2E_GOOGLE_EMAIL}`,
+        google_email: E2E_GOOGLE_EMAIL,
+        google_calendar_ids: ["primary"],
+        reconnect_needed: false,
+        auto_join: true,
+        bot_name: "Vexa",
+        enabled: true,
+      };
+      calendars.push(cal);
+    }
+    return sendJson(res, 201, cal);
   }
 
   // POST /bots

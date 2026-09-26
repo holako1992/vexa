@@ -137,3 +137,25 @@ export function isTrustedBillingRedirect(url: string): boolean {
   }
   return parsed.protocol === "https:" && STRIPE_REDIRECT_HOSTS.has(parsed.hostname);
 }
+
+/** The one host Google's consent screen is ever served from (`google_oauth.py`'s
+ *  `AUTHORIZE_ENDPOINT`, `https://accounts.google.com/o/oauth2/v2/auth`). */
+const GOOGLE_AUTHORIZE_HOST = "accounts.google.com";
+
+/** Is a `GET /user/calendars/google/authorize` response's `authorize_url` safe to send the
+ *  browser to with `window.location.assign()`?
+ *
+ *  Same shape as `isTrustedBillingRedirect` above and for the same reason: admin-api's
+ *  `GoogleAuthorizeResponse` types `authorize_url` as a plain `str` with no shape check of its
+ *  own, so this client checks it is `https://accounts.google.com` before ever navigating there —
+ *  a malformed response or a future regression fails closed instead of taking a signed-in user's
+ *  browser to an arbitrary origin. */
+export function isTrustedGoogleAuthorizeRedirect(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" && parsed.hostname === GOOGLE_AUTHORIZE_HOST;
+}

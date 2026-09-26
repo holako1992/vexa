@@ -37,6 +37,7 @@ describe("SendBotDialog", () => {
           calendars: [
             {
               id: "cal-1",
+              kind: "ics",
               name: "Work calendar",
               ics_url_set: true,
               ics_url_masked: "https://calendar.example.com/***.ics",
@@ -143,5 +144,50 @@ describe("SendBotDialog", () => {
     expect(
       fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/vexa/user/calendars")),
     ).toBe(true);
+  });
+
+  // DB-31: Google Calendar connect is the primary path; Microsoft 365 (DB-32) is not shipped as
+  // a disabled placeholder — AGENTS.md's "never ship a placeholder" rule.
+  it("shows Connect Google Calendar as the primary calendar action, with no Microsoft placeholder", async () => {
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
+
+    fireEvent.click(screen.getByRole("button", { name: /^calendar$/i }));
+
+    expect(await screen.findByRole("button", { name: /connect google calendar/i })).not.toBeNull();
+    // Outlook/Microsoft 365 is legitimately named as an ICS-fallback provider in the inline
+    // guide — what must NOT exist is a "Connect Microsoft 365" action of its own (DB-32) or a
+    // disabled "coming soon" placeholder for it.
+    expect(screen.queryByRole("button", { name: /connect microsoft/i })).toBeNull();
+    expect(screen.queryByText(/coming soon/i)).toBeNull();
+  });
+
+  it("shows a Reconnect action for a Google connection whose grant needs reconnecting", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/vexa/meeting/jitsi-hosts")) return jsonResponse({ hosts: [] });
+      if (url.includes("/api/vexa/user/calendars")) {
+        return jsonResponse({
+          calendars: [
+            {
+              id: "cal-g1",
+              kind: "google",
+              name: "Google — person@example.com",
+              google_email: "person@example.com",
+              google_calendar_ids: ["primary"],
+              reconnect_needed: true,
+              auto_join: true,
+              enabled: true,
+            },
+          ],
+        });
+      }
+      return jsonResponse({ error: "unexpected_url", url }, 404);
+    });
+
+    renderDialog({ onClose: () => {}, onBotSent: () => {} });
+    fireEvent.click(screen.getByRole("button", { name: /^calendar$/i }));
+
+    expect(await screen.findByText(/reconnect needed/i)).not.toBeNull();
+    expect(screen.getByRole("button", { name: /^reconnect$/i })).not.toBeNull();
   });
 });

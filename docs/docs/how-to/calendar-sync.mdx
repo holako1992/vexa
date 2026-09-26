@@ -23,9 +23,18 @@ own auto-join policy and bot name — see the [Calendar API](/api/calendar) for 
 
 ## Connect Google Calendar
 
-On the dashboard's **Calendar** page, click **Connect Google Calendar**. Google shows its own
-consent screen naming exactly one permission — read-only access to your calendar — and returns you
-to Vexa already connected, syncing within seconds. No secret address, no copy-paste.
+Open **Add Bot** → the **Calendar** tab, and click **Connect Google Calendar** — it's the primary
+action there, above the ICS fallback. Google shows its own consent screen naming exactly one
+permission — read-only access to your calendar — and redirects back to Vexa's
+`/calendar/google/callback` page, which finishes the connection and hands you back to the same
+Calendar tab, already connected. No secret address, no copy-paste, no other field to fill in.
+
+If Google's consent screen is declined, or the connection fails, the callback page names the exact
+reason (Google's own rejection, or "you declined the consent screen") and a **Back to Calendar**
+button that returns you to the same tab to try again.
+
+A connection whose access has been revoked or expired shows **Reconnect needed** instead of a
+silent sync failure — click **Reconnect** to repeat the same consent flow and clear it.
 
 <Info>
 **What Vexa can see:** the `calendar.readonly` scope (events, and the calendar list so Vexa can
@@ -77,9 +86,13 @@ the ICS calendar surface below is completely unaffected.
 
 ## Connect Microsoft 365
 
-On the dashboard's **Calendar** page, click **Connect Microsoft 365**. Microsoft shows its own
-consent screen naming exactly one permission — read-only access to your calendar — and returns you
-to Vexa already connected, syncing within seconds. No secret address, no copy-paste.
+The Microsoft Graph connector exists at the API level today
+(`GET`/`POST /user/calendars/microsoft/{authorize,exchange}`, below) — the dashboard's own
+**Connect Microsoft 365** button is a separate, not-yet-shipped piece of dashboard work, so it does
+not appear next to **Connect Google Calendar** on the Calendar tab yet. Once it ships, the flow will
+be the same shape as Google's: one consent screen naming exactly one permission — read-only access
+to your calendar — and a redirect straight back into Vexa, connected. No secret address, no
+copy-paste.
 
 <Info>
 **What Vexa can see:** the `Calendars.Read` scope (events on your default calendar and any others
@@ -184,19 +197,21 @@ settings ("Reset" in Google Calendar) — then reconnect with the new address.
 ### 2. Connect it — and get an answer immediately
 
 On hosted Vexa, the dashboard lives at **[dashboard.vexa.ai](https://dashboard.vexa.ai)** — a
-different host from `vexa.ai`, which carries the site and sign-in and has no calendar page. Sign
-in there and open **Calendar** from the sidebar. Give the connection a recognizable
-name such as **Work** or **Personal**, paste the secret address, choose whether meetings from that
-calendar should auto-join, and click **Connect**. Repeat this for each feed you want Vexa to follow
-(up to 10 active connections).
+different host from `vexa.ai`, which carries the site and sign-in and has no calendar surface. Sign
+in there, open **Add Bot**, and switch to the **Calendar** tab — **Other calendar (ICS)** is the
+fallback below **Connect Google Calendar**. Give the connection a recognizable name such as **Work**
+or **Personal**, paste the secret address, choose whether meetings from that calendar should
+auto-join, and click **Connect**. Repeat this for each feed you want Vexa to follow (up to 10 active
+connections).
 
 Everything the dashboard does here is the [calendar API](/api/calendar) underneath, so a self-hosted
 deployment — which ships the API but not the hosted dashboard — connects feeds the same way with
 `POST /user/calendars`. The API is the complete surface; the examples are below.
 
-The same page groups **Upcoming auto-joins** by source calendar. Each calendar has its own
-**Default bot name**, used when that calendar arms an unattended join. For a meeting present in
-several calendars, the first source with auto-join enabled supplies the bot name.
+Each calendar has its own **Default bot name**, used when that calendar arms an unattended join.
+For a meeting present in several calendars, the first source with auto-join enabled supplies the bot
+name. A dedicated **Upcoming** page grouping auto-joins by source calendar is separate,
+not-yet-shipped dashboard work.
 
 **Connecting runs a sync on the spot** — within seconds the panel answers with the result, not
 silence:
@@ -274,9 +289,11 @@ A masked connection now carries `"kind": "ics"`, `"kind": "google"`, or `"kind":
 Google connection's shape adds `google_email` (the connected account, not a secret),
 `google_calendar_ids` (default `["primary"]`), and `reconnect_needed`; a Microsoft connection adds
 the same shape under `microsoft_email` / `microsoft_calendar_ids`. `reconnect_needed` is `true`
-once the provider reports the grant revoked or expired, `false` otherwise; the panel shows
-**Reconnect needed** for that connection instead of a generic sync failure, and reconnecting
-(repeating the consent flow for the same account) clears it.
+once the provider reports the grant revoked or expired, `false` otherwise; the dashboard's Calendar
+tab shows **Reconnect needed** and a **Reconnect** action for a Google connection in this state
+today. A Microsoft connection made directly through the API carries the same `reconnect_needed`
+field, but the dashboard's own **Reconnect** control for it ships alongside DB-32's dashboard
+button above.
 
 Imported meeting metadata includes `data.calendar_sources`, an array of source objects with the
 stable connection `id`, display `name`, provider event `uid`, source `auto_join` preference,
@@ -425,7 +442,7 @@ to the legacy user-wide setting, then `Vexa`.
 
 ## Disconnect
 
-On **Calendar**, choose **Disconnect** for the exact named feed. Meetings that also belong to
+On the Calendar tab, choose **Disconnect** for the exact named feed. Meetings that also belong to
 another calendar keep that source and remain. A future planned meeting owned only by the removed
 calendar is cleaned up; a manual plan that the calendar had adopted remains. Other connections
 and their credentials are untouched.

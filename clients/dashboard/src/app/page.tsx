@@ -5,10 +5,12 @@
  *  so a null user here means the session was rejected by the identity oracle between the two —
  *  which is a sign-out, not an error page.
  */
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/session";
 import { Shell } from "@/components/Shell";
 import { MeetingsView } from "@/components/MeetingsView";
+import { LoadingState } from "@/components/EmptyState";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,12 @@ export default async function HomePage() {
 
   return (
     <Shell user={{ email: user.email, name: user.name }}>
-      <MeetingsView />
+      {/* MeetingsView reads `?calendar=` (DB-31's return-from-Google-OAuth landing) via
+          useSearchParams, which Next.js requires a Suspense boundary for even under
+          force-dynamic. */}
+      <Suspense fallback={<LoadingState label="Loading meetings…" />}>
+        <MeetingsView />
+      </Suspense>
     </Shell>
   );
 }

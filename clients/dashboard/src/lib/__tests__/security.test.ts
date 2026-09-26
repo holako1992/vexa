@@ -5,6 +5,7 @@ import {
   contentSecurityPolicy,
   isSameOriginWrite,
   isTrustedBillingRedirect,
+  isTrustedGoogleAuthorizeRedirect,
   makeNonce,
   safeNext,
   securityHeaders,
@@ -136,6 +137,35 @@ describe("isTrustedBillingRedirect (DB-74b)", () => {
   it("refuses a malformed or non-URL string outright", () => {
     for (const bad of ["", "not a url", "checkout.stripe.com", "//checkout.stripe.com/x"]) {
       expect(isTrustedBillingRedirect(bad)).toBe(false);
+    }
+  });
+});
+
+describe("isTrustedGoogleAuthorizeRedirect (DB-31)", () => {
+  it("admits Google's own consent-screen host, over https", () => {
+    expect(isTrustedGoogleAuthorizeRedirect("https://accounts.google.com/o/oauth2/v2/auth?client_id=x")).toBe(true);
+  });
+
+  it("refuses a plausible-looking near-miss host", () => {
+    for (const bad of [
+      "https://accounts.google.com.evil.example.com/x",
+      "https://evil.example.com/accounts.google.com",
+      "https://google.com/x",
+      "https://accounts-google.com/x",
+      "https://xn--accounts-googlecom.evil.test/x",
+    ]) {
+      expect(isTrustedGoogleAuthorizeRedirect(bad)).toBe(false);
+    }
+  });
+
+  it("refuses a non-https scheme on an otherwise-trusted host", () => {
+    expect(isTrustedGoogleAuthorizeRedirect("http://accounts.google.com/o/oauth2/v2/auth")).toBe(false);
+    expect(isTrustedGoogleAuthorizeRedirect("javascript://accounts.google.com/%0aalert(1)")).toBe(false);
+  });
+
+  it("refuses a malformed or non-URL string outright", () => {
+    for (const bad of ["", "not a url", "accounts.google.com", "//accounts.google.com/x"]) {
+      expect(isTrustedGoogleAuthorizeRedirect(bad)).toBe(false);
     }
   });
 });

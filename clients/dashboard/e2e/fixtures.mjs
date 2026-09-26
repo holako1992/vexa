@@ -246,6 +246,12 @@ export function freshCalendars() {
   return [];
 }
 
+/** DB-31: the fixed Google account the stub's OAuth exchange always resolves to — one identity
+ *  is enough to prove connect, reconnect (matches an existing connection by this SAME email and
+ *  clears `reconnect_needed`), and the state/consent failure paths; a spec that needs a SECOND
+ *  distinct Google account is out of this task's scope. */
+export const E2E_GOOGLE_EMAIL = "person@e2e.test";
+
 export const JITSI_HOSTS = ["meet.e2e.test"];
 
 // ── DB-74/DB-75: GET /user/entitlements fixtures ────────────────────────────────────────────────

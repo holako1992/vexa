@@ -94,6 +94,90 @@ describe("resolveUpstream — entitlements (DB-75)", () => {
   });
 });
 
+describe("resolveUpstream — Google calendar authorize (DB-31)", () => {
+  it("admits GET user/calendars/google/authorize", () => {
+    expect(resolveUpstream(["user", "calendars", "google", "authorize"])).toEqual({
+      path: "/user/calendars/google/authorize",
+    });
+  });
+
+  it("refuses near-misses: wrong segment, extra segment, and the exchange path (POST-only)", () => {
+    for (const path of [
+      ["user", "calendars", "google"],
+      ["user", "calendars", "google", "exchange"],
+      ["user", "calendars", "microsoft", "authorize"],
+      ["user", "calendars", "google", "authorize", "extra"],
+      ["users", "calendars", "google", "authorize"],
+    ]) {
+      expect(resolveUpstream(path)).toBeNull();
+    }
+    expect(resolveWriteUpstream("POST", ["user", "calendars", "google", "authorize"])).toBeNull();
+    expect(resolveWriteUpstream("GET", ["user", "calendars", "google", "authorize"])).toBeNull();
+  });
+});
+
+describe("resolveWriteUpstream — Google calendar exchange (DB-31)", () => {
+  it("admits POST /user/calendars/google/exchange with a body check attached", () => {
+    expect(resolveWriteUpstream("POST", ["user", "calendars", "google", "exchange"])).toEqual({
+      path: "/user/calendars/google/exchange",
+      body: expect.any(Function),
+    });
+  });
+
+  it("refuses method/path near-misses, including the authorize path (GET-only)", () => {
+    for (const [method, path] of [
+      ["GET", ["user", "calendars", "google", "exchange"]],
+      ["PATCH", ["user", "calendars", "google", "exchange"]],
+      ["DELETE", ["user", "calendars", "google", "exchange"]],
+      ["POST", ["user", "calendars", "google", "authorize"]],
+      ["POST", ["user", "calendars", "google"]],
+      ["POST", ["user", "calendars", "google", "exchange", "extra"]],
+      ["POST", ["user", "calendars", "microsoft", "exchange"]],
+    ] as const) {
+      expect(resolveWriteUpstream(method, path)).toBeNull();
+    }
+  });
+});
+
+describe("validateBody — user/calendars/google/exchange (DB-31)", () => {
+  const exchange = resolveWriteUpstream("POST", ["user", "calendars", "google", "exchange"])!;
+  // A shape matching `google_oauth.sign_state`'s two dot-separated base64url segments — this
+  // allowlist checks the SHAPE only, never validity (see `isGoogleExchangeBody`'s comment in
+  // upstream.ts): the core alone signs and verifies it.
+  const realState = "eyJ1aWQiOjF9.c2lnbmF0dXJl";
+
+  it("admits exactly {code, state}, both plausible strings", () => {
+    expect(validateBody(exchange, JSON.stringify({ code: "4/0Ab_test-code", state: realState }))).toBe(true);
+  });
+
+  it("refuses extra keys, missing keys, wrong types, and non-object bodies", () => {
+    expect(validateBody(exchange, JSON.stringify({ code: "abc", state: realState, extra: 1 }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ code: "abc" }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ state: realState }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ code: 1, state: realState }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ code: "abc", state: 1 }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify(["abc", realState]))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify(null))).toBe(false);
+  });
+
+  it("refuses a state that isn't the signed token's two-segment shape", () => {
+    for (const state of ["", "no-dot-here", "a.b.c", ".", "short.short", "a".repeat(2049) + "." + "b".repeat(8)]) {
+      expect(validateBody(exchange, JSON.stringify({ code: "abc", state }))).toBe(false);
+    }
+  });
+
+  it("refuses an empty code, an overlong code, and a code carrying a newline", () => {
+    expect(validateBody(exchange, JSON.stringify({ code: "", state: realState }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ code: "x".repeat(2049), state: realState }))).toBe(false);
+    expect(validateBody(exchange, JSON.stringify({ code: "abc\ndef", state: realState }))).toBe(false);
+  });
+
+  it("refuses an empty body and malformed JSON", () => {
+    expect(validateBody(exchange, "")).toBe(false);
+    expect(validateBody(exchange, "{not json")).toBe(false);
+  });
+});
+
 describe("resolveWriteUpstream", () => {
   it("admits POST /bots", () => {
     expect(resolveWriteUpstream("POST", ["bots"])).toEqual({ path: "/bots" });

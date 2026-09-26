@@ -89,6 +89,21 @@ export async function forceBotsQuotaExceeded(request: APIRequestContext, on = tr
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { botsQuota: on } });
 }
 
+/** Force the stub gateway's next `POST /user/calendars/google/exchange` (and every one after,
+ *  until the next reset) to answer `status` instead of resolving state normally — DB-31's
+ *  exchange-failure spec (Google itself rejecting the code, surfaced verbatim). */
+export async function forceGoogleExchange(request: APIRequestContext, status: number | null): Promise<void> {
+  await request.post(`${GATEWAY_URL}/__control/force`, { data: { googleExchange: status } });
+}
+
+/** Push one raw calendar connection straight into the stub's list — DB-31's reconnect spec seeds
+ *  an existing Google connection with `reconnect_needed: true` this way, without driving a real
+ *  connect first. An `id` is minted if the caller doesn't supply one. */
+export async function seedCalendar(request: APIRequestContext, calendar: Record<string, unknown>): Promise<void> {
+  const res = await request.post(`${GATEWAY_URL}/__control/seedCalendar`, { data: calendar });
+  if (!res.ok()) throw new Error(`stub seed-calendar failed: ${res.status()}`);
+}
+
 /** Set or clear whether the stub's account has a Stripe customer on file (DB-74b) — governs
  *  whether `POST /billing/portal` answers a session or a 409. `POST /billing/checkout` sets this
  *  itself on first use, same as the real core; call this to reach the portal's success path

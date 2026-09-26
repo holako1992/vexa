@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Bot, Search, Users, Video } from "lucide-react";
 import { getJson, presentError } from "@/lib/api";
 import {
@@ -31,7 +31,7 @@ import {
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
 import { SendBotDialog } from "./SendBotDialog";
-import { Button, Input, Tab, Tabs } from "./ui";
+import { Button, Input, Tab, Tabs, useToast } from "./ui";
 
 const TABS = [
   { id: "all", label: "All" },
@@ -66,11 +66,14 @@ function whenLabel(m: Meeting): string {
 
 export function MeetingsView() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const toast = useToast();
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<TabId>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogInitialTab, setDialogInitialTab] = useState<"link" | "calendar">("link");
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   // Kept in refs so the poll effect does not restart on every refresh, and so a concurrent
@@ -138,6 +141,28 @@ export function MeetingsView() {
     };
   }, [load]);
 
+  // DB-31: the Google-connect callback page (`/calendar/google/callback`) sends the browser back
+  // here with `?calendar=connected` (success) or `?calendar=1` (the person clicked "Back to
+  // Calendar" after an error, or wants another attempt) — either way, land back on the Calendar
+  // tab of the SAME dialog they started the OAuth flow from, rather than the meetings list. The
+  // param is stripped immediately after so a refresh doesn't reopen the dialog or re-toast.
+  // `handledCalendarReturn` guards against React's dev-mode double-invoked effect firing this
+  // twice (and so double-toasting) for the SAME landing — `router.replace` below is what actually
+  // makes it not fire again on a later render.
+  const handledCalendarReturn = useRef(false);
+  useEffect(() => {
+    const calendarParam = searchParams.get("calendar");
+    if (!calendarParam || handledCalendarReturn.current) return;
+    handledCalendarReturn.current = true;
+    setDialogInitialTab("calendar");
+    setDialogOpen(true);
+    if (calendarParam === "connected") {
+      toast.push({ tone: "success", title: "Google Calendar connected." });
+    }
+    router.replace("/", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const visible = useMemo(() => {
     if (!meetings) return [];
     const byTab = tab === "all" ? meetings : meetings.filter((m) => m.phase === tab);
@@ -160,8 +185,9 @@ export function MeetingsView() {
     <>
     {dialogOpen && (
       <SendBotDialog
-        onClose={() => setDialogOpen(false)}
+        onClose={() => { setDialogOpen(false); setDialogInitialTab("link"); }}
         onBotSent={() => { void load(); }}
+        initialTab={dialogInitialTab}
       />
     )}
     <div className="mx-auto w-full max-w-5xl px-4 py-8 md:px-8 md:py-10">
@@ -170,7 +196,7 @@ export function MeetingsView() {
           <h1 className="text-2xl font-semibold tracking-tight">Meetings</h1>
           <p className="mt-1 text-sm text-ink-2">Everything Vexa has captured for you.</p>
         </div>
-        <Button variant="primary" size="lg" icon={<Bot size={15} aria-hidden />} onClick={() => setDialogOpen(true)} className="rounded-xl shadow-sm">
+        <Button variant="primary" size="lg" icon={<Bot size={15} aria-hidden />} onClick={() => { setDialogInitialTab("link"); setDialogOpen(true); }} className="rounded-xl shadow-sm">
           Add Bot
         </Button>
       </header>

@@ -178,6 +178,16 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 2 && segments[0] === "user" && segments[1] === "entitlements") {
     return { path: "/user/entitlements" };
   }
+  // GET /user/calendars/google/authorize — DB-31's "Connect Google Calendar" button. Answers
+  // `{authorize_url, state}`; the caller's own `isTrustedGoogleAuthorizeRedirect` (lib/security.ts)
+  // checks `authorize_url` before ever navigating there, so this allowlist entry only needs to get
+  // the request there and back.
+  if (
+    segments.length === 4 && segments[0] === "user" && segments[1] === "calendars" &&
+    segments[2] === "google" && segments[3] === "authorize"
+  ) {
+    return { path: "/user/calendars/google/authorize" };
+  }
   return null;
 }
 
@@ -208,6 +218,31 @@ function isCheckoutBody(parsed: unknown): boolean {
   const { plan, interval } = parsed as Record<string, unknown>;
   return typeof plan === "string" && CHECKOUT_PLAN_IDS.has(plan)
     && typeof interval === "string" && CHECKOUT_INTERVALS.has(interval);
+}
+
+/** `POST /user/calendars/google/exchange`'s body, exactly: `code` and `state`, both strings,
+ *  from Google's own redirect (DB-31's callback page relays them verbatim — it never constructs
+ *  either value itself). `state` is checked for SHAPE only — the two dot-separated base64url
+ *  segments `google_oauth.sign_state` (core/identity/services/admin-api/src/admin_api/app/
+ *  google_oauth.py) always produces — never for validity: the core is the only party that signs
+ *  and verifies it (signature, TTL, caller binding, single-use), so this allowlist does not
+ *  invent a second, weaker check of its own. `code` gets a generous length bound and no character
+ *  allowlist beyond "no control characters" — Google's authorization codes are not a fixed shape
+ *  this client should assume it knows, unlike the calendar-id path segments elsewhere in this
+ *  file, which this value never becomes (it stays in the JSON body all the way to admin-api). */
+const GOOGLE_STATE_SHAPE = /^[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{8,2048}$/;
+const MAX_GOOGLE_CODE_CHARS = 2048;
+
+function isGoogleExchangeBody(parsed: unknown): boolean {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+  const keys = Object.keys(parsed as Record<string, unknown>);
+  if (keys.length !== 2) return false;
+  const { code, state } = parsed as Record<string, unknown>;
+  return (
+    typeof code === "string" && code.length >= 1 && code.length <= MAX_GOOGLE_CODE_CHARS &&
+    !/[\r\n]/.test(code) &&
+    typeof state === "string" && GOOGLE_STATE_SHAPE.test(state)
+  );
 }
 
 /** `POST /billing/portal` takes no body at all (`create_billing_portal` in `main.py` has no
@@ -247,6 +282,16 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
       /^\d{1,20}$/.test(segments[1])
     ) {
       return { path: `/meetings/${encodeURIComponent(segments[1])}/annotate` };
+    }
+    // POST /user/calendars/google/exchange {code, state} — DB-31's callback page. Body checked
+    // by `isGoogleExchangeBody` above; `google` here is a fixed literal segment, never a calendar
+    // id, so it is matched before the `/user/calendars/<id>/sync` branch below rather than
+    // through `SAFE_CAL_ID` (which would also accept it, but for the wrong reason).
+    if (
+      segments.length === 4 && segments[0] === "user" && segments[1] === "calendars" &&
+      segments[2] === "google" && segments[3] === "exchange"
+    ) {
+      return { path: "/user/calendars/google/exchange", body: isGoogleExchangeBody };
     }
     // POST /billing/checkout {plan, interval} — DB-74b's Upgrade button. `_require_stripe_billing`
     // on the core answers 503 when Stripe isn't configured on this deployment; that is the core's
