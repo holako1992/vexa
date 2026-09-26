@@ -22,11 +22,16 @@ Two doors read this package, at two different costs, and the split is the point:
   real `MeetingsUsagePort(db)` runs here, and the response carries a `quota` block
   (`meetings_per_month`, `meetings_used`, `resets_at`, `upgrade_url`) only when the resolved plan
   has a finite `meetings_per_month` — an unlimited plan omits the key, and meeting-api then does
-  no check at all.
+  no check at all. The SAME response also states `max_minutes_per_meeting` whenever the resolved
+  plan names one AT ALL (Free 60, Pro/Team 240) — a separate axis from `quota`, so it is NOT gated
+  on `meetings_per_month`: Pro/Team have no monthly meeting quota but still have a per-meeting
+  minute cap, and gating this field the same way `quota` is would silently drop it for both.
 
-meeting-api enforces both numbers; this package only resolves and reports them — see
+meeting-api enforces all three numbers (concurrency, monthly quota, per-meeting minutes); this
+package only resolves and reports them — see
 `core/meetings/services/meeting-api/src/meeting_api/bot_spawn/README.md` for the enforcement side
-(the exact refusal body, the 402 status, and the auto-join skip).
+(the exact refusal body, the 402 status, the auto-join skip, and the per-meeting minute cap's
+combination with the caller's own `automatic_leave.max_bot_time`).
 
 **The concurrent-bot cap is a product change for existing Free users**, stated once here: every
 Free user whose `max_concurrent_bots` column still reads the untouched legacy default (3) moves to

@@ -39,6 +39,7 @@ from ..service_authority import (
 )
 from .env_flags import env_flag
 from .invocation import build_invocation, build_workload_spec, mint_meeting_token
+from .max_bot_time import resolve_max_bot_time_ms
 from .ports import (
     AuthSessionBusy,
     AuthSessionNotConfigured,
@@ -101,6 +102,18 @@ def lobby_budget_ms() -> int:
     if seconds <= 0:
         return DEFAULT_LOBBY_BUDGET_S * 1000
     return int(seconds * 1000)
+
+
+def _with_waiting_room_default(automatic_leave: Optional[dict]) -> dict:
+    """``automatic_leave`` with ``waitingRoomTimeout`` filled from the lobby budget when absent.
+
+    A plain ``automatic_leave or {...}`` skips the fill whenever the dict is non-empty for ANY
+    reason — which a `maxBotTime`-only dict (no caller `automatic_leave` at all, just a plan cap)
+    routinely is. ``setdefault`` fills the one field that is missing without disturbing anything
+    the caller or the plan cap set."""
+    resolved = dict(automatic_leave or {})
+    resolved.setdefault("waitingRoomTimeout", lobby_budget_ms())
+    return resolved
 
 # Non-terminal statuses (parent's active set) — a prior meeting in one of these blocks a new spawn.
 _ACTIVE_STATUSES = ("requested", "joining", "awaiting_admission", "active", "stopping")
@@ -557,6 +570,25 @@ async def request_bot(
                     resets_at=quota.get("resets_at"), upgrade_url=quota.get("upgrade_url"),
                 )
 
+    # 1e. Per-plan minute cap — off the SAME best-effort `bot_context` fetch above (no
+    #     second admin-api call). `max_minutes_per_meeting` (Free 60, Pro/Team 240;
+    #     billing/catalog.py) becomes the bot's `automatic_leave.max_bot_time` ceiling, combined
+    #     with the caller's own `max_bot_time` (if any) by MINIMUM: a plan cap is a ceiling the
+    #     caller cannot raise, but they may always ask for something shorter. `resolve_max_bot_time_ms`
+    #     is the ONE place that combination happens (unit-tested in isolation). The bot then floors
+    #     this against its own deployment-wide `BOT_MAX_ACTIVE_MS` (env, default 4h) in
+    #     `deriveMaxActiveMs` — meeting-api never reads that env var, so the effective cap ends up
+    #     being the min of all three. Absent on both sides (no billing wired, no caller value) →
+    #     `None`, and `automatic_leave` carries no `maxBotTime` at all.
+    automatic_leave = dict(automatic_leave or {})
+    plan_max_minutes = bot_context.get("max_minutes_per_meeting") if isinstance(bot_context, dict) else None
+    effective_max_bot_time = resolve_max_bot_time_ms(
+        caller_max_bot_time_ms=automatic_leave.get("maxBotTime"),
+        plan_max_minutes_per_meeting=plan_max_minutes,
+    )
+    if effective_max_bot_time is not None:
+        automatic_leave["maxBotTime"] = effective_max_bot_time
+
     # 1c. Authenticated-bot mode (#724, deployment-scoped knob — Q1-A): when BOT_AUTHENTICATED is
     #     set, EVERY spawn carries the sealed invocation.v1 auth block, so the bot restores the
     #     deployment's provisioned browser session (`make login`) and joins signed-in. Config is
@@ -807,8 +839,11 @@ async def request_bot(
         s3_secret_key=auth_s3.get("s3_secret_key"),
         # Explicit caller windows win; otherwise omit everyoneLeftTimeout so the bot's
         # silence-window module default applies (the lobby window stays forgiving for
-        # human-in-the-loop dashboard joins).
-        automatic_leave=automatic_leave or {"waitingRoomTimeout": lobby_budget_ms()},
+        # human-in-the-loop dashboard joins). `automatic_leave` is ALWAYS a dict from 1e above
+        # (never falsy) once a plan cap can populate `maxBotTime` alone, so the waiting-room
+        # default is filled explicitly here rather than through an `or {...}` that a non-empty,
+        # waitingRoomTimeout-less dict would silently skip.
+        automatic_leave=_with_waiting_room_default(automatic_leave),
     )
 
     # 4b. THE SPAWN FENCE (F2, stage rev 193 row 26313). Re-read this row's user-stop flag from the

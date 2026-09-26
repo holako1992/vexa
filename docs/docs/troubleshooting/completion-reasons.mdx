@@ -56,7 +56,7 @@ request, your own policy, or the ordinary friction of putting a bot into someone
 | `join_failure` | The bot never reached the call: no admission signal ever appeared, or it died before it could join. | **Vexa** | Retry. If it repeats on one platform or one link, tell us — and read the [caveat on this value](#join_failure-is-currently-two-failures-under-one-name) first. |
 | `auth_session_missing` | The run needed a signed-in browser identity and there was no usable one — a meeting restricted to authenticated accounts, or a stored session that has died. | **Vexa, or your bot identity** | A re-spawn against a dead session cannot succeed. Self-hosting: re-provision with `make login` — see [Authenticated bots](/authenticated-bots). Hosted: tell us. |
 | `validation_error` | The request that created the run was not usable — wrong `native_meeting_id`, wrong platform value, malformed parameters. | **Yours** | Fix the request. [Bot won't join the meeting](/troubleshooting#bot-wont-join-the-meeting) lists the usual causes. |
-| `max_bot_time_exceeded` | The run hit its hard lifetime cap and was ended. | **Your policy** | Raise `automatic_leave.max_bot_time` if your meetings run longer. The transcript up to the cap is kept. |
+| `max_bot_time_exceeded` | The run hit its hard lifetime cap and was ended. | **Your policy, or your plan** | Raise `automatic_leave.max_bot_time` if your meetings run longer — but see [the per-plan minute cap](#the-per-plan-minute-cap) below: your plan's own per-meeting minute allowance narrows whatever you ask for, and only an upgrade raises THAT. The transcript up to the cap is kept. |
 
 ## Tuning the timeouts
 
@@ -82,6 +82,17 @@ curl -X POST "$API_BASE/bots" \
 
 A bot that keeps timing out in the lobby of hosts who admit slowly is a budget you can change
 today, not a defect you have to wait on.
+
+### The per-plan minute cap
+
+`max_bot_time` is a ceiling you can LOWER freely, never one you can raise past your plan. Each plan
+in the catalog (`billing/catalog.py`) carries its own per-meeting minute allowance — Free 60
+minutes, Pro and Team 240 — and the bot's actual cap is the SHORTER of that plan allowance and
+whatever `max_bot_time` you pass (missing either one just leaves the other in force). A Free-plan
+request for `automatic_leave: {"max_bot_time": 7200000}` (2h) still ends at 60 minutes with
+`max_bot_time_exceeded` — the request was accepted, the number asked for was simply above what the
+plan allows. [Upgrade](/how-to/billing) to raise the allowance itself; see [Read the resolved
+plan](/how-to/billing#read-the-resolved-plan) for `max_minutes_per_meeting` on your own account.
 
 ## Reading a reason honestly
 

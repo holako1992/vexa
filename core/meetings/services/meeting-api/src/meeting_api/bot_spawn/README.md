@@ -86,15 +86,20 @@ second network call added for the quota check.
   `users.max_concurrent_bots` column (`admin-api`'s `billing.catalog.effective_concurrent_cap`) —
   see `core/identity/services/admin-api/src/admin_api/app/billing/README.md` for the combination
   rule and the stated product change for existing Free users.
-- **The per-meeting minute cap is NOT enforced by this change.** The bot module
-  (`core/meetings/services/bot/src/index.ts`) has exactly one duration ceiling,
-  `deriveMaxActiveMs` — a DEPLOYMENT-WIDE `BOT_MAX_ACTIVE_MS` env var (default 4h), never a
-  per-invocation/per-plan value. `_resolve_automatic_leave` in `router.py` accepts a caller-sent
-  `max_bot_time` key (so it does not 422) but never translates it into anything the invocation or
-  the bot reads — it is silently dropped. Wiring a per-plan minute cap through to the bot is new
-  bot-runtime work, out of scope for this task; it is not built here.
+- **The per-meeting minute cap is a THIRD ceiling, resolved by `max_bot_time.py`.** The plan's
+  `max_minutes_per_meeting` (Free 60, Pro/Team 240) rides the SAME `bot_context` fetch as the
+  quota above (`bot_context["max_minutes_per_meeting"]` — stated whenever the plan names one AT
+  ALL, unlike `quota`, so Pro/Team's unlimited meeting COUNT does not hide their finite per-meeting
+  DURATION). `resolve_max_bot_time_ms` combines it with the caller's own
+  `automatic_leave.max_bot_time` (threaded through by `_resolve_automatic_leave` in `router.py` —
+  it used to be accepted in the allowed-keys set and silently dropped) by MINIMUM, and the result
+  rides the invocation as `automaticLeave.maxBotTime`. The bot module
+  (`core/meetings/services/bot/src/index.ts`) then floors that against its own DEPLOYMENT-WIDE
+  `BOT_MAX_ACTIVE_MS` env (`deriveMaxActiveMs`), so the effective cap ends up being the min of all
+  three ceilings without either side reading the other's config. A bot that hits the cap ends with
+  the existing `completion_reason: max_bot_time_exceeded` — no new reason.
 
-Tests: `../../../tests/test_monthly_quota.py`.
+Tests: `../../../tests/test_monthly_quota.py` · `test_max_bot_time.py`.
 
 ### Optional external service authority
 

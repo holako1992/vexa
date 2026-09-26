@@ -144,10 +144,16 @@ def _resolve_automatic_leave(value: Optional[object]) -> dict:
     resolved = {"waitingRoomTimeout": waiting_room}
     no_one_joined = timeout("no_one_joined_timeout")
     everyone_left = timeout("max_time_left_alone", "everyone_left_timeout")
+    # `max_bot_time` — the absolute lifetime cap (docs/troubleshooting/completion-reasons.mdx
+    # documents raising it). Threaded through to `maxBotTime`; `service.request_bot` combines it
+    # with the plan's per-meeting minute cap by minimum before it reaches the bot.
+    max_bot_time = timeout("max_bot_time")
     if no_one_joined is not None:
         resolved["noOneJoinedTimeout"] = no_one_joined
     if everyone_left is not None:
         resolved["everyoneLeftTimeout"] = everyone_left
+    if max_bot_time is not None:
+        resolved["maxBotTime"] = max_bot_time
     return resolved
 
 

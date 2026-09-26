@@ -51,6 +51,10 @@ export interface AutomaticLeave {
   waitingRoomTimeout?: number;
   noOneJoinedTimeout?: number;
   everyoneLeftTimeout?: number;
+  /** Absolute hard cap (ms) on the active phase — meeting-api's resolution of the caller's own
+   *  `max_bot_time` and their plan's per-meeting minute cap, by minimum. Unset leaves the bot on
+   *  its own deployment-wide `BOT_MAX_ACTIVE_MS` env alone (see `deriveMaxActiveMs` in index.ts). */
+  maxBotTime?: number;
 }
 
 /** The compile-time mirror of invocation.v1 `#/$defs/Invocation` (ajv is the runtime truth). */

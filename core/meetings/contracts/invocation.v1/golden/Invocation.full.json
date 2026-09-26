@@ -19,7 +19,7 @@
   "captureModes": ["audio", "video"],
   "captureSignalEnabled": true,
   "recordingUploadUrl": "https://s3.example.com/recordings/42",
-  "automaticLeave": { "waitingRoomTimeout": 300000, "noOneJoinedTimeout": 600000, "everyoneLeftTimeout": 120000 },
+  "automaticLeave": { "waitingRoomTimeout": 300000, "noOneJoinedTimeout": 600000, "everyoneLeftTimeout": 120000, "maxBotTime": 3600000 },
   "voiceAgentEnabled": true,
   "defaultAvatarUrl": "https://cdn.example.com/avatars/vexa.png",
   "authenticated": true,

@@ -11,7 +11,8 @@
       "properties": {
         "waitingRoomTimeout": { "type": "integer", "default": 300000 },
         "noOneJoinedTimeout": { "type": "integer", "default": 600000 },
-        "everyoneLeftTimeout": { "type": "integer", "default": 120000 }
+        "everyoneLeftTimeout": { "type": "integer", "default": 120000 },
+        "maxBotTime": { "type": "integer", "description": "absolute hard cap (ms) on the active phase — resolved from the caller's own automatic_leave.max_bot_time and the caller's plan's per-meeting minute cap, by minimum; unset means only the bot's own deployment-wide BOT_MAX_ACTIVE_MS env applies" }
       }
     },
     "Invocation": {

@@ -115,6 +115,30 @@ def test_bot_context_quota_carries_the_configured_upgrade_url(client, monkeypatc
     assert r.json()["quota"]["upgrade_url"] == "https://vexa.ai/pricing"
 
 
+# ── /internal/users/{id}/bot-context: `max_minutes_per_meeting` — the per-meeting minute cap
+#    meeting-api combines with the caller's own `automatic_leave.max_bot_time` by minimum ────────
+
+def test_bot_context_max_minutes_per_meeting_present_for_free_plan(client):
+    user_id, _token = _create_user_with_token(client, "free-minutes@vexa.ai")
+    r = client.get(f"/internal/users/{user_id}/bot-context", headers=_internal())
+    assert r.status_code == 200, r.text
+    assert r.json()["max_minutes_per_meeting"] == 60
+
+
+def test_bot_context_max_minutes_per_meeting_present_for_unlimited_meeting_count_plan(client):
+    """Team has NO monthly meeting quota (`quota` is absent, see the test above it) but DOES have a
+    per-meeting minute cap — the two fields are independent axes, and gating this one on
+    `meetings_per_month` (as `quota` is) would silently drop it for every paid plan."""
+    user_id, _token = _create_user_with_token(client, "team-minutes@vexa.ai")
+    client.patch(f"/admin/users/{user_id}", headers=_admin(),
+                json={"data": {"subscription_status": "active", "subscription_tier": "team"}})
+    r = client.get(f"/internal/users/{user_id}/bot-context", headers=_internal())
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "quota" not in body
+    assert body["max_minutes_per_meeting"] == 240
+
+
 def test_bot_context_max_concurrent_matches_validate(client):
     """Auto-join reads its per-user cap off bot-context; a manual POST /bots reads it off
     /internal/validate's x-user-limits. Both MUST resolve to the same number for one user, or the

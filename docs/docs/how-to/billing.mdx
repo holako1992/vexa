@@ -56,6 +56,13 @@ Returns the resolved plan, its limits, the current billing period, and usage so 
 grace window before falling back to Free, and a `canceled` one keeps its paid tier until
 `period_end` (Stripe's own "still paid for what you bought" shape) and resolves to Free only after.
 
+`limits.max_minutes_per_meeting` (Free 60, Pro/Team 240) is the OTHER cap `POST /bots` enforces,
+alongside the monthly meeting quota — every bot's active phase is hard-capped at that many minutes,
+taking the SHORTER of it and any `automatic_leave.max_bot_time` the request itself passes. The bot
+leaves with `completion_reason: max_bot_time_exceeded` when it hits the cap either way — see
+[completion reasons](/troubleshooting/completion-reasons#the-per-plan-minute-cap) for how the two
+combine and what to do about it.
+
 ## How the webhook keeps this true
 
 `POST /billing/webhook` is the **only** writer of a user's Stripe fields. It never trusts a

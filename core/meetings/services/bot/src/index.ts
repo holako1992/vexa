@@ -85,16 +85,26 @@ function meetingChannelId(inv: Invocation): string | number {
  *  `completed(max_bot_time_exceeded)` — a backstop so a bot can never live forever (the granular
  *  silence timeout that maps to left_alone is driven by the injected AlonenessSource). This is a
  *  GENEROUS backstop (default 4h, override with BOT_MAX_ACTIVE_MS in ms). We floor it at the largest
- *  configured lifecycle timeout + 60s so it cannot undercut a more specific lifecycle verdict. */
-const DEFAULT_MAX_ACTIVE_MS = 4 * 60 * 60 * 1000; // 4 hours
-function deriveMaxActiveMs(inv: Invocation, everyoneLeftMs: number, env: NodeJS.ProcessEnv = process.env): number {
+ *  configured lifecycle timeout + 60s so it cannot undercut a more specific lifecycle verdict.
+ *
+ *  `automaticLeave.maxBotTime`, when present, is meeting-api's own resolution of the caller's
+ *  `automatic_leave.max_bot_time` and their plan's per-meeting minute cap (Free 60min, Pro/Team
+ *  240min — billing/catalog.py), already combined by minimum. It narrows the deployment's own
+ *  `BOT_MAX_ACTIVE_MS` further — never widens past it — so the effective cap ends up being the min
+ *  of all three ceilings without this function reading anything billing-shaped itself. */
+export const DEFAULT_MAX_ACTIVE_MS = 4 * 60 * 60 * 1000; // 4 hours
+export function deriveMaxActiveMs(inv: Invocation, everyoneLeftMs: number, env: NodeJS.ProcessEnv = process.env): number {
   const al = inv.automaticLeave ?? {};
   const noOneJoined = al.noOneJoinedTimeout ?? 600_000;
   const waitingRoom = al.waitingRoomTimeout ?? 300_000;
   const MARGIN_MS = 60_000; // give the granular timeouts room to fire first
   const floor = Math.max(everyoneLeftMs, noOneJoined, waitingRoom) + MARGIN_MS;
   const override = Number(env.BOT_MAX_ACTIVE_MS);
-  const cap = Number.isFinite(override) && override > 0 ? override : DEFAULT_MAX_ACTIVE_MS;
+  const deploymentCap = Number.isFinite(override) && override > 0 ? override : DEFAULT_MAX_ACTIVE_MS;
+  const perMeetingCap = al.maxBotTime;
+  const cap = typeof perMeetingCap === 'number' && perMeetingCap > 0
+    ? Math.min(deploymentCap, perMeetingCap)
+    : deploymentCap;
   return Math.max(cap, floor);
 }
 
