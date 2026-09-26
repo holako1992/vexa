@@ -389,7 +389,8 @@ list row. Fetch a meeting's full `data` from `GET /meetings/{meeting_id}` — th
 unaffected and still returns every key.
 
 The list is also **paged**: with no `limit`, a default page size of `50` applies (pass `limit`/`offset`
-to page explicitly). `GET /bots` returns `has_more: true` when more rows remain past the current page.
+to page explicitly). Both `GET /bots` and `GET /meetings` return `has_more: true` when more rows
+remain past the current page — page by incrementing `offset` until it comes back `false`.
 Pass `exclude_planned=true` to either endpoint when rendering run/transcript history: the server
 removes `idle` and `scheduled` plans before applying `limit` and `offset`. An explicit `status=...`
 filter takes precedence. This keeps future Calendar entries on schedule surfaces without letting

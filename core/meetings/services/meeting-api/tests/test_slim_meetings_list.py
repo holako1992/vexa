@@ -211,16 +211,17 @@ def test_patch_response_projects_calendar_sources_on_both_routes(path):
 
 # ── C2 · default page size + honest has_more ───────────────────────────────────────────────────────
 
-def test_bots_has_more_reflects_more_not_hardcoded_false():
+@pytest.mark.parametrize("path", ["/bots", "/meetings"])
+def test_bots_has_more_reflects_more_not_hardcoded_false(path):
     store = InMemoryTranscriptStore()
     _seed_n(store, 2)
     c = _client(store)
     # one-per-page over two meetings → there IS more (was hardcoded `false` before #584)
-    r1 = c.get("/bots", headers=HEADERS, params={"limit": 1})
+    r1 = c.get(path, headers=HEADERS, params={"limit": 1})
     assert r1.status_code == 200 and len(r1.json()["meetings"]) == 1
     assert r1.json()["has_more"] is True
     # the whole (small) set on one page → no more
-    r2 = c.get("/bots", headers=HEADERS, params={"limit": 100})
+    r2 = c.get(path, headers=HEADERS, params={"limit": 100})
     assert r2.json()["has_more"] is False
 
 

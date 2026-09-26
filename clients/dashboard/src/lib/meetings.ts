@@ -6,6 +6,14 @@
  *  backend already decided.
  */
 
+/** The envelope GET /meetings returns: the page's rows plus whether another page exists past the
+ *  requested `limit`/`offset` — forwarded verbatim from meeting-api's own store (`has_more` is the
+ *  producer's word, never re-derived from page length on this side of the wire). */
+export interface MeetingsPageDTO {
+  meetings?: MeetingRowDTO[];
+  has_more?: boolean;
+}
+
 /** A row as meeting-api returns it from GET /meetings (live AND past). */
 export interface MeetingRowDTO {
   id: number | string;
@@ -131,17 +139,6 @@ export function sortMeetings(list: Meeting[]): Meeting[] {
     if (b.phase === "live" && a.phase !== "live") return 1;
     return when(b) - when(a);
   });
-}
-
-/** DB-48: meeting-api's `GET /meetings` returns no total and no `has_more` (read the handler in
- *  `meeting_api/collector/app.py` — it discards the store's own `has_more` return value). So
- *  "another page may exist" is inferred the standard way: the page came back exactly as long as
- *  the limit that was requested. This can be wrong in only one direction — a false "may have more"
- *  when the true total is an exact multiple of the page size, which costs one extra request that
- *  comes back empty and clears the flag. It never produces a false "no more", which would hide
- *  real rows. */
-export function pageMayContinue(pageLength: number, requestedLimit: number): boolean {
-  return pageLength > 0 && pageLength >= requestedLimit;
 }
 
 /** DB-48's merge rule for combining a freshly-fetched page of rows with what is already loaded —

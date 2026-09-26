@@ -144,17 +144,17 @@ async function handleGateway(req, res) {
 
   logRequest(gatewayLog, req);
 
-  // GET /meetings — DB-48: honours `limit`/`offset` exactly like meeting-api's own handler
-  // (`meeting_api/collector/app.py`'s `get_meetings`), and returns NO total and NO `has_more` —
-  // meeting-api's route discards the store's own `has_more` return value, so this stub mirrors
-  // that omission rather than being more helpful than the real backend (`lib/meetings.ts`'s
-  // `pageMayContinue` infers "more" from a full page for exactly this reason).
+  // GET /meetings — DB-48: honours `limit`/`offset` and reports `has_more`, exactly like
+  // meeting-api's own handler (`meeting_api/collector/app.py`'s `get_meetings`, which forwards
+  // the store's own `has_more` return value rather than discarding it).
   if (req.method === "GET" && parts.length === 1 && parts[0] === "meetings") {
     if (force.meetings) return sendJson(res, force.meetings, { error: "forced_failure" });
     const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : meetings.length;
     const offset = url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0;
-    const page = meetings.slice(offset, offset + (Number.isFinite(limit) ? limit : meetings.length));
-    return sendJson(res, 200, { meetings: page });
+    const effectiveLimit = Number.isFinite(limit) ? limit : meetings.length;
+    const page = meetings.slice(offset, offset + effectiveLimit);
+    const hasMore = offset + page.length < meetings.length;
+    return sendJson(res, 200, { meetings: page, has_more: hasMore });
   }
 
   // GET /transcripts/search?q=... — DB-44. Checked before the generic 3-segment transcripts

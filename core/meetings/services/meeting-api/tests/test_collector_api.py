@@ -75,6 +75,8 @@ def test_get_meetings_conforms():
     # the list orders by (non-terminal pin, event time), not created_at recency.
     assert body["meetings"][0]["platform"] == "google_meet"
     assert body["meetings"][1]["platform"] == "zoom"
+    # Both seeded rows fit under the unlimited/default page, so there is nothing more to page to.
+    assert body["has_more"] is False
 
 
 def test_get_meetings_filters():
@@ -88,7 +90,12 @@ def test_get_meetings_filters():
     assert [m["platform"] for m in body["meetings"]] == ["zoom"]
 
     r2 = client.get("/meetings", headers=GATEWAY_HEADERS, params={"limit": 1})
-    assert len(r2.json()["meetings"]) == 1
+    body2 = r2.json()
+    assert_api_conforms("MeetingListResponse", body2)
+    assert len(body2["meetings"]) == 1
+    # A page cut short of the caller's full history must say so — the store's own `has_more`,
+    # forwarded verbatim, not re-derived from page length client-side.
+    assert body2["has_more"] is True
 
 
 def test_get_meetings_can_exclude_planned_rows_before_pagination():
@@ -116,6 +123,7 @@ def test_get_meetings_empty_for_other_user_conforms():
     body = r.json()
     assert_api_conforms("MeetingListResponse", body)
     assert body["meetings"] == []
+    assert body["has_more"] is False
 
 
 def test_ws_authorize_subscribe_authorizes_owned_meeting():

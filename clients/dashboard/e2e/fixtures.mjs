@@ -93,9 +93,8 @@ const MEETING_ROWS = [
 /** DB-48: enough ADDITIONAL rows to force `GET /meetings` past one page at the dashboard's own
  *  page size (20) — `Archived Call 1`..`Archived Call 19`, ids 200..218, oldest-looking first so
  *  they sort after the six named rows above. 6 + 19 = 25 total: page one (limit 20, offset 0)
- *  returns 20 rows (all six named ones plus the first 14 archived ones — `pageMayContinue` reads
- *  that as "more may exist"), page two (offset 20) returns the remaining 5 (a short page — no
- *  third page). */
+ *  returns 20 rows (all six named ones plus the first 14 archived ones) with `has_more: true`,
+ *  page two (offset 20) returns the remaining 5 with `has_more: false` (no third page). */
 const ARCHIVED_ROWS = Array.from({ length: 19 }, (_, i) => {
   const n = i + 1;
   const day = String(20 + (i % 8)).padStart(2, "0"); // spreads across a few August dates

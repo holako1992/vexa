@@ -20,16 +20,18 @@ Client components. They receive identity as props (resolved on the server) and f
   (items with `implemented: true`), so this file is the one place that decides what the sidebar
   links to; nothing else in the tree references a nav destination.
 - `MeetingsView` — the list: phase tabs (`ui/Tabs`), polling, the "Add Bot" action that opens
-  `SendBotDialog`. DB-48 adds pagination: `GET /meetings` is fetched `limit`/`offset` (meeting-api
-  reports no total, so a "Load more" button — a real `<button>`, keyboard-operable by
-  construction, never a scroll-triggered auto-load — is shown whenever the last page came back
-  full; see `lib/meetings.ts`'s `pageMayContinue`). The phase-aware poll re-fetches the FULL
-  loaded window on every tick (`offset=0, limit=<rows on screen>`), not just page one — the rule
-  that keeps a live row loaded via "Load more" from dropping off; see the file's own header
-  comment and `mergeMeetingsPage`. No per-tab numeric badge is rendered any more (a count built
-  from loaded rows is not a total); one "N loaded" line replaces it. The box that used to be
-  labelled "Search meetings" is now "Filter loaded meetings" — it still narrows the rows already
-  on screen, but Enter now hands the same text to DB-44's `/search`, which asks the server across
+  `SendBotDialog`. DB-48 adds pagination: `GET /meetings` is fetched `limit`/`offset`, and its
+  response envelope carries the store's own `has_more` (`lib/meetings.ts`'s `MeetingsPageDTO`) —
+  a "Load more" button — a real `<button>`, keyboard-operable by construction, never a
+  scroll-triggered auto-load — is shown whenever the server says another page exists, and the
+  loaded-count line reads "all meetings loaded" once it says otherwise. The phase-aware poll
+  re-fetches the FULL loaded window on every tick (`offset=0, limit=<rows on screen>`), not just
+  page one — the rule that keeps a live row loaded via "Load more" from dropping off; see the
+  file's own header comment and `mergeMeetingsPage`. No per-tab numeric badge is rendered any more
+  (a count built from loaded rows is not a total); one "N loaded" line replaces it. The box that
+  used to be labelled "Search meetings" is now "Filter loaded meetings" — it still narrows the
+  rows already on screen, but Enter now hands the same text to DB-44's `/search`, which asks the
+  server across
   every meeting and every transcript instead of just what happens to be loaded; see the file's own
   header comment for why that reconciliation, not two competing boxes, is the right shape.
 - `SearchView` — DB-44's `/search` results: `GET /transcripts/search`, grouped by meeting

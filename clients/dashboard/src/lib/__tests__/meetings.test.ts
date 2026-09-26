@@ -8,7 +8,6 @@ import {
   formatClock,
   initialsOf,
   mergeMeetingsPage,
-  pageMayContinue,
   sortMeetings,
   toMeeting,
   toTranscript,
@@ -116,24 +115,6 @@ describe("initialsOf", () => {
     expect(initialsOf("Ada Lovelace")).toBe("AL");
     expect(initialsOf("Ada")).toBe("A");
     expect(initialsOf("  ")).toBe("?");
-  });
-});
-
-describe("pageMayContinue (DB-48)", () => {
-  it("a full page (as long as the requested limit) means more may exist", () => {
-    expect(pageMayContinue(20, 20)).toBe(true);
-  });
-
-  it("a short page means this was the last one", () => {
-    expect(pageMayContinue(3, 20)).toBe(false);
-  });
-
-  it("an empty page never continues, even if limit is 0-ish or odd", () => {
-    expect(pageMayContinue(0, 20)).toBe(false);
-  });
-
-  it("a page longer than the limit (should not happen, but must not hide a real gap) still continues", () => {
-    expect(pageMayContinue(25, 20)).toBe(true);
   });
 });
 

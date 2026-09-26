@@ -278,7 +278,7 @@ def build_router(
                 raise HTTPException(status_code=422, detail="'metadata' must be a JSON object")
             if not isinstance(metadata_filter, dict):
                 raise HTTPException(status_code=422, detail="'metadata' must be a JSON object")
-        meetings, _has_more = await store.list_meetings(
+        meetings, has_more = await store.list_meetings(
             user_id, status=status_filter, platform=platform, limit=limit, offset=offset,
             member_workspaces=member_workspaces, list_view=True, metadata_filter=metadata_filter,
         )
@@ -289,10 +289,10 @@ def build_router(
             user_id=user_id,
             fields={"count": len(meetings)},
         )
-        return JSONResponse(content={"meetings": meetings})
+        return JSONResponse(content={"meetings": meetings, "has_more": has_more})
 
-    # --- GET /bots → the dashboard's primary meetings-list source (api.v1). Same DB query + shape as
-    # GET /meetings, plus `has_more` for the proxy's pagination. ---
+    # --- GET /bots → the dashboard's primary meetings-list source (api.v1). Same DB query + shape,
+    # and the same `has_more` for the proxy's pagination. ---
     @router.get("/bots")
     async def list_bots(
         request: Request,

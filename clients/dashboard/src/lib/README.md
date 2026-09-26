@@ -20,10 +20,11 @@
   in-memory; it bounds one instance and says so.
 - **`meetings.ts`** — the shapes the UI renders and the mapping onto them. Presentation only: it
   picks a title, buckets a status, formats a time. It never reshapes a transcript. DB-48 adds
-  `pageMayContinue` (infers "another page may exist" from a full page, since `GET /meetings`
-  reports no total) and `mergeMeetingsPage` (the one rule for combining a fetched page with what
-  is already loaded — "append" for Load more, "replace" for the phase-aware poll's full-window
-  re-fetch, which is what keeps a live row on a later page from dropping off).
+  `MeetingsPageDTO` (the list envelope, `has_more` read verbatim off `GET /meetings` — meeting-api
+  forwards the store's own flag rather than the caller guessing from page length) and
+  `mergeMeetingsPage` (the one rule for combining a fetched page with what is already loaded —
+  "append" for Load more, "replace" for the phase-aware poll's full-window re-fetch, which is what
+  keeps a live row on a later page from dropping off).
 - **`search.ts`** — DB-44's two pure transforms for `/search`: `groupHitsByMeeting` (collects
   `GET /transcripts/search`'s flat hit list into per-meeting groups, in the producer's own rank
   order) and `highlightSnippet` (splits a snippet into plain/matched text segments for the

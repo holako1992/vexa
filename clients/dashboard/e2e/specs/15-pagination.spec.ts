@@ -3,7 +3,8 @@
  *
  *  Expected:
  *   1. The list loads the first page (20 rows) and shows "Load more"; clicking it appends the
- *      remaining 5 and the button disappears (`pageMayContinue` reading a short page as "no more").
+ *      remaining 5 and the button disappears — the stub's `has_more: false` on that response,
+ *      read verbatim by `MeetingsView.tsx`, same as the real meeting-api's own field.
  *   2. A meeting that only becomes live AFTER it was loaded via "Load more" (so it sits beyond the
  *      first page) is still shown live once the phase-aware poll re-fetches — proving the poll's
  *      "re-fetch the whole loaded window, not just page one" rule from `MeetingsView.tsx`'s header
@@ -32,6 +33,8 @@ test("Load more appends the remaining page and then hides itself", async ({ page
   await expect(page.getByText(/^25 loaded/)).toBeVisible();
   await expect(page.getByText("more available")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+  // The end of the list is stated honestly, not just left blank.
+  await expect(page.getByText("all meetings loaded")).toBeVisible();
 });
 
 test("Load more is reachable and activated by the keyboard alone", async ({ page }) => {
@@ -88,13 +91,12 @@ test("the poll's own GET /meetings carries limit = the number of rows currently 
 });
 
 test("'Load more' does not resurface once the loaded count happens to equal the true total", async ({ page }) => {
-  // Caught live (not by any unit test): once every row is loaded, the poll's own window-refresh
-  // re-fetch asks for exactly `limit=<rows loaded>` — which, when that number equals the actual
-  // total, comes back as a FULL page. Judging that by the same "full page ⇒ maybe more" rule
-  // `pageMayContinue` uses for a real next-page probe made "Load more" reappear forever after the
-  // very first poll tick past loading everything. `MeetingsView.tsx`'s `load()` now only applies
-  // that rule on the initial fetch; a poll only ever flips `hasMore` to `false` (a window that
-  // came back SHORTER than asked), never back to `true`.
+  // Once every row is loaded, the poll's own window-refresh re-fetch asks for exactly
+  // `limit=<rows loaded>` — which, when that number equals the actual total, comes back as a
+  // FULL page. `MeetingsView.tsx` reads `has_more` straight off that response rather than
+  // guessing "full page ⇒ maybe more": the store answers against the real total, so a poll that
+  // re-probes an already-complete window keeps reporting `has_more: false` and "Load more" stays
+  // gone.
   await signIn(page, testEmail("pag-no-phantom-more"));
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(page.getByText(/^25 loaded/)).toBeVisible();
