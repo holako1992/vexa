@@ -7,7 +7,7 @@
  *  actually groups by meeting rather than flattening every hit into one list.
  */
 import { test, expect } from "@playwright/test";
-import { forceSearch, gatewayRequests, resetStub, signIn, testEmail } from "./helpers";
+import { forceSearch, gatewayRequests, holdSearch, releaseSearch, resetStub, signIn, testEmail } from "./helpers";
 
 test.beforeEach(async ({ request }) => { await resetStub(request); });
 
@@ -81,13 +81,12 @@ test("a forced failure renders the error state with retry, not an empty result",
 
 test("the loading state is shown while the search request is in flight", async ({ page, request }) => {
   await signIn(page, testEmail("search-loading"));
-  // A slow-but-eventually-fine response would race the assertion in a real backend; forcing a
-  // failure here only proves loading renders BEFORE the outcome, which is all this spec checks —
-  // the success and failure paths each have their own spec above.
-  await forceSearch(request, 500);
-  const navigation = page.goto("/search?q=calendar");
+  await holdSearch(request);
+  await page.goto("/search?q=calendar");
   await expect(page.getByText(/Searching for/)).toBeVisible();
-  await navigation;
+  await releaseSearch(request);
+  await expect(page.getByText(/Searching for/)).toHaveCount(0);
+  await expect(page.locator("mark").first()).toBeVisible();
 });
 
 test("q never reaches GET /meetings, and reaches /transcripts/search intact", async ({ page, request }) => {

@@ -62,6 +62,15 @@ let entitlements = freeEntitlements();
  *  a session instead of 409. `/__control/billingCustomer` lets a spec set it directly, to prove
  *  the Manage button's success path without first driving a real checkout. */
 let stripeCustomerId = null;
+/** While non-null, every `GET /transcripts/search` waits on this gate before answering, so a spec
+ *  can observe the in-flight state for as long as it needs. `/__control/searchHold` opens it,
+ *  `/__control/searchRelease` lets every waiting request through. */
+let searchHold = null;
+
+function releaseSearchHold() {
+  if (searchHold) searchHold.release();
+  searchHold = null;
+}
 
 let users = new Map(); // email -> { id, email, name }
 let nextUserId = 1;
@@ -78,6 +87,7 @@ function resetAll() {
   force = { meetings: null, meetingDetail: null, botsQuota: false, search: null };
   entitlements = freeEntitlements();
   stripeCustomerId = null;
+  releaseSearchHold();
   users = new Map();
   nextUserId = 1;
   tokens.clear();
@@ -132,6 +142,18 @@ async function handleGateway(req, res) {
     force = { ...force, ...body };
     return sendJson(res, 200, { ok: true, force });
   }
+  if (url.pathname === "/__control/searchHold" && req.method === "POST") {
+    if (!searchHold) {
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      searchHold = { gate, release };
+    }
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === "/__control/searchRelease" && req.method === "POST") {
+    releaseSearchHold();
+    return sendJson(res, 200, { ok: true });
+  }
   if (url.pathname === "/__control/entitlements" && req.method === "POST") {
     entitlements = await readJsonBody(req);
     return sendJson(res, 200, { ok: true, entitlements });
@@ -171,11 +193,10 @@ async function handleGateway(req, res) {
   }
 
   // GET /transcripts/search?q=... — DB-44. Checked before the generic 3-segment transcripts
-  // branch, same ordering rule the real route uses ("search" is not a platform). A small
-  // artificial delay (unlike every other handler here) so the dashboard's "Searching…" loading
-  // state is actually observable in a spec rather than racing an instant local response.
+  // branch, same ordering rule the real route uses ("search" is not a platform). A spec that
+  // needs to see the in-flight state holds the answer with `/__control/searchHold`.
   if (req.method === "GET" && parts.length === 2 && parts[0] === "transcripts" && parts[1] === "search") {
-    await new Promise((r) => setTimeout(r, 150));
+    if (searchHold) await searchHold.gate;
     if (force.search) return sendJson(res, force.search, { error: "forced_failure" });
     const q = url.searchParams.get("q") || "";
     if (!q.trim()) return sendJson(res, 422, { detail: "'q' must not be blank" });

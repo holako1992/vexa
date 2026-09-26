@@ -58,6 +58,16 @@ export async function forceSearch(request: APIRequestContext, status: number): P
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { search: status } });
 }
 
+/** Hold every `GET /transcripts/search` answer until `releaseSearch` (or the next reset), so the
+ *  in-flight state is observable without racing the response. */
+export async function holdSearch(request: APIRequestContext): Promise<void> {
+  await request.post(`${GATEWAY_URL}/__control/searchHold`);
+}
+
+export async function releaseSearch(request: APIRequestContext): Promise<void> {
+  await request.post(`${GATEWAY_URL}/__control/searchRelease`);
+}
+
 /** Flip one fixture meeting's status directly (DB-48's "a live row on a later page stays visible"
  *  spec) — a shortcut around a real bot lifecycle, which is already covered by 05/13's specs. */
 export async function setMeetingStatus(request: APIRequestContext, id: number, status: string): Promise<void> {
