@@ -198,7 +198,7 @@ def test_a_step_may_need_two_domains_and_four_of_these_do():
     declarations ride the same decorator; the engine answers on the first absent one.
 
     SIX where the agent half is in the tree, five where it is not (`commit_meeting_summary`
-    joined the five-of-four count at): `prepare_meeting` is `production_agent`'s and needs
+    is the sixth): `prepare_meeting` is `production_agent`'s and needs
     both."""
     reg = _production_registry()
     both = {s for s, n in reg.step_needs.items() if {"agent", "meetings"} <= set(n)}

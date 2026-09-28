@@ -106,7 +106,7 @@ def effective_concurrent_cap(
     `meeting_api.bot_spawn.router._resolve_max_concurrent` enforces.
 
     The stored column PREDATES billing: every user carries it, defaulted to
-    `LEGACY_MAX_CONCURRENT_BOTS_DEFAULT`. Raising a user above their plan is the job
+    `LEGACY_MAX_CONCURRENT_BOTS_DEFAULT`. Raising a user above their plan is the admin overrides' job
     (`plan_override`/`quota_bonus`, applied inside `entitlements.resolve_plan` — the `plan_concurrent_bots`
     this function receives already reflects any override). This function's OWN job stays narrow: the
     stored column keeps its pre-billing meaning, an operator-settable HARD CEILING that can only
@@ -117,7 +117,7 @@ def effective_concurrent_cap(
         2/5, not clamped down to the legacy default of 3);
       * stored value has been explicitly set to something ELSE → the LOWER of the two wins (an
         operator's explicit value always narrows the cap, it never widens a user past their plan
-        — raising someone above their plan is the job, not this column's).
+        — raising someone above their plan is the admin overrides' job, not this column's).
 
     PRODUCT CHANGE, stated once here rather than left implicit in a diff: every existing Free
     user's column reads the untouched default of 3 (nobody has been through `PATCH

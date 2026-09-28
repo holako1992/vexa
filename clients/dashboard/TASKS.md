@@ -403,7 +403,7 @@ took the suite from 6 passing to 10.
 
 ---
 
-## Status at 2026-09-26 — paused, resume next week
+## Status at 2026-09-28 — paused, resume next week
 
 Work is done by Sonnet agents, one task per agent, verified by a coordinator that re-runs every
 claimed test before pushing. **Every agent reads [`AGENT-RULES.md`](AGENT-RULES.md) first.** It holds
@@ -438,6 +438,9 @@ the known environmental traps.
 | DB-77 | `ffe05203` + route hardening | `plan_override` and per-period `quota_bonus`; Users tab in the terminal admin panel |
 | DB-78 | `615d99db` | One dunning email per failed invoice (flows); Free-plan recording purge sweep (off unless `RETENTION_SWEEP_ENABLED`) |
 | DB-33, DB-34, MS connect | `faec48ca` | `/upcoming` (by day, join toggle, skip reason, sync now), `/calendar` health page, Connect Microsoft 365 | e2e 77/77 twice.
+| DB-76 (core part) | `3e6d9ea6` | Disposable-domain sign-up refused (vendored CC0 list, `SIGNUP_ALLOW_DISPOSABLE` override); sign-ups logged with IP |
+| DB-50, DB-51, DB-52 | `644105c8` | `/recordings` (download, delete), meeting audio player, click a line to seek, playing line highlighted. e2e 83/83 twice |
+| Wording sweep | `6abbfad7` + follow-up | Ticket ids and history narration removed from source comments added on this branch |
 | e2e fix | see log | Search loading spec holds the stub answer instead of racing a 150ms delay |
 
 ### Decisions waiting on the user
@@ -455,29 +458,41 @@ the known environmental traps.
 
 ### Next, in order (updated 2026-09-26, paused until next week)
 
-Everything in the old list items 1–5 is done (see the "Done" table). Remaining, in order:
+Everything in the old list items 1–5 is done (see the "Done" table), plus DB-76 (core part),
+DB-50/51/52 and the wording sweep. Remaining, in order:
 
 1. **Run the docker-gated suites once on a docker host** before anything else ships. Nothing below
    has been proven against Postgres/Redis: admin-api `test_google_calendar_oauth.py`,
    `test_microsoft_calendar_oauth.py`, `test_billing_quota_admission.py` (DB-72b, DB-77 cases),
-   `test_dunning_payment_failed_webhook.py`. Also run `npm test` in `core/meetings/services/bot`
-   (installs its deps) for `max-active-cap.test.ts`, never executed yet.
+   `test_dunning_payment_failed_webhook.py`, `test_signup_disposable_domain.py`. Also run `npm test`
+   in `core/meetings/services/bot` (installs its deps) for `max-active-cap.test.ts`, never executed.
 2. **Stripe webhook ingress** (decision 1 above, still open — needs the user). Until it exists,
    DB-73/DB-74b/DB-78 do nothing live: no plan change, no dunning email.
-3. **DB-50/51/52 recordings:** player with range proxy, click-segment-to-seek, download/delete.
-   Dashboard lane.
-4. **DB-45 export** (SRT/VTT/DOCX/PDF, Category-A libs only) and **DB-46 sharing** (`/s/<token>`).
-5. **DB-43 speaker rename** (verify annotate can carry a speaker map; else add a core field) and
+3. **DB-76 dashboard follow-ups** (small, dashboard lane):
+   - a refused sign-up shows no reason: the OAuth `signIn` callback in `authOptions.ts` returns
+     `false` for any admin-api failure, and the dev email door shows the raw JSON body. Map
+     `disposable_email_domain` to a readable message on `/login`.
+   - forward the client IP (`rateLimit.ts`'s `clientKey`, honouring `DASHBOARD_TRUST_PROXY`) to
+     admin-api as `X-Forwarded-For` in `lib/adminApi.ts`, so the sign-up log records the user's
+     address instead of the dashboard server's.
+4. **DB-12 identity oracle, then the rest of DB-76:** admin-api has no "email verified" field, so
+   "Free allowance only for verified identities" cannot be enforced yet. DB-12 must record OAuth
+   provenance at `POST /admin/users` (or first login); then `resolve_entitlements` gives unverified
+   users 0 meetings with a reason, overrides still winning.
+5. **DB-45 export** (SRT/VTT/DOCX/PDF, Category-A libs only) and **DB-46 sharing** (`/s/<token>`).
+6. **DB-43 speaker rename** (verify annotate can carry a speaker map; else add a core field) and
    **DB-47 tags**.
-6. **DB-40 live transcript** (SSE via `/agent/meeting/stream`), **DB-61 chat**, **DB-62 auto-title**.
-7. **DB-10 magic link**, **DB-11 account page**, **DB-20 first-run wizard**, **DB-21 empty/error
-   audit**, **DB-12 identity oracle always on**.
-8. **DB-81/82/83 settings** (webhooks UI, API keys, transcription settings), **DB-76 trial abuse
-   floor**.
-9. **DB-92/93/95**, **DB-90/91**, then **DB-94 security review last**.
-10. **DB-96 plus a wording sweep:** comments added in these waves carry ticket ids ("DB-72:",
-    "DB-32 added …" in `gateway/routes_manifest.py`, `gateway/app.py`, `bot_spawn/*`) and some
-    history narration. AGENTS.md wants the designed present. Remove them in one pass.
+7. **DB-40 live transcript** (SSE via `/agent/meeting/stream`), **DB-61 chat**, **DB-62 auto-title**.
+8. **DB-10 magic link**, **DB-11 account page**, **DB-20 first-run wizard**, **DB-21 empty/error
+   audit**.
+9. **DB-81/82/83 settings** (webhooks UI, API keys, transcription settings).
+10. **DB-92/93/95**, **DB-90/91**, then **DB-94 security review last** — include the recordings
+    raw proxy (`forwardRaw` in `src/app/api/vexa/[...path]/route.ts`) and the terminal admin
+    Users route.
+
+Ticket ids that remain on purpose after the sweep: `architecture.calm.json` (sealed; re-seal with
+`pnpm seal:arch` if you want them gone), `core/flows/contracts/flows.v1/carriers.json` and its
+golden (contract text), and one `TokenCipherError` message string in `token_cipher.py`.
 
 Open questions found while working (answer on the issue before building on them):
 
@@ -487,6 +502,9 @@ Open questions found while working (answer on the issue before building on them)
   `{auto_join}` body. Confirm this is the intended control.
 - **Dunning grace** is `period_end + 7 days` (DB-70's resolver), not "7 days after the failed
   payment" as DB-78's text reads. Usually the same day; decide which is the rule.
+- **Recordings are not plan-gated** (DB-52): plans carry `recording_retention_days` but no
+  on/off flag, so every plan gets list, player, download and delete. Add a flag to the catalog if
+  a plan should lose them.
 - **`quota_bonus`** (DB-77) is stamped to the current period and does not carry over; support
   re-sends it each month. Confirm.
 - DB-77's text assumed a terminal user-edit form existed; none did. A new Users tab was built in
