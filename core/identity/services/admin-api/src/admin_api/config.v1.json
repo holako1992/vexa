@@ -274,6 +274,20 @@
    "targets": ["compose"]
   },
   {
+   "key": "SIGNUP_ALLOW_DISPOSABLE",
+   "class": "defaulted",
+   "default": "false",
+   "description": "DB-76 operator override: `true` disables the disposable-email-domain refusal on `POST /admin/users` entirely (app/main.py create_user, disposable_domains.py). Any other value (unset, empty, a typo) leaves the block ON — read at call time, never a boot-time snapshot. Never affects an address that has already signed up.",
+   "targets": ["compose"]
+  },
+  {
+   "key": "SIGNUP_DISPOSABLE_EXTRA_DOMAINS",
+   "class": "defaulted",
+   "default": "(unset — only the vendored list applies)",
+   "description": "DB-76: comma-separated extra domains to treat as disposable on `POST /admin/users`, ADDED to the vendored list (`data/disposable_email_domains.txt`) rather than replacing it. For an operator-observed abuse domain the upstream list has not caught yet — no redeploy needed. Read at call time (disposable_domains.py `_extra_domains`).",
+   "targets": ["compose"]
+  },
+  {
    "key": "MICROSOFT_CALENDAR_TENANT_ID",
    "class": "defaulted",
    "default": "common",

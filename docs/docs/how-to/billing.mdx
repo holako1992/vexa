@@ -63,6 +63,66 @@ leaves with `completion_reason: max_bot_time_exceeded` when it hits the cap eith
 [completion reasons](/troubleshooting/completion-reasons#the-per-plan-minute-cap) for how the two
 combine and what to do about it.
 
+## Sign-up: the trial-abuse floor
+
+`POST /admin/users` — the one point a person is created (every sign-in path onboards through it,
+including the dashboard's own find-or-create) — refuses a disposable/throwaway email domain:
+
+```json
+{"error": "disposable_email_domain", "message": "This email domain is a disposable/throwaway provider and cannot be used to sign up. Use a permanent email address."}
+```
+
+as a typed **422**. What a person actually sees differs by sign-in door, and neither surfaces this message today
+(dashboard-side follow-up, not part of this change): the OAuth callback
+(`clients/dashboard/src/app/api/auth/authOptions.ts`) treats any `findOrCreateUserToken` failure
+alike — it logs `result.error` server-side and returns `false` from `signIn`, which NextAuth
+turns into a generic redirect to `/login` with no reason exposed; the dev email-login door
+(`api/auth/login/route.ts`) is closer but still rough — it forwards `result.error` verbatim as
+`{error: result.error}`, and `result.error` is `adminRequest`'s raw response *text*, i.e. the
+whole JSON body `{"error":"disposable_email_domain","message":"..."}` as one string, not the
+`message` field alone.
+
+The domain list (`admin_api/data/disposable_email_domains.txt`) is vendored from
+[disposable-email-domains/disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains)
+(CC0 1.0 — ADR-0004 Category A). Matching is registrable-domain-and-subdomains, case-insensitive:
+`user@sub.mailinator.com` matches a listed `mailinator.com`. Two env overrides, both read live
+(no redeploy to change either):
+
+- `SIGNUP_ALLOW_DISPOSABLE=true` — disables the block entirely.
+- `SIGNUP_DISPOSABLE_EXTRA_DOMAINS=foo.test,bar.test` — blocks additional domains the vendored
+  list hasn't caught up to yet, on top of it.
+
+**An address that already has an account is never affected** — the check only runs on the INSERT
+branch of `create_user`; the existing-row lookup that make find-or-create idempotent returns
+first, before the domain is ever checked, for every request against an address already onboarded.
+
+Every call to `POST /admin/users` also logs the domain and the client address the request
+carries, for abuse review — **never to block**, only to log:
+
+```
+signup: email_domain=mailinator.com ip=203.0.113.7
+```
+
+**What that IP actually is, stated honestly:** this route is called by the dashboard's own
+Next.js server, not directly by a browser, and that call does not currently forward any
+`X-Forwarded-For` header — so today the logged address is the dashboard server's own address
+(its container/pod IP or a reverse proxy in front of admin-api), not the signing-up person's
+browser. The dashboard already resolves a real client address for its own rate limiter, gated on
+`DASHBOARD_TRUST_PROXY` (`clients/dashboard/src/lib/rateLimit.ts`); it is not yet threaded
+through to the account-creation call. `_signup_client_ip` in `app/main.py` reads
+`X-Forwarded-For` first if a future dashboard change starts sending it, so wiring that through is
+a dashboard-side change with no core change needed.
+
+**Free allowance and identity verification (DB-12).** The product intent is that the Free
+plan's monthly meeting allowance applies only once an identity is verified. Today `admin-api`'s
+`users` table stores no verified/`email_verified` flag at all — the dev email-sign-in door
+(`DASHBOARD_ALLOW_EMAIL_LOGIN`) and the Google/Microsoft OAuth doors both resolve to the exact
+same `find_or_create` call with nothing distinguishing "an OAuth provider vouched for this
+address" from "nobody checked." Until that fact is captured somewhere in core (an OAuth-vs-other
+provenance field on the account, populated at `POST /admin/users` time or on first login),
+`resolve_entitlements` has no verified signal to read and none was added here — see this page's
+governing issue for the exact schema/plumbing DB-12 still needs.
+
 ## Dunning and grace (a payment fails)
 
 `invoice.payment_failed` moves a subscription to `subscription_status: past_due`. `resolve_plan`

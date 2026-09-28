@@ -34,6 +34,7 @@ from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import config_preflight
+from .. import disposable_domains as disposable_domains_mod
 from ..schema.models import APIToken, PlatformSetting, User
 from ..token_scope import VALID_SCOPES, generate_prefixed_token
 from .db import get_db
@@ -84,6 +85,30 @@ def normalise_email(email: str) -> str:
     case its person typed, mail already goes there, and a migration that rewrote every address to
     chase an index would be changing data to suit a query plan."""
     return (email or "").strip().lower()
+
+
+def _signup_client_ip(request: Request) -> str:
+    """DB-76: what this process can actually see about the caller's address for `POST
+    /admin/users`, logged for abuse review — never used to block (no IP-based refusal anywhere
+    in this module).
+
+    THE HONEST ANSWER, stated once here rather than assumed at the log call site: this route is
+    called by the dashboard's own Next.js server (`clients/dashboard/src/lib/adminApi.ts`
+    `createUser`), not directly by a browser, and that call carries no `X-Forwarded-For` or
+    similar header today — `adminRequest` sends only `Content-Type` and `X-Admin-API-Key`. So
+    `request.client.host` here is the DASHBOARD's own address (its container/pod IP, or a
+    reverse proxy in front of admin-api), not the end user's browsers's. The dashboard DOES
+    already resolve a real client address for its own rate limiter, gated on
+    `DASHBOARD_TRUST_PROXY` (`clients/dashboard/src/lib/rateLimit.ts` `clientKey`) — it is simply
+    not threaded through to this call. A future dashboard change forwarding that value as
+    `X-Forwarded-For` on the `createUser` request would upgrade this for free: it is checked
+    first, and used AS GIVEN (this service has no trusted-proxy-depth config of its own, unlike
+    the gateway's `edge_guard.py` — one untrusted hop is what a direct admin-api caller can send,
+    so the value is logged, not trusted for any decision).
+    """
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    peer = request.client.host if request.client else ""
+    return forwarded or peer or "unknown"
 
 
 def _dev_mode() -> bool:
@@ -607,7 +632,7 @@ def create_app() -> FastAPI:
     # --- admin tier: user + token CRUD ---
     @app.post("/admin/users", response_model=UserResponse,
               dependencies=[Depends(verify_admin_token)])
-    async def create_user(user_in: UserCreate, response: Response,
+    async def create_user(user_in: UserCreate, response: Response, request: Request,
                           db: AsyncSession = Depends(get_db)):
         # CASE-FOLDED, like the sign-in lookup two hundred lines down (R-B08). An exact match
         # here means `Anna.Smith@acme.com` does not find the account `anna.smith@acme.com`, so
@@ -631,6 +656,36 @@ def create_app() -> FastAPI:
         if existing:
             response.status_code = status.HTTP_200_OK
             return UserResponse.model_validate(existing)
+
+        # DB-76 trial-abuse floor, part 1: disposable-domain refusal. ONLY on the create path —
+        # an address already onboarded above returns 200 on the existing row without ever
+        # reaching here, so a domain added to the list after someone signed up never locks them
+        # out. `SIGNUP_ALLOW_DISPOSABLE=true` is the operator escape hatch (see
+        # `disposable_domains.py`'s module docstring for the full contract, including why this is
+        # a 422 and not a 403: the request is well-formed, the field's VALUE is refused).
+        if not disposable_domains_mod.signup_block_disabled() and \
+                disposable_domains_mod.is_disposable_domain(user_in.email):
+            log.warning(
+                "signup refused: disposable_email_domain domain=%r ip=%s",
+                normalise_email(user_in.email).rsplit("@", 1)[-1], _signup_client_ip(request),
+            )
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "disposable_email_domain",
+                    "message": "This email domain is a disposable/throwaway provider and cannot "
+                               "be used to sign up. Use a permanent email address.",
+                },
+            )
+
+        # DB-76 trial-abuse floor, part 2: log the signup with the client address this request
+        # actually carries, for review — never a block. See `_signup_client_ip`'s docstring for
+        # exactly what that address is (and is not) today.
+        log.info(
+            "signup: email_domain=%s ip=%s",
+            normalise_email(user_in.email).rsplit("@", 1)[-1], _signup_client_ip(request),
+        )
+
         # ── the one point a person enters ────────────────────────────────────────────────────
         # FIVE independent paths onboard somebody — the control MCP's sign-in verbs, its OAuth door,
         # its shared account_for helper, the terminal's own auth, and the flows mail door when an
