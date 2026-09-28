@@ -1,4 +1,4 @@
-/** Property 10 — DB-04's accessibility claim, proven with Playwright rather than a Lighthouse
+/** Property 10 — the accessibility claim, proven with Playwright rather than a Lighthouse
  *  score this harness cannot honestly measure (see `README.md`).
  *
  *  Expected:

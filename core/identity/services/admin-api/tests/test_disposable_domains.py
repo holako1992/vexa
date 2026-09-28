@@ -1,4 +1,4 @@
-"""DB-76 trial-abuse floor, pure unit coverage — no DB, no docker (`disposable_domains.py` reads
+"""This trial-abuse floor, pure unit coverage — no DB, no docker (`disposable_domains.py` reads
 only its vendored file and the process env). The full `POST /admin/users` → 422 path is in
 `test_signup_disposable_domain.py` (docker-gated, mirrors `test_email_case_folding.py`'s shape).
 """

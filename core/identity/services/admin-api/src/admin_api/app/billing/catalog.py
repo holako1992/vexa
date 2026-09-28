@@ -1,7 +1,7 @@
-"""The plan catalog — one file, one source of truth (DB-70).
+"""The plan catalog — one file, one source of truth.
 
 Changing a price tier's limits is a one-line edit here, not a hunt across the codebase. Every
-consumer (the resolver in this package, DB-72's spawn-time enforcement, DB-74's billing page)
+consumer (the resolver in this package, the spawn-time enforcement, the billing page)
 reads plans through `PLANS` / `get_plan`, never by re-deriving a number.
 
 UNLIMITED is a single explicit sentinel — `None` meaning "no ceiling" — never a large integer.
@@ -91,7 +91,7 @@ def get_plan(plan_id: Optional[str]) -> PlanLimits:
 
 
 #: `users.max_concurrent_bots`' column default (`schema.sql`) — the value every user carries until
-#: an operator explicitly sets a different one via `PATCH /admin/users/{id}`. DB-72
+#: an operator explicitly sets a different one via `PATCH /admin/users/{id}`. This
 #: (`effective_concurrent_cap` below) treats a stored value still AT this default as "no admin
 #: override yet", never as a deliberate 3-bot ceiling.
 LEGACY_MAX_CONCURRENT_BOTS_DEFAULT = 3
@@ -103,10 +103,10 @@ def effective_concurrent_cap(
     """Combine the resolved plan's `concurrent_bots` with the pre-billing
     `users.max_concurrent_bots` column into the ONE number `/internal/validate` returns as
     `max_concurrent` — the number the gateway injects as `x-user-limits` and
-    `meeting_api.bot_spawn.router._resolve_max_concurrent` enforces (DB-72).
+    `meeting_api.bot_spawn.router._resolve_max_concurrent` enforces.
 
     The stored column PREDATES billing: every user carries it, defaulted to
-    `LEGACY_MAX_CONCURRENT_BOTS_DEFAULT`. Raising a user above their plan is DB-77's job
+    `LEGACY_MAX_CONCURRENT_BOTS_DEFAULT`. Raising a user above their plan is the job
     (`plan_override`/`quota_bonus`, applied inside `entitlements.resolve_plan` — the `plan_concurrent_bots`
     this function receives already reflects any override). This function's OWN job stays narrow: the
     stored column keeps its pre-billing meaning, an operator-settable HARD CEILING that can only
@@ -117,14 +117,14 @@ def effective_concurrent_cap(
         2/5, not clamped down to the legacy default of 3);
       * stored value has been explicitly set to something ELSE → the LOWER of the two wins (an
         operator's explicit value always narrows the cap, it never widens a user past their plan
-        — raising someone above their plan is DB-77's job, not this column's).
+        — raising someone above their plan is the job, not this column's).
 
     PRODUCT CHANGE, stated once here rather than left implicit in a diff: every existing Free
     user's column reads the untouched default of 3 (nobody has been through `PATCH
     /admin/users/{id}` for this reason yet), so before this function existed a Free user could run
     up to 3 concurrent bots. The Free plan's `concurrent_bots` is 1, so `effective_concurrent_cap`
-    takes every untouched Free user from 3 down to 1 the moment DB-72 ships. That IS the product's
-    free tier, not a bug — DB-72's report states it plainly for the same reason this comment does.
+    takes every untouched Free user from 3 down to 1 the moment it ships. That IS the product's
+    free tier, not a bug — the report states it plainly for the same reason this comment does.
     """
     if (
         stored_max_concurrent_bots is None
@@ -134,7 +134,7 @@ def effective_concurrent_cap(
     return min(plan_concurrent_bots, stored_max_concurrent_bots)
 
 
-# ── Stripe price ↔ catalog plan (DB-73) ─────────────────────────────────────────────────────────
+# ── Stripe price ↔ catalog plan ─────────────────────────────────────────────────────────
 #
 # THIS IS THE ONE PLACE A STRIPE PRICE ID BECOMES A PLAN. The webhook handler
 # (`billing/stripe_webhook.py`) and the checkout endpoint (`main.py`) both go through

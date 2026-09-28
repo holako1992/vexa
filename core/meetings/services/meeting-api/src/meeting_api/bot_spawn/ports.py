@@ -344,7 +344,7 @@ class TranscriptionNotConfigured(Exception):
 
 
 class MeetingQuotaExceeded(Exception):
-    """The caller's MONTHLY meeting quota (DB-72) is exhausted — HTTP 402.
+    """The caller's MONTHLY meeting quota is exhausted — HTTP 402.
 
     Raised in ``service.request_bot`` BEFORE any DB write, from the ``quota`` block admin-api's
     ``/internal/users/{id}/bot-context`` reports (the SAME best-effort fetch the spawn flow already

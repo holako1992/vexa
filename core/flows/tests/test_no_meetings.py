@@ -53,7 +53,7 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 MEETINGS_STEPS_CORE = {
     "await_start", "dispatch_bot", "run_meeting", "first_meeting",
     "process_meeting", "email_minutes", "email_attendees", "drop_to_attendees",
-    # DB-60: reads the segment count, the transcript (grounding re-check) and the meeting row.
+    # Reads the segment count, the transcript (grounding re-check) and the meeting row.
     "commit_meeting_summary",
 }
 #: `prepare_meeting` needs BOTH domains and lives in the optional `flows_defs/production_agent.py`,
@@ -198,7 +198,7 @@ def test_a_step_may_need_two_domains_and_four_of_these_do():
     declarations ride the same decorator; the engine answers on the first absent one.
 
     SIX where the agent half is in the tree, five where it is not (`commit_meeting_summary`
-    joined the five-of-four count at DB-60): `prepare_meeting` is `production_agent`'s and needs
+    joined the five-of-four count at): `prepare_meeting` is `production_agent`'s and needs
     both."""
     reg = _production_registry()
     both = {s for s, n in reg.step_needs.items() if {"agent", "meetings"} <= set(n)}

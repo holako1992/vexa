@@ -15,10 +15,10 @@ export interface AdminUser {
   name?: string | null;
   max_concurrent_bots?: number;
   created_at?: string;
-  /** The billing fields DB-77's admin overrides live in — `data.plan_override` /
+  /** The billing fields the admin overrides live in — `data.plan_override` /
    *  `data.quota_bonus` / `data.quota_bonus_period_start`, alongside whatever the Stripe
    *  webhook wrote (subscription_tier, etc). Opaque to this client; the admin overrides panel
-   *  reads only the three DB-77 keys and leaves the rest untouched. */
+   * reads only the three keys above and leaves the rest untouched. */
   data?: Record<string, unknown>;
 }
 
@@ -74,7 +74,7 @@ export function getUserById(userId: string | number): Promise<AdminResult<AdminU
   return adminRequest<AdminUser>(`/admin/users/${encodeURIComponent(String(userId))}`, { method: "GET" });
 }
 
-/** DB-77 support comp: the ONLY writer of `plan_override`/`quota_bonus`/`max_concurrent_bots` —
+/** Support comp: the ONLY writer of `plan_override`/`quota_bonus`/`max_concurrent_bots` —
  *  a thin pass-through to admin-api's `PATCH /admin/users/{id}`, which validates the plan id
  *  (422 on unknown) and the bonus (422 if negative) and stamps `quota_bonus_period_start` to the
  *  user's CURRENT resolved period. This client invents nothing: it forwards exactly what the

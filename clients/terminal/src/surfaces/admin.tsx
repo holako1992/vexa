@@ -1,6 +1,6 @@
 "use client";
 /** Hidden admin surface — infra observability (workloads + meeting pipeline + probe) plus the
- *  DB-77 user-overrides form.
+ * user-overrides form.
  *
  *  HIDDEN: nothing registers at import time. The module probes `/api/admin/me` (server-verified
  *  email allowlist — see app/api/admin/gate.ts); only a 200 registers the "Infra" list + the
@@ -9,7 +9,7 @@
  *
  *  Layout: a persistent TRANSCRIPTION GOLDEN PROBE strip (gateway → meeting-api → runtime →
  *  redis carriers → transcript relay; run on demand) above three in-panel tabs — Workloads,
- *  Meeting pipeline (both read-only, client-side filters) and Users (DB-77's support-comp form:
+ * Meeting pipeline (both read-only, client-side filters) and Users (the support-comp form:
  *  look a user up by email, set `plan_override`/`quota_bonus`/`max_concurrent_bots`, save).
  *  Data: GET /api/admin/overview + POST /api/admin/probe → agent-api (internal tier);
  *  GET/PATCH /api/admin/users[/[id]] → admin-api's admin tier.
@@ -21,7 +21,7 @@ import { LayoutServiceId, type TabDescriptor } from "../workbench/layout";
 import { Icon } from "../ui-kit";
 import { meetingsOnly } from "../app/mode";
 
-// DB-77 admin overrides — the catalog plan ids a support agent may set as `plan_override`.
+// Admin overrides — the catalog plan ids a support agent may set as `plan_override`.
 // Mirrors `core/identity/services/admin-api/src/admin_api/app/billing/catalog.py`'s `PLANS`
 // keys; admin-api itself is the source of truth and rejects anything else with 422 — this list
 // is only for the dropdown's options, never trusted as validation.
@@ -293,7 +293,7 @@ function PipelineTab({ meetings, botStops, error }: { meetings: PipelineRow[]; b
   );
 }
 
-// ── users tab: DB-77 admin overrides (comp a user) ─────────────────────────────────
+// ── users tab: admin overrides (comp a user) ─────────────────────────────────
 interface AdminUserRecord {
   id: string | number;
   email: string;

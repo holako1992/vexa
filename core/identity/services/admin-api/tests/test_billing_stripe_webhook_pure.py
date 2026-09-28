@@ -1,4 +1,4 @@
-"""DB-73 — `billing.stripe_webhook`'s PURE core: `apply_subscription_patch` (a Stripe subscription
+"""`billing.stripe_webhook`'s PURE core: `apply_subscription_patch` (a Stripe subscription
 object -> the `PlatformBillingDataPatch`-shaped dict, or `None` for an unrecognized price) and the
 event-shape helpers that resolve WHICH subscription/user an event concerns.
 
@@ -110,7 +110,7 @@ def test_checkout_session_completed_names_its_subscription_and_client_reference(
 
 
 def test_checkout_session_with_no_subscription_is_none():
-    """A Checkout Session in a mode other than `subscription` (should not happen — DB-73 always
+    """A Checkout Session in a mode other than `subscription` (should not happen — This always
     requests mode=subscription — but the parser must not crash on it)."""
     assert subscription_id_for_event("checkout.session.completed", {"customer": "cus_abc"}) is None
 
@@ -133,7 +133,7 @@ def test_invoice_events_name_the_subscription_field():
 
 
 def test_an_invoice_with_no_subscription_is_none():
-    """A one-off invoice, unrelated to any subscription — DB-73 has nothing to re-read."""
+    """A one-off invoice, unrelated to any subscription — This has nothing to re-read."""
     assert subscription_id_for_event("invoice.paid", {"customer": "cus_x"}) is None
 
 

@@ -1,4 +1,4 @@
-/** DB-48 — pagination against the stub's now-27-row `/meetings` fixture (8 named rows + 19
+/** Pagination against the stub's now-27-row `/meetings` fixture (8 named rows + 19
  *  "Archived Call N" rows, `../fixtures.mjs`).
  *
  *  Expected:

@@ -1,4 +1,4 @@
-"""Free-plan recording retention purge (DB-78, DB-70's `recording_retention_days` catalog value).
+"""Free-plan recording retention purge (the `recording_retention_days` catalog value).
 
 WHAT THIS SWEEP DOES AND DOES NOT DO. `past_due` grace (`entitlements.resolve_plan`'s
 `grace_until`) never deletes anything — Free limits apply after grace, but the data stays. The
@@ -82,7 +82,7 @@ async def fetch_user_plan_id(
     admin_api_url: str, internal_secret: str, user_id: int, *, timeout_s: float = 10.0,
 ) -> Optional[str]:
     """This one candidate's owner's CURRENTLY RESOLVED plan id, via the same `bot-context` edge
-    every spawn already calls (DB-72) — `None` on any failure, which the sweep treats as "not
+    every spawn already calls — `None` on any failure, which the sweep treats as "not
     provably Free" (skip, never delete on an unresolved answer)."""
     if not admin_api_url or not internal_secret:
         return None

@@ -1,4 +1,4 @@
-/** DB-44 — global search results page. No nav-rail entry (see `Shell.tsx`'s header comment for
+/** Global search results page. No nav-rail entry (see `Shell.tsx`'s header comment for
  *  why): reached from the search box in the top bar, `Ctrl+K`/`Cmd+K`, or a link straight to a
  *  `?q=`. */
 import { Suspense } from "react";

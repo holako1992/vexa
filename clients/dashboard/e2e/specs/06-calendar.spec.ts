@@ -1,9 +1,9 @@
 /** Property 6 — connecting a calendar.
  *
- *  ICS half (unchanged by DB-31): add an ICS connection (`POST /user/calendars`), then toggle
+ * ICS half (unchanged): add an ICS connection (`POST /user/calendars`), then toggle
  *  auto-join (`PATCH /user/calendars/<id>`).
  *
- *  DB-31 half — Google Calendar is now the PRIMARY path, no text entry at all:
+ * This half — Google Calendar is now the PRIMARY path, no text entry at all:
  *   - `GET /user/calendars/google/authorize` → the dashboard's own `isTrustedGoogleAuthorizeRedirect`
  *     check → a real full-page navigation to `accounts.google.com`, intercepted here with
  *     `page.route` and redirected straight back to `/calendar/google/callback?code=…&state=…` —
@@ -65,7 +65,7 @@ test("connect an ICS calendar, then toggle auto-join", async ({ page, request })
   // Expand the row, then flip auto-join.
   await page.getByRole("button", { name: "Expand" }).click();
   await expect(page.getByText("Auto-join meetings from this calendar")).toBeVisible();
-  // DB-04: auto-join is a real `Toggle` (`role="switch"`) now, not a `<span role="checkbox">` —
+  // Auto-join is a real `Toggle` (`role="switch"`) now, not a `<span role="checkbox">` —
   // the control's accessible role changed on purpose, so the locator follows it.
   await page.getByRole("switch").click();
 

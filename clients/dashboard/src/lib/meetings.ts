@@ -35,7 +35,7 @@ export interface MeetingRowDTO {
     reason?: string | null;
     /** Whether the auto-join sweep should dispatch a bot for this planned row when its time
      *  arrives (`meeting_api/bot_spawn/auto_join.py`) — absent means on, same default the
-     *  producer applies. DB-33's Upcoming page reads and writes this (via `PATCH
+     * producer applies. the Upcoming page reads and writes this (via `PATCH
      *  /meetings/<id>`) as the per-meeting Join / Don't join override. */
     auto_join?: boolean;
     /** The producer's own reason the LAST auto-join attempt was skipped or failed
@@ -82,7 +82,7 @@ export interface Meeting {
   hasRecording: boolean;
   /** The id of this meeting's own recording (`data.recordings[0].id` — one recording per meeting
    *  in practice, `source: "bot"`; see `recordings/adapters.py`'s `list_meeting_recordings`, which
-   *  reads this exact same array). `null` when `hasRecording` is false. DB-50's audio player reads
+   * reads this exact same array). `null` when `hasRecording` is false. the audio player reads
    *  `GET /recordings/<recordingId>/master` from this — never a second lookup by meeting id, since
    *  the row already carries it. */
   recordingId: string | null;
@@ -91,7 +91,7 @@ export interface Meeting {
   meetingUrl: string | null;
   /** The producer's own join-failure reason, verbatim — null when the bot never failed to join. */
   joinFailureReason: string | null;
-  /** Whether the auto-join sweep will dispatch a bot for this planned row — DB-33's Join /
+  /** Whether the auto-join sweep will dispatch a bot for this planned row — the Join /
    *  Don't join override. Defaults to `true`, the same default the producer applies when the key
    *  is absent (`data.auto_join`, `bot_spawn/auto_join.py`). Meaningless once a meeting has left
    *  the "scheduled" phase, but always present so a caller never has to special-case it away. */
@@ -192,7 +192,7 @@ export function sortMeetings(list: Meeting[]): Meeting[] {
   });
 }
 
-/** DB-48's merge rule for combining a freshly-fetched page of rows with what is already loaded —
+/** The merge rule for combining a freshly-fetched page of rows with what is already loaded —
  *  the one place both callers (the "Load more" button and the phase-aware poll) go through, so the
  *  rule is defined once.
  *
@@ -218,7 +218,7 @@ export function mergeMeetingsPage(
 }
 
 /** One day's worth of scheduled meetings, soonest day first — the Upcoming page's grouping
- *  (DB-33). `dayKey` is the meeting's own event time truncated to a calendar day in the VIEWER's
+ * `dayKey` is the meeting's own event time truncated to a calendar day in the VIEWER's
  *  local timezone (never UTC — a 11pm-UTC meeting and a person eight hours west should not land
  *  on different days than what their own calendar app would show them), formatted `YYYY-MM-DD` so
  *  it sorts lexically the same as chronologically. */
@@ -301,7 +301,7 @@ export function toTranscript(segments: readonly SegmentDTO[] | undefined | null)
     .filter((l) => l.text.length > 0);
 }
 
-/** The transcript line whose `at` is the LATEST one at or before `currentTime` — DB-51's "the
+/** The transcript line whose `at` is the LATEST one at or before `currentTime` — the "the
  *  segment playing right now" highlight. `null` while nothing has played yet (or `lines` isn't
  *  loaded), and it stays on the LAST segment once playback runs past it — there is no "next"
  *  segment to hand off to. Segments are already producer-ordered (never re-sorted anywhere in

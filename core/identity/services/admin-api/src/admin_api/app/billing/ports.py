@@ -1,4 +1,4 @@
-"""The usage seam (DB-70 defines it, DB-71 fills it) — mirrors this repo's ports/adapters idiom
+"""The usage seam — one module defines it, another fills it — mirrors this repo's ports/adapters idiom
 (`meeting_api.bot_spawn.ports`, `gateway.ports`): the resolver depends on BEHAVIOR (a
 `typing.Protocol`), not a concrete meter, so `entitlements.resolve_entitlements` runs unchanged
 the day a real meter lands.
@@ -26,7 +26,7 @@ class UsageSnapshot:
 
 @runtime_checkable
 class UsagePort(Protocol):
-    """The meter DB-71 supplies. `resolve_entitlements` calls this once per resolution to learn
+    """The meter the resolver draws on. `resolve_entitlements` calls this once per resolution to learn
     how much of the resolved period's allowance is already spent."""
 
     async def usage_for_period(
@@ -40,7 +40,7 @@ class UsagePort(Protocol):
 
 
 class NullUsagePort:
-    """The adapter that exists until DB-71 lands. Reports every period as UNKNOWN usage — see
+    """The adapter that stands in until a real meter lands. Reports every period as UNKNOWN usage — see
     module docstring for why that is not 0. `resolve_entitlements` defaults to this so a caller
     who has not wired a real meter still gets a correctly-shaped (if unknown) answer."""
 

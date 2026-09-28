@@ -1,5 +1,5 @@
 "use client";
-/** DB-44 — global search results: `GET /transcripts/search`, grouped by meeting, snippets
+/** Global search results: `GET /transcripts/search`, grouped by meeting, snippets
  *  highlighted.
  *
  *  Three distinct states other than "here are your results" (`components/README.md`'s rule,

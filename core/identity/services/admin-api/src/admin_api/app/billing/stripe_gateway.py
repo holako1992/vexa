@@ -1,4 +1,4 @@
-"""The Stripe edge (DB-73) — signature verification + the REST calls checkout/portal/webhook need.
+"""The Stripe edge — signature verification + the REST calls checkout/portal/webhook need.
 
 NO STRIPE SDK. Stripe's REST API is form-encoded POSTs behind a bearer key, and the webhook
 signature check is ~20 lines of stdlib `hmac` — both comfortably inside "no new dependency"
@@ -185,7 +185,7 @@ class StripeClient:
         client_reference_id: str,
         metadata: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """`POST /v1/checkout/sessions`, `mode=subscription` — always: DB-73 sells subscriptions,
+        """`POST /v1/checkout/sessions`, `mode=subscription` — always: This sells subscriptions,
         never a one-off charge. `client_reference_id` carries OUR user id, so
         `checkout.session.completed` can resolve the session back to a user without a second
         lookup table (Stripe echoes it verbatim on the event)."""

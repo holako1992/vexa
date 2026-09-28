@@ -1,6 +1,6 @@
 "use client";
 /** The OAuth redirect landing page, shared by every calendar provider the dashboard connects
- *  (Google — DB-31, Microsoft 365 — DB-32/DB-33): reads `code`/`state` (or `error`) off the
+ * (Google, Microsoft 365): reads `code`/`state` (or `error`) off the
  *  query string and relays `{code, state}` to `POST /api/vexa/user/calendars/<provider>/exchange`.
  *
  *  `state` is checked ONLY by the core (`google_oauth.verify_state` / `microsoft_oauth.verify_state`

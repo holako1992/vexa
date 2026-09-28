@@ -1,4 +1,4 @@
-/** DB-60 (dashboard half) — the post-meeting summary panel. Five states, proven distinct against
+/** This (dashboard half) — the post-meeting summary panel. Five states, proven distinct against
  *  a REAL running stub (`fixtures.mjs`'s `SUMMARIES`):
  *
  *   - live (101): "appears after this meeting ends" — no summary fetch is even made.

@@ -695,7 +695,7 @@ def _attach_background_loops(
                 log.exception("signal tape janitor tick failed")
             await asyncio.sleep(signal_janitor_interval)
 
-    # Free-plan recording retention purge (DB-78). OFF by default — a self-host with no operator
+    # Free-plan recording retention purge. OFF by default — a self-host with no operator
     # decision made here must not start deleting recordings the day this ships; explicit opt-in
     # (`RETENTION_SWEEP_ENABLED=true`) is the same "capability degrade, not silently on" posture
     # `calendar_sync`/`auto_join` already take on their own missing-config paths, just spelled as

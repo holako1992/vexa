@@ -1,4 +1,4 @@
-"""The Stripe webhook's event handling (DB-73) — signature-verified in `stripe_gateway`, wired to
+"""The Stripe webhook's event handling — signature-verified in `stripe_gateway`, wired to
 the DB in `main.py`. This module is the part that can be reasoned about and tested without a wire:
 what does EACH event type do to `users.data`, given a subscription object.
 
@@ -31,7 +31,7 @@ this module implements. See `tests/test_billing_stripe_webhook.py` for both scen
 
 `apply_subscription_patch` is the pure core (subscription dict in, `PlatformBillingDataPatch`-shaped
 dict out, or `None` when the price does not resolve to a catalog plan) — no I/O, no clock read
-beyond what `subscription` already carries, so DB-73's acceptance table is a table of
+beyond what `subscription` already carries, so the acceptance table is a table of
 `apply_subscription_patch(subscription) == expected` assertions.
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ log = logging.getLogger("admin_api.billing.stripe_webhook")
 #: Stripe event types this webhook acts on. Every one of them is handled by the SAME
 #: subscription-affecting path (`main.py`'s webhook route): resolve the subscription id, re-read
 #: it, apply. Anything else (payment_method.*, customer.updated, ...) is acknowledged 200 and
-#: otherwise ignored — DB-73 does not need it, and acknowledging keeps Stripe from retrying.
+#: otherwise ignored — This does not need it, and acknowledging keeps Stripe from retrying.
 HANDLED_EVENT_TYPES = frozenset(
     {
         "checkout.session.completed",

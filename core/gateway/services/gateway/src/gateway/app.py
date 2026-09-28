@@ -761,7 +761,7 @@ def create_app(
             return error
         return await _forward("DELETE", _admin(f"/user/calendars/{segment}"), request)
 
-    # ---- DB-30: Google Calendar OAuth connect. Both routes are identity's (admin-api owns the
+    # ---- Google Calendar OAuth connect. Both routes are identity's (admin-api owns the
     # client secret and the encrypted refresh token — see core/identity's calendars.py/google_oauth.py);
     # scoped bot,tx like the model/transcription/entitlements self-serve routes, not bot-only like
     # the ICS CRUD above, per routes.v1.json. ----
@@ -773,7 +773,7 @@ def create_app(
     async def google_calendar_exchange(request: Request):
         return await _forward("POST", _admin("/user/calendars/google/exchange"), request)
 
-    # ---- DB-32: Microsoft Graph Calendar OAuth connect. Same shape as the Google pair above —
+    # ---- Microsoft Graph Calendar OAuth connect. Same shape as the Google pair above —
     # identity owns the client secret and the encrypted refresh token (see core/identity's
     # calendars.py/microsoft_oauth.py); scoped bot,tx per routes.v1.json. ----
     @app.get("/user/calendars/microsoft/authorize")
@@ -822,12 +822,12 @@ def create_app(
     async def get_user_entitlements(request: Request):
         return await _forward("GET", _admin("/user/entitlements"), request)
 
-    # ---- Stripe checkout + portal (DB-73). Scoped BOT_OR_TX like the rest of /user/* and
+    # ---- Stripe checkout + portal. Scoped BOT_OR_TX like the rest of /user/* and
     # /billing/*; identity mints the Checkout/Portal session, Stripe hosts the payment UI, this
     # edge never sees card data. The webhook (POST /billing/webhook, admin-api) is deliberately
     # NOT declared here — Stripe cannot present an x-api-key, and every route this edge fronts
     # requires one (even the two UNSCOPED rows, /health and /auth/me, still authenticate — see
-    # ROUTE_SCOPES/_authorize). See the DB-73 report for the ingress options that need a
+    # ROUTE_SCOPES/_authorize). See the report for the ingress options that need a
     # coordinator decision before that route can be added to routes.v1.json.
     @app.post("/billing/checkout")
     async def create_billing_checkout(request: Request):

@@ -1,5 +1,5 @@
 "use client";
-/** Bot status + Stop recording (DB-41).
+/** Bot status + Stop recording.
  *
  *  Status comes from `GET /bots/status` (the caller's currently-running bots) rather than only
  *  the meeting row's own `status`, per the task's own spec — it is the same source the list

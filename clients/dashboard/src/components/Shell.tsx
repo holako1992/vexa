@@ -7,7 +7,7 @@
  *  hold state; the identity it renders is resolved on the server and handed down as a prop, so
  *  the browser is never the source of who you are.
  *
- *  DB-44 — global search: the top bar carries a search box, not a nav-rail entry. `nav.ts`'s items
+ * Global search: the top bar carries a search box, not a nav-rail entry. `nav.ts`'s items
  *  are DESTINATIONS you revisit (Meetings, Billing, eventually Upcoming/Calendar); search is an
  *  ACTION you take from wherever you already are, the way GitHub, Linear and Notion all put it in
  *  a persistent header bar rather than the sidebar. A rail entry would also cost a click to reach
@@ -165,7 +165,7 @@ export function Shell({ user, children }: { user: ShellUser; children: React.Rea
             </div>
           </form>
           {/* Mobile fallback: the inline box above is hidden below `sm` for space, but search must
-              still be reachable from every page (DB-44) — a plain link to /search, no query. */}
+              still be reachable from every page — a plain link to /search, no query. */}
           <Link
             href="/search"
             aria-label="Open search"

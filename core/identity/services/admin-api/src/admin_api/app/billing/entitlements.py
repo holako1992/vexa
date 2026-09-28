@@ -1,17 +1,17 @@
-"""The entitlement resolver (DB-70) — maps a user's stored billing data to what they are
+"""The entitlement resolver — maps a user's stored billing data to what they are
 actually allowed right now.
 
 `resolve_plan` is the pure core: no database, no clock read, no I/O. It takes the user's
 `users.data` JSON blob (the fields `PlatformBillingDataPatch` writes into it) and `now` as plain
-arguments and returns a `ResolvedPlan` — deterministic, so the acceptance table in DB-70's issue
+arguments and returns a `ResolvedPlan` — deterministic, so the acceptance table in the issue
 is a table of `resolve_plan(data, now) == expected` assertions, not a fixture-and-mock exercise.
 
 `resolve_entitlements` is the thin async layer on top: it calls `resolve_plan` for the plan/period
-and then asks a `ports.UsagePort` how much of that period is already spent. DB-72 (quota
+and then asks a `ports.UsagePort` how much of that period is already spent. This (quota
 enforcement at spawn) is the intended caller of `resolve_entitlements` — see its docstring for the
 exact signature.
 
-**DB-77 admin overrides** are applied inside `resolve_plan`, at the very end, on top of whatever
+**Admin overrides** are applied inside `resolve_plan`, at the very end, on top of whatever
 the Stripe-derived resolution above produced. There is exactly ONE place a plan is decided
 (`resolve_plan`) and every consumer of overrides — `/user/entitlements`, `/internal/validate`,
 `/internal/users/{id}/bot-context` (meeting-api's quota check) — reads through it, so an admin
@@ -68,17 +68,17 @@ class ResolvedPlan:
     catalog_version: str
     #: The raw tier string, when it did not match any entry in `catalog.PLANS` (else `None`).
     #: Set so a caller can tell "resolved to free because nothing was ever set" apart from
-    #: "resolved to free because the stored tier was garbage" — the latter is DB-70's acceptance
+    #: "resolved to free because the stored tier was garbage" — the latter is the acceptance
     #: row that must be logged, not silently coerced.
     unrecognized_tier: Optional[str] = None
-    #: DB-77: the raw `plan_override`, when it named a catalog plan and won over the
+    #: the raw `plan_override`, when it named a catalog plan and won over the
     #: Stripe-derived tier above (`None` when no override was applied, whether because none was
     #: stored or because it named a plan `catalog.PLANS` no longer has — see `unrecognized_plan_override`).
     plan_override: Optional[str] = None
-    #: DB-77: `plan_override` was stored but did not match any entry in `catalog.PLANS` — same
+    #: `plan_override` was stored but did not match any entry in `catalog.PLANS` — same
     #: "log and ignore, never guess" posture as `unrecognized_tier`.
     unrecognized_plan_override: Optional[str] = None
-    #: DB-77: how many extra meetings `quota_bonus` actually added to this resolution's
+    #: how many extra meetings `quota_bonus` actually added to this resolution's
     #: `limits.meetings_per_month` — 0 when no bonus is stored, it targets a different period, or
     #: the plan's meetings are already unlimited. Reported so a caller can show "+1 comped" rather
     #: than re-deriving it from the raw stored fields.
@@ -142,14 +142,14 @@ def _free_result(
 
 def resolve_plan(data: Dict[str, Any], now: datetime) -> ResolvedPlan:
     """The pure resolution — see module docstring. `data` is the user's `users.data` blob (the
-    `PlatformBillingDataPatch` fields, plus DB-77's `plan_override`/`quota_bonus`/
-    `quota_bonus_period_start`; anything else in the blob is ignored). DB-77 overrides are the
+    `PlatformBillingDataPatch` fields, plus the `plan_override`/`quota_bonus`/
+    `quota_bonus_period_start`; anything else in the blob is ignored). Admin overrides are the
     LAST step, applied uniformly on whatever `_resolve_subscription_plan` below produced."""
     return _apply_admin_overrides(_resolve_subscription_plan(data, now), data)
 
 
 def _apply_admin_overrides(plan: ResolvedPlan, data: Dict[str, Any]) -> ResolvedPlan:
-    """DB-77: `plan_override` wins over the Stripe-derived tier; `quota_bonus` adds to
+    """`plan_override` wins over the Stripe-derived tier; `quota_bonus` adds to
     `meetings_per_month` for the one period it was granted for. See module docstring."""
     plan_id = plan.plan_id
     limits = plan.limits
@@ -194,8 +194,8 @@ def _apply_admin_overrides(plan: ResolvedPlan, data: Dict[str, Any]) -> Resolved
 
 
 def _resolve_subscription_plan(data: Dict[str, Any], now: datetime) -> ResolvedPlan:
-    """The Stripe-derived resolution, before DB-77's admin overrides (`resolve_plan` applies
-    those). Unchanged from DB-70 except for the rename."""
+    """The Stripe-derived resolution, before the admin overrides (`resolve_plan` applies
+    those) — unchanged except for the rename."""
     now = _as_utc(now)
     status = data.get("subscription_status")
     tier = data.get("subscription_tier")
@@ -273,12 +273,12 @@ async def resolve_entitlements(
 ) -> ResolvedEntitlements:
     """`resolve_plan` plus usage for that plan's period.
 
-    **DB-72 (quota enforcement at spawn) calls this function** — `resolve_entitlements(user.data,
+    **This (quota enforcement at spawn) calls this function** — `resolve_entitlements(user.data,
     datetime.now(timezone.utc), user.id, usage_port)` — to get the plan's limits (`.plan.limits`,
     including `concurrent_bots`, which the gateway/`x-user-limits` path already enforces
     separately, and `meetings_per_month`, which nothing enforces yet) alongside how much of the
-    current period is already spent (`.usage`, `None` fields meaning UNKNOWN until DB-71 wires a
-    real `UsagePort`). `usage_port` defaults to `ports.NullUsagePort()` when omitted.
+    current period is already spent (`.usage`, `None` fields meaning UNKNOWN until a caller wires
+    a real `UsagePort`). `usage_port` defaults to `ports.NullUsagePort()` when omitted.
     """
     port = usage_port if usage_port is not None else NullUsagePort()
     plan = resolve_plan(data, now)

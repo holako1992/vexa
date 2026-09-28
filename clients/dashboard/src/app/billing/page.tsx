@@ -1,4 +1,4 @@
-/** `/billing` (DB-74's read-only half): plan, usage, and billing period, from `GET
+/** `/billing` (the read-only half): plan, usage, and billing period, from `GET
  *  /api/vexa/user/entitlements`. Composed from `Shell` the same way every other page is; see
  *  `src/components/BillingView.tsx` for the view itself. */
 import { redirect } from "next/navigation";

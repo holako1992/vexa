@@ -1,4 +1,4 @@
-/** Playwright config for the dashboard's browser harness (DB-02).
+/** Playwright config for the dashboard's browser harness.
  *
  *  Two `webServer`s, booted fresh for every run so "green" means "cold start works":
  *    1. the stub backend (`stub-server.mjs`) — both of the dashboard's real upstreams, faked.

@@ -373,7 +373,7 @@ def parse_google_events(events: list[dict], *, now: datetime,
     """Google Calendar API ``events.list(singleSevents=true)`` items → the SAME
     ``{"events": [PlannedEvent], "cancelled_uids": [uid]}`` shape ``parse_ics`` produces, so
     ``sync_user`` (below) drives BOTH providers through one code path and an equivalent event
-    from either one yields an identical planned-meeting row (the parity DB-30 requires).
+    from either one yields an identical planned-meeting row (the same parity required of both).
 
     ``singleEvents=true`` already expands a recurring series into one item per occurrence inside
     the caller's requested window, each carrying ``recurringEventId`` (absent on a one-off event,
@@ -516,8 +516,8 @@ def parse_microsoft_events(events: list[dict], *, now: datetime,
     """Microsoft Graph ``calendarView`` items → the SAME ``{"events": [PlannedEvent],
     "cancelled_uids": [uid]}`` shape ``parse_ics``/``parse_google_events`` produce, so
     ``sync_user`` drives all three providers through one code path and an equivalent event from
-    any one of them yields an identical planned-meeting row (the same parity DB-30 established
-    for Google, DB-32 extends to Microsoft).
+    any one of them yields an identical planned-meeting row (the same parity Google's adapter
+    established, extended here to Microsoft).
 
     ``calendarView`` already expands a recurring series into one item per occurrence inside the
     requested window, each instance carrying ``seriesMasterId`` (absent on a one-off event, which

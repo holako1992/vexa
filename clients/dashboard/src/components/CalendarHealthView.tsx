@@ -1,5 +1,5 @@
 "use client";
-/** `/calendar` (DB-34): per connection, the health the "Connect your calendar" panel
+/** `/calendar`: per connection, the health the "Connect your calendar" panel
  *  (`SendBotDialog`'s Calendar tab) has no room to show — last sync time, last error, how many
  *  events the last sync actually touched, and `reconnect_needed` with a real Reconnect action. A
  *  failed feed shows that action rather than going silently stale.
@@ -13,7 +13,7 @@
  *  "Never synced yet", not an error.
  *
  *  This page never invents its own connect flow: with no connections at all, it points at the Add
- *  Bot dialog's Calendar tab (DB-31/DB-33's actual connect surface) rather than duplicating
+ * Bot dialog's Calendar tab (the actual connect surface) rather than duplicating
  *  Connect Google Calendar / Connect Microsoft 365 / Other calendar (ICS) here.
  */
 import { useCallback, useEffect, useState } from "react";

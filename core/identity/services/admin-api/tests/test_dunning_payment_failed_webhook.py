@@ -1,4 +1,4 @@
-"""DB-78 — `POST /billing/webhook`'s `invoice.payment_failed` handling publishes ONE
+"""`POST /billing/webhook`'s `invoice.payment_failed` handling publishes ONE
 `payment.failed` fact to flows, in addition to the `subscription.changed` fact every handled
 event already gets (see `test_billing_stripe_webhook_endpoint.py`). Idempotent on the INVOICE:
 a redelivered event and a Stripe retry of the same unpaid invoice both admit as the SAME

@@ -1,4 +1,4 @@
-/** `/calendar` (DB-34): calendar health — last sync, last error, events touched, and a Reconnect
+/** `/calendar`: calendar health — last sync, last error, events touched, and a Reconnect
  *  action for any connection whose grant needs it. See `src/components/CalendarHealthView.tsx`
  *  for the view itself. Distinct from `google/` and `microsoft/`, this directory's OAuth-callback
  *  subdirectories (see their own README), which have no nav-rail entry of their own. */

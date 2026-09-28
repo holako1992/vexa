@@ -1,6 +1,6 @@
 "use client";
 /** Inline rename + delete, the two mutations a meeting's own owner can make from its header
- *  (DB-42). Both are hidden outright on a shared meeting — the viewer is not the owner, and the
+ * Both are hidden outright on a shared meeting — the viewer is not the owner, and the
  *  client does not rely on the server's own 403 to hide a control that was never going to work.
  *
  *  Rename writes through `POST /meetings/<id>/annotate` (`{title}`), not `PATCH /meetings/<id>`:

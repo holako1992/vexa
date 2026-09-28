@@ -1,5 +1,5 @@
-"""DB-60b — an AD HOC bot (dashboard "Send Bot", MCP `request_meeting_bot`, or any bot started
-without a calendar invite) must still get a DB-60 summary, even though it never carries an invite.
+"""An AD HOC bot (dashboard "Send Bot", MCP `request_meeting_bot`, or any bot started
+without a calendar invite) must still get a summary, even though it never carries an invite.
 
 THE REPRODUCTION. `invite_intake`'s `emit_completed` is not the only producer of
 `meeting.completed`: `core/meetings/services/meeting_api/src/meeting_api/app.py` calls
@@ -10,11 +10,11 @@ byte-for-byte from that function's own `return`, not guessed: `{uid, meeting_id,
 completion_reason}`, every value a `str(...)`. There is no `organizer`, no `title`, no
 `participants` — meeting-api's domain holds no invite and cannot invent one.
 
-Before DB-60b, `post_meeting` given exactly this ref shape:
+Before, `post_meeting` given exactly this ref shape:
   1. `process_meeting` ran fine (every field it reads is `ctx.refs.get(...)`).
   2. `email_minutes` raised an uncaught `KeyError` on `ctx.refs["organizer"]` — never even reaching
      `ctx.refs["title"]` — which failed the WHOLE reaction and meant `commit_meeting_summary`
-     (DB-60, the flow's last step) never ran for a single dashboard-sent meeting.
+     (the flow's last step) never ran for a single dashboard-sent meeting.
   3. Patching only #2, `drop_to_attendees` then crashed too: with no `email_minutes` link to reuse
      it called `mint_scaffold("post-meeting", "the organiser", ...)` — the placeholder string the
      old fallback `ctx.refs.get("organizer") or "the organiser"` produced — which is not an email
@@ -74,7 +74,7 @@ class Desks:
         self.writes: list[tuple[str, str]] = []
         self.inits: list[str] = []
         self.users: list[str] = []          # every `ensure_platform_user(email)` call
-        self.owner_emails: dict[str, str] = {}   # uid -> email, for `platform_user_email` (DB-80)
+        self.owner_emails: dict[str, str] = {}   # uid -> email, for `platform_user_email`
 
     def uid_of(self, email):
         self.users.append(email)
@@ -96,7 +96,7 @@ class Desks:
         return self.files.get((uid, path))
 
     def email_of(self, uid):
-        """`platform_user_email(uid)` — the reverse lookup DB-80's `email_owner_ready` uses.
+        """`platform_user_email(uid)` — the reverse lookup the `email_owner_ready` uses.
         Empty by default (no account on file), same as the real door for a uid it does not know."""
         return self.owner_emails.get(str(uid), "")
 
@@ -186,16 +186,16 @@ class TestTheRedTrace:
 def test_email_minutes_used_to_crash_on_a_bare_ref_read(monkeypatch):
     """THE RED: called with exactly meeting-api's ref shape and NO organizer-guard, `email_minutes`
     raises `KeyError` reaching for `ctx.refs["organizer"]` — never even reaching the mail send.
-    Reproduced here by calling the guard-free tail of the step directly (the fixed step no longer
+    Reproduced here by calling the guard-free tail of the step directly (the fixed step never
     reaches this line at all for an organizer-less ref set, which is exactly what the green test
     below proves)."""
     with pytest.raises(KeyError):
-        _ = AD_HOC_REFS["organizer"]   # the read the old step's body performed, unguarded
+        _ = AD_HOC_REFS["organizer"]   # the unguarded read the step's body performs here
 
 
 def test_drop_to_attendees_used_to_mint_a_scaffold_for_the_placeholder_string(monkeypatch):
-    """THE SECOND RED, one layer deeper: the OLD fallback `ctx.refs.get("organizer") or
-    "the organiser"` handed a non-address literal to `mint_scaffold`, which agent-api cannot
+    """THE SECOND RED, one layer deeper: a naive fallback `ctx.refs.get("organizer") or
+    "the organiser"` would hand a non-address literal to `mint_scaffold`, which agent-api cannot
     resolve. Reproduced directly against `FakeScaffolds`+a failing resolver standing in for
     agent-api's real refusal, showing the exception is raised OUTSIDE any per-person guard — the
     shape that failed the whole step non-retryably rather than recording one person's failure."""
@@ -249,7 +249,7 @@ def test_drop_to_attendees_lands_on_the_owners_own_desk_by_uid(monkeypatch):
 
 
 def test_commit_meeting_summary_still_writes_the_db_60_note(monkeypatch):
-    """THE POINT OF THE WHOLE FIX: the DB-60 note is written regardless of what happened to the
+    """THE POINT OF THE WHOLE FIX: the note is written regardless of what happened to the
     mail/drop steps ahead of it — `commit_meeting_summary` reads only `refs.{uid,meeting_id,
     native}` and `process_meeting`'s receipt, never `organizer`."""
     desks, meetings = Desks(), FakeMeetings(row_id=97)
@@ -266,9 +266,9 @@ def test_commit_meeting_summary_still_writes_the_db_60_note(monkeypatch):
 def test_the_whole_post_meeting_sequence_reaches_commit_meeting_summary(monkeypatch):
     """END TO END, in registration order: `process_meeting`'s receipt feeds every later step, and
     none of the five steps after it raises for an ad hoc completion — which is the property that
-    was false before the DB-60b fix (either mail step's crash stopped the reaction before this
+    was false before the fix (either mail step's crash stopped the reaction before this
     line ever ran). `platform_user_email` answers "" here (no account on file for uid 7), so
-    `email_owner_ready` (DB-80, version 6's own addition) skips cleanly too — its actual send is
+    `email_owner_ready` (version 6's own addition) skips cleanly too — its actual send is
     `test_meeting_ready_email.py`'s to prove."""
     desks, meetings = Desks(), FakeMeetings(row_id=97)
     reg, _scaffolds, channel = _rig(monkeypatch, desks, meetings)
@@ -290,7 +290,7 @@ def test_the_whole_post_meeting_sequence_reaches_commit_meeting_summary(monkeypa
 
 # ── the sibling: the invite-originated path is unchanged ────────────────────────────────────────
 def test_the_invite_path_still_mails_and_drops_exactly_as_before(monkeypatch):
-    """DB-80's new last step must not add a second mail on the invite path: the organiser check
+    """The new last step must not add a second mail on the invite path: the organiser check
     inside `email_owner_ready` is the same test `email_minutes` makes, inverted, so this asserts
     the recipient list is BYTE-FOR-BYTE what it was before the step existed — two sends, nobody
     else — with `email_owner_ready` itself only a clean skip."""

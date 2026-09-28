@@ -1,4 +1,4 @@
-/** `/recordings` (DB-50/DB-52): every recording the caller owns, from `GET /api/vexa/recordings`.
+/** `/recordings`: every recording the caller owns, from `GET /api/vexa/recordings`.
  *  Composed from `Shell` the same way every other page is; see `src/components/RecordingsView.tsx`
  *  for the view itself. */
 import { redirect } from "next/navigation";

@@ -1,4 +1,4 @@
-/** Property 4 — the detail page opens ONE meeting by row id and never scans the list (DB-05,
+/** Property 4 — the detail page opens ONE meeting by row id and never scans the list (
  *  `b92d8de1`). Nothing has exercised this end to end before this spec.
  *
  *  Expected: opening meeting 102 renders its transcript with speaker attribution, and the

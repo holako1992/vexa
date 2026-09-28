@@ -1,10 +1,10 @@
-"""DB-71 — the real `UsagePort`: `meetings_usage_for_period` counted straight from `meetings`.
+"""The real `UsagePort`: `meetings_usage_for_period` counted straight from `meetings`.
 
 Same testcontainers-PG harness as `test_stack_postgres.py` (skips without docker, no Redis —
 `meetings_usage_for_period` takes a plain `AsyncSession`, nothing else). Rows are seeded with a
 sync `Session` (cheap, no event loop), then read back through the real async path the app uses.
 
-Covers the acceptance rows named in the DB-71 issue: no meetings, rows inside/outside/at the
+Covers the acceptance rows named in the issue: no meetings, rows inside/outside/at the
 exact period boundary, another user's rows never counted, non-joined rows not counted, minutes
 with a null `end_time`, and the query-failure-reports-unknown path.
 """

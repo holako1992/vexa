@@ -1,4 +1,4 @@
-"""DB-70 — `GET /user/entitlements`: auth (same tier as `/user/webhook`/`/user/transcription`)
+"""`GET /user/entitlements`: auth (same tier as `/user/webhook`/`/user/transcription`)
 and that a caller only ever sees their OWN resolved entitlements.
 
 The resolution logic itself (every row of the acceptance table) is covered without docker in
@@ -64,7 +64,7 @@ def test_valid_key_defaults_to_free_plan(client):
     assert body["plan_id"] == "free"
     assert body["limits"]["concurrent_bots"] == 1
     assert body["limits"]["meetings_per_month"] == 1
-    # DB-71: a real MeetingsUsagePort is wired in — a user with no meetings reads as counted-zero,
+    # A real MeetingsUsagePort is wired in — a user with no meetings reads as counted-zero,
     # not unknown. NullUsagePort's unknown-vs-zero distinction is covered on its own in
     # test_billing_entitlements.py and the query-failure path below.
     assert body["usage"]["meetings_used"] == 0
@@ -108,7 +108,7 @@ def test_invalid_key_is_403(client):
     assert r.status_code == 403
 
 
-# --- DB-71: usage is now metered live from `meetings`, not always unknown ---
+# --- usage is now metered live from `meetings`, not always unknown ---
 
 def _seed_meeting(pg_url, **fields):
     """Insert one `meetings` row directly (bypassing meeting-api — same table, same columns)."""

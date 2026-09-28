@@ -1,4 +1,4 @@
-/** Shapes and pure formatters for `GET /user/entitlements` (DB-70/DB-74/DB-75).
+/** Shapes and pure formatters for `GET /user/entitlements`.
  *
  *  Dependency-free like `upstream.ts` and `summary.ts`, so the formatting rules are tested
  *  directly rather than through a rendered page. Two facts the resolver upstream
@@ -39,7 +39,7 @@ export interface Entitlements {
   usage: EntitlementsUsage;
 }
 
-/** The unwrapped `402` body `POST /bots` sends when DB-72's monthly meeting quota is exhausted
+/** The unwrapped `402` body `POST /bots` sends when the monthly meeting quota is exhausted
  *  (`meeting_api/bot_spawn/router.py`) — no `{"detail": ...}` envelope, so a caller must branch on
  *  `error`, not on the status code or on `ApiError.detail` alone. */
 export interface QuotaExceededBody {

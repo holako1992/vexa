@@ -1,4 +1,4 @@
-"""DB-73 — `billing.stripe_gateway.verify_signature`: the ONE gate `POST /billing/webhook` stands
+"""`billing.stripe_gateway.verify_signature`: the ONE gate `POST /billing/webhook` stands
 behind (Stripe cannot present an X-API-Key, so signature verification IS the authentication).
 
 No docker: pure `hmac` over bytes, no DB, no network — mirrors `test_billing_catalog.py`'s "no

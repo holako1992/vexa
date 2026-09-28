@@ -1,4 +1,4 @@
-"""`payment.failed` (DB-78) — the fact identity's Stripe webhook hands to flows, IN ADDITION to
+"""`payment.failed` — the fact identity's Stripe webhook hands to flows, IN ADDITION to
 `subscription.changed`, ONLY for `invoice.payment_failed`. Pure — `events_mod.payment_failed_*`
 takes no DB and no clock, so this suite needs no docker (unlike the endpoint suites) and runs
 under a bare `pytest`.

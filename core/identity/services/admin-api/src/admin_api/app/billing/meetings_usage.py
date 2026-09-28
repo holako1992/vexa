@@ -1,4 +1,4 @@
-"""DB-71 — the real `UsagePort`: usage counted from the existing `meetings` rows.
+"""The real `UsagePort`: usage counted from the existing `meetings` rows.
 
 No second table, no counter incremented alongside meeting creation. `schema/models.py`'s
 `Meeting` (the shared table `core/meetings/services/meeting-api` also writes) already records
@@ -42,7 +42,7 @@ just unknown.
 **Failure mode.** `meetings_usage_for_period` never raises past its own try/except — a query
 failure returns `UsageSnapshot(None, None)` (UNKNOWN), the same shape `NullUsagePort` returns
 when nothing is wired at all. `ports.py`'s module docstring is the reason: unknown and zero are
-different facts, and a caller (the `/user/entitlements` endpoint today, DB-72's spawn-time
+different facts, and a caller (the `/user/entitlements` endpoint today, the spawn-time
 enforcement tomorrow) that turned "the query broke" into "0 used" would let a user who is
 actually over quota read as under it.
 """
@@ -109,7 +109,7 @@ async def meetings_usage_for_period(
     """This user's consumed meetings + minutes inside `[period_start, period_end)`, counted from
     `meetings` rows. `period_end` is exclusive, matching `resolve_plan`'s own period boundaries.
 
-    THE function DB-72 (spawn-time quota enforcement) reuses unmodified — same signature, same
+    THE function (spawn-time quota enforcement) reuses unmodified — same signature, same
     `db: AsyncSession` first argument it already holds via `Depends(get_db)`.
 
     The `WHERE user_id = ... AND created_at >= period_start AND created_at < period_end` shape is
@@ -117,7 +117,7 @@ async def meetings_usage_for_period(
     built to serve; `status`/`data` are read alongside for the in-Python join-classification
     above rather than pushed into SQL, so the one `_is_consumed` rule stays a single, readable,
     unit-testable function instead of a CASE expression duplicated between here and a future
-    DB-72 query.
+    quota-enforcement query.
 
     Never raises: a DB error is logged and reported as UNKNOWN usage, never as 0 (see module
     docstring).
@@ -154,7 +154,7 @@ async def meetings_usage_for_period(
 
 
 class MeetingsUsagePort:
-    """The `UsagePort` adapter DB-71 promised — wraps `meetings_usage_for_period` against one
+    """The real `UsagePort` adapter — wraps `meetings_usage_for_period` against one
     request's `AsyncSession` so `resolve_entitlements(data, now, user.id, usage_port=...)` gets a
     real meter instead of `NullUsagePort`'s permanent UNKNOWN."""
 

@@ -16,7 +16,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ meetin
 
   return (
     <Shell user={{ email: user.email, name: user.name }}>
-      {/* MeetingDetail reads `?t=` (DB-44's scroll-to-segment link) via useSearchParams, which
+      {/* MeetingDetail reads `?t=` (the scroll-to-segment link) via useSearchParams, which
           Next.js requires a Suspense boundary for even under force-dynamic. */}
       <Suspense fallback={<LoadingState label="Loading meeting…" />}>
         <MeetingDetail meetingId={meetingId} />

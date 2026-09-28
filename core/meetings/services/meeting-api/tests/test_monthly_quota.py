@@ -1,4 +1,4 @@
-"""DB-72 eval — the MONTHLY meeting quota, enforced at admission (manual POST /bots and auto-join).
+"""This eval — the MONTHLY meeting quota, enforced at admission (manual POST /bots and auto-join).
 
 The quota itself (which plan allows how many meetings, and which `meetings` rows count toward the
 current period) is admin-api's — resolved by `billing.entitlements.resolve_entitlements` and
@@ -20,7 +20,7 @@ Covers:
     other under-quota count;
   * auto-join SKIPS (never joins) on the same refusal, stamping `data.auto_join_error` with a
     reason rather than raising past the sweep;
-  * absent `x-user-limits`/no `quota` key at all → unchanged pre-DB-72 behaviour;
+  * absent `x-user-limits`/no `quota` key at all → unchanged pre-it behaviour;
   * UNKNOWN usage (`meetings_used: None`) on a finite-limit plan fails CLOSED (refused, never
     silently admitted as "0 used");
   * the concurrent-bot cap (a DIFFERENT axis, still 429 via `MaxBotsExceeded`) is unaffected by the
@@ -123,7 +123,7 @@ def test_pro_shaped_context_no_quota_key_never_checked(monkeypatch):
 
 def test_absent_billing_entirely_unchanged(monkeypatch):
     """No ADMIN_API_URL/INTERNAL_API_SECRET → `_fetch_bot_context` answers `{}` (the real,
-    unstubbed function) → no `quota` key → no pre-check. Same shape as every pre-DB-72 deployment."""
+    unstubbed function) → no `quota` key → no pre-check. Same shape as every pre-it deployment."""
     monkeypatch.delenv("ADMIN_API_URL", raising=False)
     monkeypatch.delenv("INTERNAL_API_SECRET", raising=False)
     repo, runtime = InMemoryMeetingRepo(), FakeRuntimeClient()
@@ -138,7 +138,7 @@ def test_absent_billing_entirely_unchanged(monkeypatch):
 
 def test_unknown_usage_on_a_finite_plan_fails_closed(monkeypatch):
     """`meetings_used: None` (admin-api's usage query failed) on a FINITE plan is refused, never
-    silently admitted as "0 used" — the deliberate fail-closed rule DB-72's issue states."""
+    silently admitted as "0 used" — the deliberate fail-closed rule the issue states."""
     client, repo, runtime = _client(monkeypatch, context=_quota_context(limit=1, used=None))
     r = _spawn(client, "m-1")
     assert r.status_code == 402, r.text

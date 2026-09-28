@@ -1,4 +1,4 @@
-"""DB-70 — the plan catalog + the entitlement resolver.
+"""The plan catalog + the entitlement resolver.
 
 Pure logic, no database: `resolve_plan` takes `data` (the `users.data` blob) and `now` as plain
 arguments and is deterministic, so this suite runs with no docker, no testcontainers, no FastAPI
@@ -204,7 +204,7 @@ def test_resolve_entitlements_uses_supplied_usage_port():
     assert resolved.usage == UsageSnapshot(meetings_used=1, minutes_used=42)
 
 
-# ── DB-77 admin overrides ────────────────────────────────────────────────────────────────────────
+# ── it admin overrides ────────────────────────────────────────────────────────────────────────
 
 
 def test_plan_override_wins_over_active_stripe_tier():
@@ -254,7 +254,7 @@ def test_unrecognized_plan_override_is_ignored_and_logged(caplog):
 
 
 def test_unknown_tier_and_override_together_override_still_wins():
-    """A garbage `subscription_tier` (DB-70's "unrecognized tier" case) alongside a VALID
+    """A garbage `subscription_tier` (the "unrecognized tier" case) alongside a VALID
     `plan_override` — the override still wins; the resolver never lets a garbage Stripe field
     block a real admin comp."""
     now = datetime(2026, 9, 15, tzinfo=UTC)
@@ -281,7 +281,7 @@ def test_quota_bonus_applied_when_period_matches():
 
 def test_quota_bonus_does_not_carry_over_to_a_new_period():
     """A bonus stamped for August does not silently apply once September's calendar month
-    starts — the exact "does it reset per period" behavior DB-77 must decide and document."""
+    starts — the exact "does it reset per period" behavior it must decide and document."""
     now = datetime(2026, 9, 15, tzinfo=UTC)
     august_start = datetime(2026, 8, 1, tzinfo=UTC)
     data = {"quota_bonus": 2, "quota_bonus_period_start": _unix(august_start)}

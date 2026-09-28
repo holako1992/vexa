@@ -1,8 +1,8 @@
-"""DB-78 — the Free-plan recording retention sweep (`meeting_api.sweeps.retention`).
+"""The Free-plan recording retention sweep (`meeting_api.sweeps.retention`).
 
 Drives ``run_retention_sweep`` over the SAME in-memory fakes ``test_recordings.py`` uses
 (``InMemoryRecordingRepo`` / ``InMemoryStorage``), offline — no MinIO, no DB. The four properties
-this file holds, matching DB-78's own acceptance list:
+this file holds, matching the own acceptance list:
 
   1. only Free-plan owners are purged — a Pro owner's equally-old recording is left alone;
   2. only recordings older than the (catalog-read, never-hardcoded-here) retention are purged;

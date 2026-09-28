@@ -1,4 +1,4 @@
-"""DB-77 — `PATCH /admin/users/{id}`'s `plan_override`/`quota_bonus` request schema
+"""`PATCH /admin/users/{id}`'s `plan_override`/`quota_bonus` request schema
 (`admin_api.app.main.UserAdminPatch`).
 
 Pure pydantic validation, no database, no FastAPI TestClient: importing `admin_api.app.main`
@@ -53,7 +53,7 @@ def test_quota_bonus_none_is_a_valid_explicit_clear():
 
 
 def test_plan_override_alone_satisfies_require_change():
-    """Before DB-77, a patch with no `max_concurrent_bots` and no `data` was rejected as a no-op.
+    """Before, a patch with no `max_concurrent_bots` and no `data` was rejected as a no-op.
     `plan_override`/`quota_bonus` are real changes too — they must not be rejected the same way."""
     UserAdminPatch(plan_override="pro")  # must not raise
     UserAdminPatch(quota_bonus=1)  # must not raise

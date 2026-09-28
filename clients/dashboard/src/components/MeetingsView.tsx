@@ -6,7 +6,7 @@
  *  socket proxy in the server. The interval tightens to 5s while anything is live and relaxes to
  *  30s when nothing is, so an idle tab costs almost nothing.
  *
- *  DB-48 — pagination: meeting-api's `GET /meetings` honours `limit`/`offset` and reports the
+ * Pagination: meeting-api's `GET /meetings` honours `limit`/`offset` and reports the
  *  store's own `has_more` on the response envelope. "Load more" fetches the next page and appends
  *  it, reading `has_more` straight off that response; the poll instead re-fetches the FULL
  *  currently-loaded window on every tick (`offset=0, limit=<rows on screen>`), which is the rule
@@ -141,7 +141,7 @@ export function MeetingsView() {
     };
   }, [load]);
 
-  // DB-31/DB-32/DB-33: EITHER provider's OAuth callback page (`/calendar/google/callback`,
+  // EITHER provider's OAuth callback page (`/calendar/google/callback`,
   // `/calendar/microsoft/callback`) sends the browser back here with `?calendar=connected
   // &provider=<google|microsoft>` (success) or `?calendar=1` (the person clicked "Back to
   // Calendar" after an error, or wants another attempt — no `provider`, since an error already
@@ -172,10 +172,10 @@ export function MeetingsView() {
     return filterMeetings(byTab, query);
   }, [meetings, tab, query]);
 
-  /** Reconciling the two searches (DB-44 vs. this box): this input only ever filters the rows
+  /** Reconciling the two searches (vs. this box): this input only ever filters the rows
    *  already loaded into the browser — it cannot see a match sitting on a page nobody has loaded,
    *  or a match inside a transcript's words rather than a title/attendee. Enter hands the same
-   *  text to `/search`, which asks the server (DB-44's `GET /transcripts/search`) across every
+   * text to `/search`, which asks the server (the `GET /transcripts/search`) across every
    *  meeting and every transcript, not just what is on screen. */
   function onQueryKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") return;
@@ -226,7 +226,7 @@ export function MeetingsView() {
         </Tabs>
       </div>
 
-      {/* DB-48: no per-tab numbers here — meeting-api's GET /meetings never reports a total, so a
+      {/* No per-tab numbers here — meeting-api's GET /meetings never reports a total, so a
           count built from loaded rows would only ever describe what happens to be on screen, not
           "how many live meetings you have". `has_more` (the store's own word) says whether the
           list is honestly complete, so this line always tells the truth about the loaded window. */}

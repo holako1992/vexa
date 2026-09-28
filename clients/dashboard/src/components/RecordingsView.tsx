@@ -1,16 +1,16 @@
 "use client";
-/** `/recordings` (DB-50/52): every recording the caller owns, newest first, from `GET
+/** `/recordings`: every recording the caller owns, newest first, from `GET
  *  /recordings` (meeting-api's own LIST projection — see `lib/recordings.ts`'s header comment for
- *  why this never reads `GET /recordings/<id>`). Each row links to its meeting, where DB-50's
- *  audio player and DB-51's click-a-segment-to-seek live; Download and Delete (DB-52) are here,
+ * why this never reads `GET /recordings/<id>`). Each row links to its meeting, where the
+ * audio player and the click-a-segment-to-seek live; Download and Delete are here,
  *  on the row itself, since browsing and managing recordings — not playing one back — is this
  *  page's job.
  *
- *  "Gated by plan": the entitlements resolver (DB-70) carries `limits.recording_retention_days`
+ * "Gated by plan": the entitlements resolver carries `limits.recording_retention_days`
  *  — how LONG a recording is kept, never a yes/no "can this account see recordings at all". Every
  *  plan in the catalog gets a recordings list, a player, a download and a delete button; this page
  *  only ever uses that number to show the retention note below, never to hide a control (see the
- *  task's own report for the same finding — DB-70's contract has no boolean recordings flag to
+ * task's own report for the same finding — the contract has no boolean recordings flag to
  *  gate on, and this page does not invent one).
  */
 import { useCallback, useEffect, useState } from "react";

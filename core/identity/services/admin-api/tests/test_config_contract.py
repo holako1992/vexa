@@ -62,7 +62,7 @@ def test_the_flows_publish_edge_is_declared_and_never_blocks_the_boot():
     """PRD decision 42 item 2 — A PUBLISH EDGE IS NOT A DEPENDENCY, proven at the boot layer.
 
     admin-api reads VEXA_FLOWS_API_URL and VEXA_FLOWS_API_KEY to hand `onboarding.completed` (and,
-    since DB-73, `subscription.changed`) to flows. Every env read must be declared (check 5 of
+    since, `subscription.changed`) to flows. Every env read must be declared (check 5 of
     gate:config-contract), and the three classes
     that existed before this all describe a value the service NEEDS: required-explicit refuses the
     boot without it, defaulted supplies one, capability gates endpoints on it. Declaring a publish

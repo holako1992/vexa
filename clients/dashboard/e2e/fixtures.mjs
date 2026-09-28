@@ -3,7 +3,7 @@
  *  `MEETING_ROWS` spans the three phases the list groups by (`src/lib/meetings.ts`'s `phaseOf`):
  *  live, past (including a user-stopped `completed` row so the "stopped" derived status has a
  *  fixture too), and "scheduled" — three of those: 103 (hand-scheduled, no calendar source), and
- *  DB-33's 110/111 (110 calendar-managed with a `calendar_name` source chip; 111 hand-scheduled,
+ * The 110/111 (110 calendar-managed with a `calendar_name` source chip; 111 hand-scheduled,
  *  auto-join already off, carrying a recorded `auto_join_error`, on the same day as 110 but
  *  earlier — the Upcoming page's day-grouping/ordering spec needs both a source chip AND a
  *  same-day ordering case). The past meeting with a native id keeps a full, multi-speaker
@@ -43,7 +43,7 @@ const MEETING_ROWS = [
     data: {
       title: "Design Review",
       attendees: [{ email: "carla@e2e.test", name: "Carla" }, { email: "dev@e2e.test", name: "Dev" }],
-      // DB-50/51/52: one finished audio recording, the same shape
+      // One finished audio recording, the same shape
       // `recordings/adapters.py`'s `list_meeting_recordings` reads off `meeting.data['recordings']`
       // — a numeric id (real recording ids are always numeric, `jsonb.py`'s
       // `new_recording_numeric_id`), one media file, audio only. `RECORDING_AUDIO_SECONDS`
@@ -85,7 +85,7 @@ const MEETING_ROWS = [
     constructed_meeting_url: "https://meet.e2e.test/standup",
     data: { title: "Daily Standup", stop_requested: true, attendees: [] },
   },
-  // 105 — completed, OWNED, no summary.md written yet: the 404-means-"pending" state (DB-60).
+  // 105 — completed, OWNED, no summary.md written yet: the 404-means-"pending" state.
   {
     id: 105,
     platform: "zoom",
@@ -109,7 +109,7 @@ const MEETING_ROWS = [
     constructed_meeting_url: "https://meet.google.com/skip-defg-hij",
     data: { title: "Quick Check-in", attendees: [] },
   },
-  // 110 — scheduled, calendar-managed (imported by a Google connection): DB-33's Upcoming page
+  // 110 — scheduled, calendar-managed (imported by a Google connection): the Upcoming page
   // reads `data.calendar_name` for the source chip and `data.auto_join` for the Join toggle's
   // initial state (on, here).
   {
@@ -132,7 +132,7 @@ const MEETING_ROWS = [
   },
   // 111 — scheduled by hand (no calendar source, so no chip), on the SAME day as 110 but earlier
   // — proves within-day ordering — and carrying a recorded auto-join skip reason plus auto_join
-  // already off, DB-33's "surfaced verbatim" acceptance.
+  // already off, the "surfaced verbatim" acceptance.
   {
     id: 111,
     platform: "unknown",
@@ -152,7 +152,7 @@ const MEETING_ROWS = [
   },
 ];
 
-/** DB-48: enough ADDITIONAL rows to force `GET /meetings` past one page at the dashboard's own
+/** Enough ADDITIONAL rows to force `GET /meetings` past one page at the dashboard's own
  *  page size (20) — `Archived Call 1`..`Archived Call 19`, ids 200..218, oldest-looking first so
  *  they sort after the eight named rows above. 8 + 19 = 27 total: page one (limit 20, offset 0)
  *  returns 20 rows (all eight named ones plus the first 12 archived ones) with `has_more: true`,
@@ -215,7 +215,7 @@ reason: "fewer than 3 transcript segments"
 `,
 };
 
-/** Segments keyed by meeting row id. 102 and 105 both have one — DB-44's search specs need a term
+/** Segments keyed by meeting row id. 102 and 105 both have one — the search specs need a term
  *  ("calendar") that hits more than one meeting so grouping has more than one group to prove. */
 const TRANSCRIPTS = {
   102: [
@@ -231,7 +231,7 @@ const TRANSCRIPTS = {
   ],
 };
 
-/** Participants (DB-42), keyed by `<platform>/<native>` — the same two-source shape meeting-api's
+/** Participants, keyed by `<platform>/<native>` — the same two-source shape meeting-api's
  *  own route returns. Only the live meeting (101) has any, so the header control has something
  *  real to render without every fixture meeting needing one. */
 const PARTICIPANTS = {
@@ -245,7 +245,7 @@ export function freshMeetings() {
   return JSON.parse(JSON.stringify(ALL_MEETING_ROWS));
 }
 
-/** DB-44: a crude but real substring search over the fixture transcripts above, shaped exactly
+/** A crude but real substring search over the fixture transcripts above, shaped exactly
  *  like meeting-api's own response (`meeting_api/collector/app.py`'s `search_transcripts` /
  *  `fakes.py`'s in-memory stand-in) — `{query, hits, count}`, each hit carrying `meeting_db_id`
  *  (never `meeting_id`), `platform`, `native_meeting_id`, `start`, `end`, `speaker`, `rank`,
@@ -308,18 +308,18 @@ export function freshCalendars() {
   return [];
 }
 
-/** DB-31: the fixed Google account the stub's OAuth exchange always resolves to — one identity
+/** The fixed Google account the stub's OAuth exchange always resolves to — one identity
  *  is enough to prove connect, reconnect (matches an existing connection by this SAME email and
  *  clears `reconnect_needed`), and the state/consent failure paths; a spec that needs a SECOND
  *  distinct Google account is out of this task's scope. */
 export const E2E_GOOGLE_EMAIL = "person@e2e.test";
 
-/** DB-32/DB-33's Microsoft sibling of `E2E_GOOGLE_EMAIL` — same role, same one-identity scope. */
+/** The Microsoft sibling of `E2E_GOOGLE_EMAIL` — same role, same one-identity scope. */
 export const E2E_MICROSOFT_EMAIL = "person@e2e-work.test";
 
 export const JITSI_HOSTS = ["meet.e2e.test"];
 
-// ── DB-74/DB-75: GET /user/entitlements fixtures ────────────────────────────────────────────────
+// ── GET /user/entitlements fixtures ────────────────────────────────────────────────
 //
 // One shape per state a spec needs to prove distinct: a finite plan with room left, the same plan
 // exhausted, an unlimited plan, and usage the meter hasn't reported yet (`null` — never `0`, see
@@ -392,7 +392,7 @@ export function unknownUsageEntitlements() {
   return e;
 }
 
-// ── DB-50: the recordings fixture's own audio bytes ─────────────────────────────────────────────
+// ── the recordings fixture's own audio bytes ─────────────────────────────────────────────
 //
 // A short SILENT WAV, generated in code at stub startup — never a committed binary blob. 16-bit
 // PCM mono (silence is exactly `0x00`, unlike 8-bit PCM's `0x80` midpoint) at a low sample rate,
@@ -426,7 +426,7 @@ export function makeSilentWav(durationSeconds = RECORDING_AUDIO_SECONDS, sampleR
   return buffer;
 }
 
-/** The unwrapped 402 body DB-72's quota enforcement sends (`meeting_api/bot_spawn/router.py`) —
+/** The unwrapped 402 body the quota enforcement sends (`meeting_api/bot_spawn/router.py`) —
  *  no `{"detail": ...}` envelope, so a spec proving the paywall message must see this exact shape
  *  reach the dashboard, not a generic 402. */
 export const QUOTA_EXCEEDED_BODY = {

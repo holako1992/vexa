@@ -1,4 +1,4 @@
-"""DB-60 — the Otter-style AI note: `commit_meeting_summary`, the LAST step of `post_meeting`.
+"""The Otter-style AI note: `commit_meeting_summary`, the LAST step of `post_meeting`.
 
 It writes `meetings/<row_id>/summary.md` in the organiser's own workspace, at a path the dashboard
 can resolve from the meeting's ROW ID ALONE (no title, no date — unlike `drop_to_attendees`'s
@@ -349,9 +349,9 @@ def test_redelivery_of_the_same_completion_admits_no_second_reaction():
     assert len([r for r in db.rows if r["sid"].endswith("::post_meeting")]) == 1
 
 
-# ── 6 · the step is registered in post_meeting, ahead of DB-80's own last step ──────────────────
+# ── 6 · the step is registered in post_meeting, ahead of the own last step ──────────────────
 def test_commit_meeting_summary_is_registered_in_post_meeting():
-    """`commit_meeting_summary` was the LAST step through version 5; version 6 (DB-80) adds
+    """`commit_meeting_summary` was the LAST step through version 5; version 6 adds
     `email_owner_ready` after it — which reads this step's own receipt (see
     `test_meeting_ready_email.py`), so the order here still matters even though "last" no longer
     names this step."""

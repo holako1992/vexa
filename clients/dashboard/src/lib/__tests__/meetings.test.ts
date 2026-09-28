@@ -51,7 +51,7 @@ describe("toMeeting", () => {
   });
 });
 
-describe("toMeeting — recordingId (DB-50)", () => {
+describe("toMeeting — recordingId", () => {
   it("reads the first recording's id, and hasRecording tracks the same array", () => {
     const m = toMeeting(row({ data: { recordings: [{ id: 555001 }, { id: 555002 }] } }));
     expect(m.hasRecording).toBe(true);
@@ -69,7 +69,7 @@ describe("toMeeting — recordingId (DB-50)", () => {
   });
 });
 
-describe("toMeeting — auto-join, calendar source (DB-33)", () => {
+describe("toMeeting — auto-join, calendar source", () => {
   it("defaults autoJoin to true when data.auto_join is absent, honours an explicit false", () => {
     expect(toMeeting(row({ status: "scheduled" })).autoJoin).toBe(true);
     expect(toMeeting(row({ status: "scheduled", data: { auto_join: true } })).autoJoin).toBe(true);
@@ -90,7 +90,7 @@ describe("toMeeting — auto-join, calendar source (DB-33)", () => {
   });
 });
 
-describe("groupUpcomingByDay (DB-33)", () => {
+describe("groupUpcomingByDay", () => {
   const scheduled = (id: number, scheduledAt: string | undefined, title: string): Meeting =>
     toMeeting(row({ id, native_meeting_id: null, platform: "unknown", status: "scheduled", data: { scheduled_at: scheduledAt, title } }));
 
@@ -163,7 +163,7 @@ describe("toTranscript", () => {
   });
 });
 
-describe("activeSegmentIndex (DB-51)", () => {
+describe("activeSegmentIndex", () => {
   const lines: TranscriptLine[] = [
     { at: 0, speaker: "Ada", text: "one" },
     { at: 8.5, speaker: "Bea", text: "two" },
@@ -222,7 +222,7 @@ describe("initialsOf", () => {
   });
 });
 
-describe("mergeMeetingsPage (DB-48 pagination + polling)", () => {
+describe("mergeMeetingsPage (pagination + polling)", () => {
   const m = (id: string, over: Partial<Meeting> = {}): Meeting =>
     toMeeting({ id, platform: "google_meet", native_meeting_id: id, status: "completed", ...over } as MeetingRowDTO);
 

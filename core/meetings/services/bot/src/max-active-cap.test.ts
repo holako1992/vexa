@@ -44,7 +44,7 @@ const FLOOR = Math.max(EVERYONE_LEFT_MS, SMALL_TIMEOUTS.noOneJoinedTimeout, SMAL
 }
 
 // ── the per-meeting cap (plan minute cap resolved by meeting-api) overrides the env default when
-//    SMALLER — the case DB-72b exists for: a Free user's 60-minute plan cap on a deployment whose
+// SMALLER — the case it exists for: a Free user's 60-minute plan cap on a deployment whose
 //    BOT_MAX_ACTIVE_MS default is 4h ──
 {
   const oneHourMs = 60 * 60 * 1000;

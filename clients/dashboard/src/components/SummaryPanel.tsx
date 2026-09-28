@@ -1,5 +1,5 @@
 "use client";
-/** The Otter-style AI note, above the transcript (DB-60's dashboard half).
+/** The Otter-style AI note, above the transcript (the dashboard half).
  *
  *  Reads `GET /api/vexa/meetings/<id>/summary` — the dashboard's own composed route onto
  *  `/agent/workspace/file?path=meetings/<id>/summary.md` (see `lib/upstream.ts`). The browser

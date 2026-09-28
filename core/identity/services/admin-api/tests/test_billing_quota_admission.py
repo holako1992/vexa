@@ -1,4 +1,4 @@
-"""DB-72 — the two admission-time doors meeting-api reads: `/internal/validate`'s combined
+"""The two admission-time doors meeting-api reads: `/internal/validate`'s combined
 `max_concurrent` (the gateway's `x-user-limits`, the hot per-request path — no usage query here,
 see the docstring on `main.get_bot_context` and `billing.catalog.effective_concurrent_cap`) and
 `/internal/users/{id}/bot-context`'s `quota` block (the spawn-time-only door meeting-api's
@@ -65,7 +65,7 @@ def _create_user_with_token(client, email, scopes="bot,tx"):
 def test_validate_max_concurrent_untouched_free_user_drops_from_3_to_1(client):
     """PRODUCT CHANGE, asserted directly: a Free user nobody has ever PATCHed carries the legacy
     `max_concurrent_bots` default (3) on their row, but /internal/validate now returns the Free
-    plan's 1 — the exact change DB-72's report states for every existing Free user."""
+    plan's 1 — the exact change the report states for every existing Free user."""
     _user_id, token = _create_user_with_token(client, "free-cap@vexa.ai")
     r = client.post("/internal/validate", headers=_internal(), json={"token": token})
     assert r.status_code == 200, r.text
@@ -83,7 +83,7 @@ def test_validate_max_concurrent_untouched_pro_user_gets_2_not_the_legacy_defaul
 
 def test_validate_max_concurrent_explicit_override_narrows_below_the_plan(client):
     """An operator who explicitly set max_concurrent_bots=1 on a Pro user narrows them below their
-    plan's 2 — the pre-DB-77 hard-ceiling meaning of the column."""
+    plan's 2 — the pre-it hard-ceiling meaning of the column."""
     user_id, token = _create_user_with_token(client, "pro-capped@vexa.ai")
     client.patch(f"/admin/users/{user_id}", headers=_admin(),
                 json={"data": {"subscription_status": "active", "subscription_tier": "pro"},
@@ -176,7 +176,7 @@ def test_bot_context_quota_unknown_usage_on_query_failure(client, monkeypatch):
     assert r.json()["quota"]["meetings_used"] is None
 
 
-# ── DB-77 admin overrides: the write path (PATCH), and both doors reflecting it ─────────────────
+# ── it admin overrides: the write path (PATCH), and both doors reflecting it ─────────────────
 
 def test_patch_plan_override_unknown_plan_id_is_422(client):
     user_id, _token = _create_user_with_token(client, "bad-override@vexa.ai")

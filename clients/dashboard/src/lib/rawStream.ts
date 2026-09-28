@@ -1,4 +1,4 @@
-/** The ONE non-JSON hop this proxy makes: the recording media byte stream (DB-50,
+/** The ONE non-JSON hop this proxy makes: the recording media byte stream (
  *  `.../recordings/<id>/media/<id>/raw` and its `.../download` alias, both marked `raw: true` in
  *  `upstream.ts`). Everywhere else `route.ts` forwards `Accept: application/json` and parses the
  *  upstream body; this route forwards audio/video bytes instead, so the request and response

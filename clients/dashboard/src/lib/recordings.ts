@@ -1,4 +1,4 @@
-/** The shapes and pure mapping for `/recordings` (DB-50/DB-52) — the same rule `meetings.ts`
+/** The shapes and pure mapping for `/recordings` — the same rule `meetings.ts`
  *  follows: a reader must not re-derive a producer's data, only pick a display shape out of what
  *  the backend already decided. `RecordingRowDTO` is meeting-api's own LIST projection
  *  (`meeting_api/recordings/router.py`'s `LIST_RECORDING_KEYS`/`LIST_MEDIA_FILE_KEYS`) — narrower
@@ -21,7 +21,7 @@ export interface RecordingRowDTO {
   created_at?: string | null;
   completed_at?: string | null;
   playback_url?: string | null;
-  /** Set by the retention sweep (DB-78) when this recording is queued for purge under the
+  /** Set by the retention sweep when this recording is queued for purge under the
    *  account's plan — never a promise of WHEN, just that it is scheduled. */
   deletion_pending?: boolean;
   media_files?: RecordingMediaFileDTO[];

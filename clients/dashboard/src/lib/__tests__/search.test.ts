@@ -1,4 +1,4 @@
-/** DB-44's two pure transforms: grouping search hits by meeting, and splitting a snippet into
+/** The two pure transforms: grouping search hits by meeting, and splitting a snippet into
  *  plain/matched segments for highlighting — weighted towards the cases that would otherwise
  *  reshuffle a producer's rank order or leak raw HTML. */
 import { describe, expect, it } from "vitest";

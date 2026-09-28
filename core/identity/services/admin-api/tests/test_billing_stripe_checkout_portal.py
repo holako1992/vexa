@@ -1,4 +1,4 @@
-"""DB-73 — `POST /billing/checkout` and `POST /billing/portal`: the request SHAPE sent to Stripe
+"""`POST /billing/checkout` and `POST /billing/portal`: the request SHAPE sent to Stripe
 (via an `httpx.MockTransport` — never the real network), customer creation on first use and reuse
 after, and the typed 503 when Stripe is not configured.
 

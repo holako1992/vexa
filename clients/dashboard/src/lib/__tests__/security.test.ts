@@ -112,7 +112,7 @@ describe("safeNext", () => {
   });
 });
 
-describe("isTrustedBillingRedirect (DB-74b)", () => {
+describe("isTrustedBillingRedirect", () => {
   it("admits Stripe's own Checkout and Portal hosts, over https", () => {
     expect(isTrustedBillingRedirect("https://checkout.stripe.com/c/pay/cs_test_abc")).toBe(true);
     expect(isTrustedBillingRedirect("https://billing.stripe.com/p/session/xyz")).toBe(true);
@@ -142,7 +142,7 @@ describe("isTrustedBillingRedirect (DB-74b)", () => {
   });
 });
 
-describe("isTrustedGoogleAuthorizeRedirect (DB-31)", () => {
+describe("isTrustedGoogleAuthorizeRedirect", () => {
   it("admits Google's own consent-screen host, over https", () => {
     expect(isTrustedGoogleAuthorizeRedirect("https://accounts.google.com/o/oauth2/v2/auth?client_id=x")).toBe(true);
   });
@@ -171,7 +171,7 @@ describe("isTrustedGoogleAuthorizeRedirect (DB-31)", () => {
   });
 });
 
-describe("isTrustedMicrosoftAuthorizeRedirect (DB-32/DB-33)", () => {
+describe("isTrustedMicrosoftAuthorizeRedirect", () => {
   it("admits Microsoft's own consent-screen host, over https, any tenant segment", () => {
     expect(isTrustedMicrosoftAuthorizeRedirect(
       "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=x",

@@ -74,7 +74,7 @@ describe("resolveUpstream — read extras", () => {
   });
 });
 
-describe("resolveUpstream — entitlements (DB-75)", () => {
+describe("resolveUpstream — entitlements", () => {
   it("admits GET user/entitlements", () => {
     expect(resolveUpstream(["user", "entitlements"])).toEqual({ path: "/user/entitlements" });
   });
@@ -94,7 +94,7 @@ describe("resolveUpstream — entitlements (DB-75)", () => {
   });
 });
 
-describe("resolveUpstream — Google calendar authorize (DB-31)", () => {
+describe("resolveUpstream — Google calendar authorize", () => {
   it("admits GET user/calendars/google/authorize", () => {
     expect(resolveUpstream(["user", "calendars", "google", "authorize"])).toEqual({
       path: "/user/calendars/google/authorize",
@@ -115,7 +115,7 @@ describe("resolveUpstream — Google calendar authorize (DB-31)", () => {
   });
 });
 
-describe("resolveUpstream — Microsoft calendar authorize (DB-32/DB-33)", () => {
+describe("resolveUpstream — Microsoft calendar authorize", () => {
   it("admits GET user/calendars/microsoft/authorize", () => {
     expect(resolveUpstream(["user", "calendars", "microsoft", "authorize"])).toEqual({
       path: "/user/calendars/microsoft/authorize",
@@ -136,7 +136,7 @@ describe("resolveUpstream — Microsoft calendar authorize (DB-32/DB-33)", () =>
   });
 });
 
-describe("resolveWriteUpstream — Google calendar exchange (DB-31)", () => {
+describe("resolveWriteUpstream — Google calendar exchange", () => {
   it("admits POST /user/calendars/google/exchange with a body check attached", () => {
     expect(resolveWriteUpstream("POST", ["user", "calendars", "google", "exchange"])).toEqual({
       path: "/user/calendars/google/exchange",
@@ -158,7 +158,7 @@ describe("resolveWriteUpstream — Google calendar exchange (DB-31)", () => {
   });
 });
 
-describe("resolveWriteUpstream — Microsoft calendar exchange (DB-32/DB-33)", () => {
+describe("resolveWriteUpstream — Microsoft calendar exchange", () => {
   it("admits POST /user/calendars/microsoft/exchange with a body check attached", () => {
     expect(resolveWriteUpstream("POST", ["user", "calendars", "microsoft", "exchange"])).toEqual({
       path: "/user/calendars/microsoft/exchange",
@@ -180,7 +180,7 @@ describe("resolveWriteUpstream — Microsoft calendar exchange (DB-32/DB-33)", (
   });
 });
 
-describe("validateBody — user/calendars/microsoft/exchange (DB-32/DB-33)", () => {
+describe("validateBody — user/calendars/microsoft/exchange", () => {
   const exchange = resolveWriteUpstream("POST", ["user", "calendars", "microsoft", "exchange"])!;
   // `microsoft_oauth.sign_state` produces the identical two-segment shape `google_oauth.sign_state`
   // does (see `isOAuthExchangeBody`'s comment in upstream.ts) — this allowlist checks the SHAPE
@@ -213,7 +213,7 @@ describe("validateBody — user/calendars/microsoft/exchange (DB-32/DB-33)", () 
   });
 });
 
-describe("resolveUpstream — calendar connection sync status (DB-34)", () => {
+describe("resolveUpstream — calendar connection sync status", () => {
   it("admits GET user/calendars/<id>/sync", () => {
     expect(resolveUpstream(["user", "calendars", "cal-1", "sync"])).toEqual({
       path: "/user/calendars/cal-1/sync",
@@ -236,7 +236,7 @@ describe("resolveUpstream — calendar connection sync status (DB-34)", () => {
   });
 });
 
-describe("validateBody — user/calendars/google/exchange (DB-31)", () => {
+describe("validateBody — user/calendars/google/exchange", () => {
   const exchange = resolveWriteUpstream("POST", ["user", "calendars", "google", "exchange"])!;
   // A shape matching `google_oauth.sign_state`'s two dot-separated base64url segments — this
   // allowlist checks the SHAPE only, never validity (see `isGoogleExchangeBody`'s comment in
@@ -340,7 +340,7 @@ describe("resolveWriteUpstream", () => {
   });
 });
 
-describe("resolveUpstream — meeting summary (DB-60)", () => {
+describe("resolveUpstream — meeting summary", () => {
   it("composes the workspace file path from the numeric id alone", () => {
     expect(resolveUpstream(["meetings", "104", "summary"])).toEqual({
       path: "/agent/workspace/file?path=meetings/104/summary.md",
@@ -368,7 +368,7 @@ describe("resolveUpstream — meeting summary (DB-60)", () => {
   });
 });
 
-describe("resolveUpstream — participants (DB-42)", () => {
+describe("resolveUpstream — participants", () => {
   it("admits a known platform + safe native id", () => {
     expect(resolveUpstream(["meetings", "google_meet", "abc-defg-hij", "participants"])).toEqual({
       path: "/meetings/google_meet/abc-defg-hij/participants",
@@ -384,7 +384,7 @@ describe("resolveUpstream — participants (DB-42)", () => {
   });
 });
 
-describe("resolveUpstream — bots/status (DB-41)", () => {
+describe("resolveUpstream — bots/status", () => {
   it("admits GET bots/status", () => {
     expect(resolveUpstream(["bots", "status"])).toEqual({ path: "/bots/status" });
   });
@@ -396,7 +396,7 @@ describe("resolveUpstream — bots/status (DB-41)", () => {
   });
 });
 
-describe("resolveWriteUpstream — stop recording (DB-41)", () => {
+describe("resolveWriteUpstream — stop recording", () => {
   it("admits DELETE bots/<platform>/<native> for a known platform", () => {
     expect(resolveWriteUpstream("DELETE", ["bots", "google_meet", "abc-defg-hij"])).toEqual({
       path: "/bots/google_meet/abc-defg-hij",
@@ -419,7 +419,7 @@ describe("resolveWriteUpstream — stop recording (DB-41)", () => {
   });
 });
 
-describe("resolveWriteUpstream — rename via annotate, and delete (DB-42)", () => {
+describe("resolveWriteUpstream — rename via annotate, and delete", () => {
   it("admits POST meetings/<id>/annotate for a numeric id", () => {
     expect(resolveWriteUpstream("POST", ["meetings", "104", "annotate"])).toEqual({
       path: "/meetings/104/annotate",
@@ -445,7 +445,7 @@ describe("resolveWriteUpstream — rename via annotate, and delete (DB-42)", () 
   });
 });
 
-describe("resolveWriteUpstream — auto-join override (DB-33)", () => {
+describe("resolveWriteUpstream — auto-join override", () => {
   it("admits PATCH meetings/<id> with a body check attached", () => {
     expect(resolveWriteUpstream("PATCH", ["meetings", "104"])).toEqual({
       path: "/meetings/104",
@@ -462,7 +462,7 @@ describe("resolveWriteUpstream — auto-join override (DB-33)", () => {
   });
 });
 
-describe("validateBody — meetings/<id> auto-join override (DB-33)", () => {
+describe("validateBody — meetings/<id> auto-join override", () => {
   const patch = resolveWriteUpstream("PATCH", ["meetings", "104"])!;
 
   it("admits exactly {auto_join: <boolean>}", () => {
@@ -492,7 +492,7 @@ describe("validateBody — meetings/<id> auto-join override (DB-33)", () => {
   });
 });
 
-describe("resolveWriteUpstream — billing checkout/portal (DB-74b)", () => {
+describe("resolveWriteUpstream — billing checkout/portal", () => {
   it("admits POST /billing/checkout and POST /billing/portal", () => {
     expect(resolveWriteUpstream("POST", ["billing", "checkout"])).toEqual({
       path: "/billing/checkout",
@@ -522,7 +522,7 @@ describe("resolveWriteUpstream — billing checkout/portal (DB-74b)", () => {
   });
 });
 
-describe("validateBody — billing/checkout, billing/portal (DB-74b)", () => {
+describe("validateBody — billing/checkout, billing/portal", () => {
   const checkout = resolveWriteUpstream("POST", ["billing", "checkout"])!;
   const portal = resolveWriteUpstream("POST", ["billing", "portal"])!;
 
@@ -564,7 +564,7 @@ describe("validateBody — billing/checkout, billing/portal (DB-74b)", () => {
     expect(validateBody(portal, "{not json")).toBe(false);
   });
 
-  it("a route with no body validator admits any body unchanged (pre-DB-74b routes)", () => {
+  it("a route with no body validator admits any body unchanged (routes that predate this one)", () => {
     const bots = resolveWriteUpstream("POST", ["bots"])!;
     expect(validateBody(bots, JSON.stringify({ anything: "goes", nested: { a: 1 } }))).toBe(true);
     expect(validateBody(bots, "")).toBe(true);
@@ -572,7 +572,7 @@ describe("validateBody — billing/checkout, billing/portal (DB-74b)", () => {
   });
 });
 
-describe("resolveUpstream — transcripts/search (DB-44)", () => {
+describe("resolveUpstream — transcripts/search", () => {
   it("admits GET transcripts/search with its own query shape", () => {
     expect(resolveUpstream(["transcripts", "search"])).toEqual({
       path: "/transcripts/search",
@@ -591,7 +591,7 @@ describe("resolveUpstream — transcripts/search (DB-44)", () => {
   });
 });
 
-describe("filterQuery — per-route allowlist (DB-44/DB-48)", () => {
+describe("filterQuery — per-route allowlist", () => {
   it("meetings keeps limit/offset and drops everything else, including q", () => {
     const route = resolveUpstream(["meetings"])!;
     const q = new URLSearchParams("limit=10&offset=5&user_id=7&x=1&q=pricing");

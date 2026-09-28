@@ -1,4 +1,4 @@
-"""DB-80 — `email_owner_ready`, `post_meeting` version 6's own last step: the "your meeting is
+"""`email_owner_ready`, `post_meeting` version 6's own last step: the "your meeting is
 ready" mail an AD HOC meeting's owner gets, because nothing before this step ever told them.
 
 THE GAP THIS CLOSES. `email_minutes` already mails the ORGANISER — a name a calendar invite

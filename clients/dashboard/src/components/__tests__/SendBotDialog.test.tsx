@@ -16,7 +16,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-// DB-04: SendBotDialog's bot-send and calendar mutations now confirm/fail through `useToast()`,
+// SendBotDialog's bot-send and calendar mutations now confirm/fail through `useToast`,
 // which throws outside a `ToastProvider`. Every render below needs the same provider `app/layout.tsx`
 // mounts in the real app — wrapping here is infrastructure, not a loosened assertion.
 function renderDialog(props: { onClose: () => void; onBotSent: () => void }) {
@@ -97,9 +97,9 @@ describe("SendBotDialog", () => {
 
   it("shows the confirmation after Send Bot, surviving the URL field's own clear", async () => {
     // Regression: `send()` sets the success result then clears `url` so another link can be
-    // pasted. The parse effect used to key its `setResult(null)` off `url` itself, so that
-    // programmatic clear fired the very next render and erased the confirmation before anyone
-    // could see it — this test is red without the fix in ../SendBotDialog.tsx.
+    // pasted. `setResult(null)` lives only in `send()` itself and in the URL field's own
+    // `onChange` — never in an effect keyed off `url`, which would also fire on `send()`'s own
+    // programmatic clear and erase the confirmation before anyone could see it.
     renderDialog({ onClose: () => {}, onBotSent: () => {} });
 
     const input = screen.getByLabelText(/meeting url/i) as HTMLInputElement;
@@ -108,7 +108,7 @@ describe("SendBotDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /send bot/i }));
 
-    // DB-04: the same confirmation text now also appears in a toast (a sibling of the dialog,
+    // The same confirmation text now also appears in a toast (a sibling of the dialog,
     // pushed via `useToast()`) — scope to the dialog so this asserts the inline banner
     // specifically, the thing the regression this test guards against actually erased.
     const dialog = within(screen.getByRole("dialog"));
@@ -146,7 +146,7 @@ describe("SendBotDialog", () => {
     ).toBe(true);
   });
 
-  // DB-31/DB-33: Google Calendar and Microsoft 365 connect are both primary, real actions — never
+  // Google Calendar and Microsoft 365 connect are both primary, real actions — never
   // a disabled "coming soon" placeholder (AGENTS.md's "never ship a placeholder" rule).
   it("shows both Connect Google Calendar and Connect Microsoft 365 as real, enabled actions", async () => {
     renderDialog({ onClose: () => {}, onBotSent: () => {} });

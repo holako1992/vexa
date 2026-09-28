@@ -41,7 +41,7 @@ import {
   makeSilentWav,
 } from "./fixtures.mjs";
 
-// DB-50: the recordings fixture's own audio bytes — generated ONCE at stub startup (never a
+// The recordings fixture's own audio bytes — generated ONCE at stub startup (never a
 // committed binary blob, see `fixtures.mjs`'s header comment on `makeSilentWav`). Every media
 // file this stub serves plays the SAME silent clip regardless of which recording/media-file id
 // was asked for — the point of the e2e specs is proving the DASHBOARD's Range/seek/download
@@ -60,13 +60,13 @@ const bots = []; // every POST /bots body, in arrival order
 const gatewayLog = [];
 const adminLog = [];
 /** Forced response overrides, keyed by a short name a spec asks for. Cleared on reset.
- *  `botsQuota: true` makes `POST /bots` answer DB-72's unwrapped 402 `quota_exceeded` body
+ * `botsQuota: true` makes `POST /bots` answer the unwrapped 402 `quota_exceeded` body
  *  instead of dispatching — spec 14's paywall proof. */
 let force = {
   meetings: null, meetingDetail: null, botsQuota: false, search: null,
   googleExchange: null, microsoftExchange: null,
 };
-/** DB-31 — the state tokens `GET /user/calendars/google/authorize` has issued, and which of
+/** The state tokens `GET /user/calendars/google/authorize` has issued, and which of
  *  those have already been consumed by an exchange. Mirrors just enough of the core's real
  *  behaviour (`google_oauth.sign_state`/`verify_state`) for the e2e specs: an unknown or
  *  already-used state is refused with the same `"invalid state: …"` shape the real 400 carries,
@@ -74,22 +74,22 @@ let force = {
  *  handling of that refusal, not the core's crypto. */
 let issuedGoogleStates = new Set();
 let usedGoogleStates = new Set();
-/** DB-32/DB-33 — the Microsoft sibling of the two sets just above (`microsoft_oauth.sign_state`/
+/** The Microsoft sibling of the two sets just above (`microsoft_oauth.sign_state`/
  *  `verify_state`), kept in its OWN sets so a state minted for one provider's flow is never
  *  mistaken for a replay of the other's — same rule `main.py`'s `_consume_oauth_nonce` applies
  *  with its per-provider `field`. */
 let issuedMicrosoftStates = new Set();
 let usedMicrosoftStates = new Set();
-/** DB-34 — each connected calendar's last sync stamp, keyed by calendar id, in EXACTLY the shape
+/** Each connected calendar's last sync stamp, keyed by calendar id, in EXACTLY the shape
  *  `GET /user/calendars/<id>/sync` answers (`{last_sync, last_error, counts}` —
  *  `meeting_api/calendar_sync/runner.py`'s `run_user_sync`). No entry means "never synced yet",
  *  which the route answers as `{}`, same as the real one before any sync has run. */
 let syncStamps = new Map();
-/** `GET /user/entitlements`'s current answer (DB-74/DB-75) — swapped per spec via
+/** `GET /user/entitlements`'s current answer — swapped per spec via
  *  `/__control/entitlements` (`helpers.ts`'s `setEntitlements`), reset to the free-plan default
  *  on every `/__control/reset`. */
 let entitlements = freeEntitlements();
-/** Mirrors `users.data.stripe_customer_id` on the real core (DB-74b): `null` until the account's
+/** Mirrors `users.data.stripe_customer_id` on the real core: `null` until the account's
  *  first `POST /billing/checkout`, which is exactly when `POST /billing/portal` starts answering
  *  a session instead of 409. `/__control/billingCustomer` lets a spec set it directly, to prove
  *  the Manage button's success path without first driving a real checkout. */
@@ -171,10 +171,10 @@ function logRequest(log, req) {
 
 /** Read a request's JSON body AND record it on its own already-logged entry — so a spec can
  *  assert not just "the dashboard called this route" (`gatewayRequests()`) but the exact payload
- *  it sent (`entry.body`), e.g. DB-33's Join / Don't join toggle asserting `{auto_join: false}`
+ * it sent (`entry.body`), e.g. the Join / Don't join toggle asserting `{auto_join: false}`
  *  actually reached the stub. `entry` is whatever `logRequest` returned for THIS request — every
- *  write handler in `handleGateway` that used to call bare `readJsonBody(req)` calls this instead,
- *  so the one entry already in `gatewayLog` gains a `body` field rather than a second log write. */
+ *  write handler in `handleGateway` calls this instead of bare `readJsonBody(req)`, so the one
+ *  entry already in `gatewayLog` gains a `body` field rather than a second log write. */
 async function readAndLogBody(req, entry) {
   const body = await readJsonBody(req);
   if (entry) entry.body = body;
@@ -195,7 +195,7 @@ function findRecording(recordingId) {
   return null;
 }
 
-/** DB-50: serve `buffer` honoring a real HTTP `Range` request — the same contract
+/** Serve `buffer` honoring a real HTTP `Range` request — the same contract
  *  `meeting_api/recordings/router.py`'s `get_recording_media_raw` implements against real object
  *  storage (a `206` with `Content-Range`/`Accept-Ranges` for a satisfiable range, `416` with
  *  `Content-Range: bytes *\/<total>` for one past the end, a full `200` with no `Range` header at
@@ -289,17 +289,17 @@ async function handleGateway(req, res) {
     entitlements = await readJsonBody(req);
     return sendJson(res, 200, { ok: true, entitlements });
   }
-  // DB-74b: set/clear whether this account has a Stripe customer on file — see `stripeCustomerId`
+  // Set/clear whether this account has a Stripe customer on file — see `stripeCustomerId`
   // above. `helpers.ts`'s `setStripeCustomer(request, present)`.
   if (url.pathname === "/__control/billingCustomer" && req.method === "POST") {
     const body = await readJsonBody(req);
     stripeCustomerId = body.present ? "cus_e2e_test" : null;
     return sendJson(res, 200, { ok: true, stripeCustomerId });
   }
-  // DB-48's "a live row on a later page stays visible" spec: flip one fixture meeting's status
+  // The "a live row on a later page stays visible" spec: flip one fixture meeting's status
   // without going through a real bot lifecycle, so the spec can prove the POLL's re-fetch window
   // rule rather than the bot-spawn path (already covered elsewhere).
-  // DB-31: seed one raw calendar connection directly (e.g. a pre-existing Google connection with
+  // Seed one raw calendar connection directly (e.g. a pre-existing Google connection with
   // `reconnect_needed: true`) — a shortcut around driving a real connect first, the same role
   // `/__control/setMeetingStatus` plays for meetings below. An id is minted if the caller didn't
   // give one.
@@ -309,7 +309,7 @@ async function handleGateway(req, res) {
     calendars.push(cal);
     return sendJson(res, 200, { ok: true, calendar: cal });
   }
-  // DB-34: seed a connection's sync stamp directly — the health page's "failed feed" and "N
+  // Seed a connection's sync stamp directly — the health page's "failed feed" and "N
   // events touched" specs need a specific `{last_sync, last_error, counts}` without driving a
   // real sync first. `calendarId` names an EXISTING connection (seed it with `seedCalendar`
   // first, or use the fixture's own id).
@@ -329,7 +329,7 @@ async function handleGateway(req, res) {
 
   const logEntry = logRequest(gatewayLog, req);
 
-  // GET /meetings — DB-48: honours `limit`/`offset` and reports `has_more`, exactly like
+  // GET /meetings — honours `limit`/`offset` and reports `has_more`, exactly like
   // meeting-api's own handler (`meeting_api/collector/app.py`'s `get_meetings`, which forwards
   // the store's own `has_more` return value rather than discarding it).
   if (req.method === "GET" && parts.length === 1 && parts[0] === "meetings") {
@@ -342,7 +342,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { meetings: page, has_more: hasMore });
   }
 
-  // GET /transcripts/search?q=... — DB-44. Checked before the generic 3-segment transcripts
+  // GET /transcripts/search?q=.... Checked before the generic 3-segment transcripts
   // branch, same ordering rule the real route uses ("search" is not a platform). A spec that
   // needs to see the in-flight state holds the answer with `/__control/searchHold`.
   if (req.method === "GET" && parts.length === 2 && parts[0] === "transcripts" && parts[1] === "search") {
@@ -374,7 +374,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { hosts: JITSI_HOSTS });
   }
 
-  // GET /agent/workspace/file?path=meetings/<id>/summary.md — DB-60's summary door. The dashboard
+  // GET /agent/workspace/file?path=meetings/<id>/summary.md — the summary door. The dashboard
   // composes this path itself; only a numeric id ever reaches it (upstream.test.ts proves that),
   // so this stub only ever needs to answer the one shape.
   if (req.method === "GET" && parts.length === 3 && parts[0] === "agent" && parts[1] === "workspace" && parts[2] === "file") {
@@ -385,18 +385,18 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { path, content });
   }
 
-  // GET /bots/status — the caller's currently running bots (DB-41).
+  // GET /bots/status — the caller's currently running bots.
   if (req.method === "GET" && parts.length === 2 && parts[0] === "bots" && parts[1] === "status") {
     const running = meetings.filter((m) => RUNNING_STATUSES.has(m.status));
     return sendJson(res, 200, { running, running_bots: running, count: running.length });
   }
 
-  // GET /user/entitlements — the resolved plan/limits/usage (DB-70/DB-74/DB-75).
+  // GET /user/entitlements — the resolved plan/limits/usage.
   if (req.method === "GET" && parts.length === 2 && parts[0] === "user" && parts[1] === "entitlements") {
     return sendJson(res, 200, entitlements);
   }
 
-  // DELETE /bots/<platform>/<native> — Stop recording (DB-41). Mirrors meeting-api's own shape
+  // DELETE /bots/<platform>/<native> — Stop recording. Mirrors meeting-api's own shape
   // closely enough for the dashboard's spec: an unsupported platform is 422, an unknown/already-
   // stopped pair is 404, otherwise the row moves to `completed` with `stop_requested: true`.
   if (req.method === "DELETE" && parts.length === 3 && parts[0] === "bots") {
@@ -416,7 +416,7 @@ async function handleGateway(req, res) {
     });
   }
 
-  // GET /meetings/<platform>/<native>/participants — DB-42.
+  // GET /meetings/<platform>/<native>/participants.
   if (req.method === "GET" && parts.length === 4 && parts[0] === "meetings" && parts[3] === "participants") {
     const [, platform, native] = parts;
     const found = participantsFor(platform, native);
@@ -435,7 +435,7 @@ async function handleGateway(req, res) {
     });
   }
 
-  // POST /meetings/<id>/annotate — inline rename (DB-42): {title} merges onto the row's own data.
+  // POST /meetings/<id>/annotate — inline rename: {title} merges onto the row's own data.
   if (req.method === "POST" && parts.length === 3 && parts[0] === "meetings" && parts[2] === "annotate") {
     const row = meetings.find((m) => String(m.id) === parts[1]);
     if (!row) return sendJson(res, 404, { detail: "Meeting not found" });
@@ -444,7 +444,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, row);
   }
 
-  // PATCH /meetings/<id> {auto_join} — DB-33's Upcoming page's Join / Don't join override. The
+  // PATCH /meetings/<id> {auto_join} — the Upcoming page's Join / Don't join override. The
   // dashboard's own allowlist (`upstream.ts`'s `isAutoJoinBody`) only ever forwards this exact
   // shape, so the stub only needs to answer it. Mirrors `_apply_meeting_patch`
   // (`meeting_api/collector/app.py`): only the field actually sent is written; a stale
@@ -461,7 +461,7 @@ async function handleGateway(req, res) {
   }
 
   // DELETE /meetings/<id> — delete a planned row outright, or wipe a completed one's transcript
-  // and recordings while the row itself stays (meeting-api's own two branches; DB-42's confirm
+  // and recordings while the row itself stays (meeting-api's own two branches; the confirm
   // text names both without knowing in advance which one a given meeting will take).
   if (req.method === "DELETE" && parts.length === 2 && parts[0] === "meetings") {
     const idx = meetings.findIndex((m) => String(m.id) === parts[1]);
@@ -480,7 +480,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { calendars });
   }
 
-  // GET /user/calendars/google/authorize — DB-31. Mints a state, records it as issued (never
+  // GET /user/calendars/google/authorize. Mints a state, records it as issued (never
   // signs it — see `issuedGoogleStates`'s comment above), and hands back a REAL
   // accounts.google.com URL carrying it, exactly like `google_oauth.build_authorize_url`, so the
   // dashboard's own `isTrustedGoogleAuthorizeRedirect` check has something real to accept.
@@ -511,7 +511,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { authorize_url, state });
   }
 
-  // POST /user/calendars/google/exchange {code, state} — DB-31's callback page. `code` is never
+  // POST /user/calendars/google/exchange {code, state} — the callback page. `code` is never
   // inspected (the stub has no real Google token endpoint to call) — only `state`'s issued/used
   // bookkeeping and `force.googleExchange` decide the answer, which is exactly the seam the
   // dashboard's own specs need: THIS client's handling of a state refusal or an upstream failure,
@@ -554,7 +554,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 201, cal);
   }
 
-  // GET /user/calendars/microsoft/authorize — DB-32/DB-33's Microsoft sibling of the Google
+  // GET /user/calendars/microsoft/authorize — the Microsoft sibling of the Google
   // authorize route above. Mints a state, records it as issued, and hands back a REAL
   // login.microsoftonline.com URL carrying it, so the dashboard's own
   // `isTrustedMicrosoftAuthorizeRedirect` check has something real to accept.
@@ -580,7 +580,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { authorize_url, state });
   }
 
-  // POST /user/calendars/microsoft/exchange {code, state} — DB-32/DB-33's callback page. Same
+  // POST /user/calendars/microsoft/exchange {code, state} — the callback page. Same
   // rule as the Google exchange above: `code` is never inspected, only `state`'s issued/used
   // bookkeeping and `force.microsoftExchange` decide the answer.
   if (
@@ -623,7 +623,7 @@ async function handleGateway(req, res) {
 
   // POST /bots
   if (req.method === "POST" && parts.length === 1 && parts[0] === "bots") {
-    // DB-72/DB-75: `force.botsQuota` mirrors meeting-api's monthly-quota refusal — an unwrapped
+    // `force.botsQuota` mirrors meeting-api's monthly-quota refusal — an unwrapped
     // 402, no `{"detail": ...}` envelope. The dashboard's paywall must branch on the `error`
     // field this body carries, never on the 402 status alone (see SendBotDialog.tsx).
     if (force.botsQuota) return sendJson(res, 402, QUOTA_EXCEEDED_BODY);
@@ -632,7 +632,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { id: 900 + bots.length, status: "requested", ...body });
   }
 
-  // POST /billing/checkout {plan, interval} — DB-74b's Upgrade button. Mirrors
+  // POST /billing/checkout {plan, interval} — the Upgrade button. Mirrors
   // `create_billing_checkout` (`admin_api/app/main.py`) closely enough for the dashboard's own
   // spec: mints a Stripe customer on first use (idempotent after), and returns a Checkout Session
   // URL on the real `checkout.stripe.com` host — the dashboard's own `isTrustedBillingRedirect`
@@ -645,7 +645,7 @@ async function handleGateway(req, res) {
     });
   }
 
-  // POST /billing/portal — DB-74b's Manage-subscription button. 409 with no body when there is no
+  // POST /billing/portal — the Manage-subscription button. 409 with no body when there is no
   // Stripe customer yet, exactly like `create_billing_portal`'s `HTTPException(409, ...)`.
   if (req.method === "POST" && parts.length === 2 && parts[0] === "billing" && parts[1] === "portal") {
     if (!stripeCustomerId) {
@@ -670,7 +670,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, cal);
   }
 
-  // GET /user/calendars/<id>/sync — DB-34's health read: the connection's last sync stamp, or
+  // GET /user/calendars/<id>/sync — the health read: the connection's last sync stamp, or
   // `{}` when it has never synced (same as the real route before any sweep/POST has run for it).
   if (req.method === "GET" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" && parts[3] === "sync") {
     const cal = calendars.find((c) => c.id === parts[2]);
@@ -678,8 +678,8 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, syncStamps.get(parts[2]) ?? {});
   }
 
-  // POST /user/calendars/<id>/sync — "sync now" (DB-31's Calendar tab, DB-33's Upcoming page,
-  // DB-34's health page all call this). Answers the SAME stamp shape the GET above reads back,
+  // POST /user/calendars/<id>/sync — "sync now" (the Calendar tab, the Upcoming page,
+  // The health page all call this). Answers the SAME stamp shape the GET above reads back,
   // and stores it, so a spec can drive a real sync and then read its own result off the health
   // route — meeting-api's own `calendar_connection_sync_run` behaves identically.
   if (req.method === "POST" && parts.length === 4 && parts[0] === "user" && parts[1] === "calendars" && parts[3] === "sync") {
@@ -711,7 +711,7 @@ async function handleGateway(req, res) {
     return sendJson(res, 204, null);
   }
 
-  // GET /recordings — DB-50's list, the same JSONB-scan shape `list_recordings` builds
+  // GET /recordings — the list, the same JSONB-scan shape `list_recordings` builds
   // (`meeting_api/recordings/router.py`): every fixture meeting's `data.recordings[]`, newest
   // `created_at` first, honoring `limit`/`offset`/`meeting_id` exactly like `GET /meetings` above.
   if (req.method === "GET" && parts.length === 1 && parts[0] === "recordings") {
@@ -735,7 +735,7 @@ async function handleGateway(req, res) {
     });
   }
 
-  // GET /recordings/<id>/master?type=audio|video — DB-50's finalize-on-read metadata. Mirrors
+  // GET /recordings/<id>/master?type=audio|video — the finalize-on-read metadata. Mirrors
   // `get_recording_master`: 404 for an unknown/unowned recording id, 404 when this recording has
   // no media file of the requested `type` yet.
   if (req.method === "GET" && parts.length === 3 && parts[0] === "recordings" && parts[2] === "master") {
@@ -772,7 +772,7 @@ async function handleGateway(req, res) {
     return;
   }
 
-  // DELETE /recordings/<id> — DB-52's Delete button. Mirrors `delete_recording`'s 404 for an
+  // DELETE /recordings/<id> — the Delete button. Mirrors `delete_recording`'s 404 for an
   // unknown/unowned id; this stub has no storage backend to fail, so it always succeeds otherwise.
   if (req.method === "DELETE" && parts.length === 2 && parts[0] === "recordings") {
     const found = findRecording(parts[1]);

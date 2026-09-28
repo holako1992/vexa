@@ -105,7 +105,7 @@ class RecordingRepo(Protocol):
         ...
 
     async def list_purge_candidates(self, cutoff, limit: int) -> list[dict]:
-        """A BOUNDED batch for the Free-plan retention sweep (DB-78) — at most ``limit`` MEETING
+        """A BOUNDED batch for the Free-plan retention sweep — at most ``limit`` MEETING
         rows scanned (the oldest ``completed``/``failed`` ones first, by the indexed
         ``Meeting.created_at``), never the whole ``meetings`` table and never a JSONB scan with no
         bound at all. Within those rows, every recording whose OWN ``created_at`` is at or before

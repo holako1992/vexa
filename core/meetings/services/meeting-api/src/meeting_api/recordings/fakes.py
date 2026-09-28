@@ -136,7 +136,7 @@ class InMemoryRecordingRepo:
         return out
 
     async def list_purge_candidates(self, cutoff, limit: int) -> list[dict]:
-        """Mirrors ``SqlAlchemyRecordingRepo.list_purge_candidates`` (DB-78): oldest terminal
+        """Mirrors ``SqlAlchemyRecordingRepo.list_purge_candidates``: oldest terminal
         meetings first (by ``created_at``, seeded by ``seed(..., created_at=...)``), a
         candidate's OWN recording ``created_at`` compared against ``cutoff``, bounded by
         ``limit``."""

@@ -404,7 +404,7 @@ def test_a_retry_after_a_partial_failure_finishes_the_rest(monkeypatch):
 def test_drop_to_attendees_runs_after_email_attendees_in_post_meeting():
     reg = Registry()
     production.build(reg, _StubDB())
-    # VERSION 6 (DB-80): `email_owner_ready` added, after `commit_meeting_summary` — see
+    # VERSION 6: `email_owner_ready` added, after `commit_meeting_summary` — see
     # production.py's own comment on the registration for why the mail/drop/summary steps lead it.
     steps = list(reg.flows[("post_meeting", 6)].steps)
     assert steps == ["process_meeting", "email_minutes", "email_attendees",

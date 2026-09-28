@@ -1,6 +1,6 @@
 """token_cipher.py — AES-256-GCM at rest for the Google Calendar refresh token.
 
-DB-30: the refresh token is a bearer credential (like the Stripe secret key, unlike the ICS feed
+The refresh token is a bearer credential (like the Stripe secret key, unlike the ICS feed
 URL or the webhook secret, which this service has always stored PLAINTEXT-and-masked — see
 ``_mask_secret`` in ``main.py`` and ``git_credentials.py``'s "plaintext at rest" note in the agent
 domain). Those precedents are deliberate for values that are either low-blast-radius or themselves
@@ -10,7 +10,7 @@ Google, mints a fresh access token to the holder's calendar. It must never sit i
 reads a user row) as bytes an operator with read access to the table can use directly. So it is
 encrypted here before ``calendars.py`` ever puts it in a connection dict.
 
-DB-30a: AES-256-GCM from ``cryptography`` (Apache-2.0/BSD, Category A; already vendored in this
+AES-256-GCM from ``cryptography`` (Apache-2.0/BSD, Category A; already vendored in this
 monorepo for ``core/meetings/services/mcp``), not a hand-rolled construction.
 
   * ``CALENDAR_TOKEN_ENCRYPTION_KEY`` is standard base64 (``base64.b64encode`` — the padded

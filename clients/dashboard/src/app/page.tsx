@@ -20,7 +20,7 @@ export default async function HomePage() {
 
   return (
     <Shell user={{ email: user.email, name: user.name }}>
-      {/* MeetingsView reads `?calendar=` (DB-31's return-from-Google-OAuth landing) via
+      {/* MeetingsView reads `?calendar=` (the return-from-Google-OAuth landing) via
           useSearchParams, which Next.js requires a Suspense boundary for even under
           force-dynamic. */}
       <Suspense fallback={<LoadingState label="Loading meetings…" />}>

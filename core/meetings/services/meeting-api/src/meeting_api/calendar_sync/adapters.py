@@ -9,7 +9,7 @@ flip can never turn the poller into an internal-network probe. Size-capped: a fe
 ``fetch_configs`` asks admin-api's internal edge (X-Internal-Secret) which users have a feed
 connected — the secret URL crosses only this internal hop.
 
-DB-32 adds the Microsoft Graph pair (``fetch_microsoft_access_token`` / ``fetch_microsoft_events``)
+This adds the Microsoft Graph pair (``fetch_microsoft_access_token`` / ``fetch_microsoft_events``)
 beside the Google one (``fetch_google_access_token`` / ``fetch_google_events``) — same shapes,
 same fail-loud rules, a different provider's token-mint edge and events endpoint.
 """
@@ -144,7 +144,7 @@ async def fetch_microsoft_access_token(admin_api_url: str, internal_secret: str,
                                        ) -> tuple[Optional[str], Optional[str]]:
     """A short-lived Microsoft Graph access token for this connection, via admin-api's internal
     edge — meeting-api NEVER reads identity's tables or an encrypted refresh token directly. Same
-    shape as ``fetch_google_access_token`` (DB-32 mirrors DB-30)."""
+    shape as ``fetch_google_access_token`` (mirrors)."""
     import httpx
 
     try:

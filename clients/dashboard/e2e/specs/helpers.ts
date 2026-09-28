@@ -26,7 +26,7 @@ export interface LoggedRequest {
   headers: Record<string, string>;
   at: number;
   /** The parsed JSON body the stub GATEWAY received on this request, for every write route that
-   *  goes through `handleGateway`'s own `readAndLogBody` (every write route added since DB-33) —
+   * goes through `handleGateway`'s own `readAndLogBody` (every write route added since) —
    *  `undefined` on a route that predates it or on a GET. Lets a spec assert the exact payload
    *  that reached the stub, not just that the route was called. */
   body?: unknown;
@@ -58,7 +58,7 @@ export async function forceMeetingDetail(request: APIRequestContext, status: num
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { meetingDetail: status } });
 }
 
-/** Same, for `GET /transcripts/search` — DB-44's error-state spec. */
+/** Same, for `GET /transcripts/search` — the error-state spec. */
 export async function forceSearch(request: APIRequestContext, status: number): Promise<void> {
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { search: status } });
 }
@@ -73,14 +73,14 @@ export async function releaseSearch(request: APIRequestContext): Promise<void> {
   await request.post(`${GATEWAY_URL}/__control/searchRelease`);
 }
 
-/** Flip one fixture meeting's status directly (DB-48's "a live row on a later page stays visible"
+/** Flip one fixture meeting's status directly (the "a live row on a later page stays visible"
  *  spec) — a shortcut around a real bot lifecycle, which is already covered by 05/13's specs. */
 export async function setMeetingStatus(request: APIRequestContext, id: number, status: string): Promise<void> {
   const res = await request.post(`${GATEWAY_URL}/__control/setMeetingStatus`, { data: { id, status } });
   if (!res.ok()) throw new Error(`stub set-meeting-status failed: ${res.status()}`);
 }
 
-/** Swap the stub's `GET /user/entitlements` answer (DB-74/DB-75) — see `../fixtures.mjs` for the
+/** Swap the stub's `GET /user/entitlements` answer — see `../fixtures.mjs` for the
  *  named states (`freeEntitlements`, `proUnlimitedEntitlements`, `pastDueEntitlements`,
  *  `unknownUsageEntitlements`). Persists until the next `resetStub`. */
 export async function setEntitlements(request: APIRequestContext, data: unknown): Promise<void> {
@@ -88,26 +88,26 @@ export async function setEntitlements(request: APIRequestContext, data: unknown)
   if (!res.ok()) throw new Error(`stub set-entitlements failed: ${res.status()}`);
 }
 
-/** Make the stub's `POST /bots` answer DB-72's unwrapped 402 `quota_exceeded` body
+/** Make the stub's `POST /bots` answer the unwrapped 402 `quota_exceeded` body
  *  (`../fixtures.mjs`'s `QUOTA_EXCEEDED_BODY`) instead of dispatching — spec 14's paywall proof. */
 export async function forceBotsQuotaExceeded(request: APIRequestContext, on = true): Promise<void> {
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { botsQuota: on } });
 }
 
 /** Force the stub gateway's next `POST /user/calendars/google/exchange` (and every one after,
- *  until the next reset) to answer `status` instead of resolving state normally — DB-31's
+ * until the next reset) to answer `status` instead of resolving state normally — the
  *  exchange-failure spec (Google itself rejecting the code, surfaced verbatim). */
 export async function forceGoogleExchange(request: APIRequestContext, status: number | null): Promise<void> {
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { googleExchange: status } });
 }
 
-/** The Microsoft sibling of `forceGoogleExchange` above — DB-32/DB-33's exchange-failure spec. */
+/** The Microsoft sibling of `forceGoogleExchange` above — the exchange-failure spec. */
 export async function forceMicrosoftExchange(request: APIRequestContext, status: number | null): Promise<void> {
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { microsoftExchange: status } });
 }
 
 /** Seed one connection's sync stamp directly (`{last_sync, last_error, counts}` — the exact
- *  shape `GET /user/calendars/<id>/sync` answers) — DB-34's health-page specs prove a failed
+ * shape `GET /user/calendars/<id>/sync` answers) — the health-page specs prove a failed
  *  feed and an event count without driving a real sync first. */
 export async function seedSyncStamp(
   request: APIRequestContext,
@@ -118,7 +118,7 @@ export async function seedSyncStamp(
   if (!res.ok()) throw new Error(`stub seed-sync-stamp failed: ${res.status()}`);
 }
 
-/** Push one raw calendar connection straight into the stub's list — DB-31's reconnect spec seeds
+/** Push one raw calendar connection straight into the stub's list — the reconnect spec seeds
  *  an existing Google connection with `reconnect_needed: true` this way, without driving a real
  *  connect first. An `id` is minted if the caller doesn't supply one. */
 export async function seedCalendar(request: APIRequestContext, calendar: Record<string, unknown>): Promise<void> {
@@ -126,7 +126,7 @@ export async function seedCalendar(request: APIRequestContext, calendar: Record<
   if (!res.ok()) throw new Error(`stub seed-calendar failed: ${res.status()}`);
 }
 
-/** Set or clear whether the stub's account has a Stripe customer on file (DB-74b) — governs
+/** Set or clear whether the stub's account has a Stripe customer on file — governs
  *  whether `POST /billing/portal` answers a session or a 409. `POST /billing/checkout` sets this
  *  itself on first use, same as the real core; call this to reach the portal's success path
  *  directly, without driving a checkout first. */
@@ -142,7 +142,7 @@ export async function setStripeCustomer(request: APIRequestContext, present: boo
 let signInCounter = 0;
 
 /** Drive the real email-login form to a signed-in state and land on the meetings list. Uses the
- *  UI, not a cookie shortcut — DB-02 exists to prove the actual sign-in flow, not to route around
+ * UI, not a cookie shortcut — This exists to prove the actual sign-in flow, not to route around
  *  it. */
 export async function signIn(page: Page, email: string): Promise<void> {
   signInCounter += 1;

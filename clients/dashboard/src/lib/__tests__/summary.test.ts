@@ -1,4 +1,4 @@
-/** `summary.v1` parsing (DB-60) — weighted toward malformed input, since a summary the dashboard
+/** `summary.v1` parsing — weighted toward malformed input, since a summary the dashboard
  *  cannot parse must render as its own distinct state (`SummaryPanel`'s `malformed` branch),
  *  never silently as "skipped" or an empty complete note. */
 import { describe, expect, it } from "vitest";

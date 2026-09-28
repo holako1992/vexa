@@ -1,4 +1,4 @@
-"""microsoft_oauth.py — DB-32: the Microsoft Graph Calendar OAuth flow, server-side, client secret
+"""microsoft_oauth.py — the Microsoft Graph Calendar OAuth flow, server-side, client secret
 never leaving admin-api. Same shape as ``google_oauth.py``; see that module's docstring for the
 rationale each piece below mirrors.
 
@@ -124,7 +124,7 @@ class MicrosoftOAuthError(RuntimeError):
         self.reason = reason
         # invalid_grant is the Azure AD v2 endpoint's own error code for "this refresh token is
         # revoked/expired" — the one case that must become the connection's reconnect_needed
-        # state, not a generic failure (same rule DB-30 set for Google).
+        # state, not a generic failure (same rule the Google flow follows).
         self.invalid_grant = invalid_grant
 
 

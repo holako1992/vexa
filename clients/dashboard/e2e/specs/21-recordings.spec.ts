@@ -1,4 +1,4 @@
-/** DB-50 (list + audio player), DB-51 (click-a-segment-to-seek), DB-52 (download + delete)
+/** The list, the audio player, click-a-segment-to-seek, and download + delete —
  *  against a REAL running stub — including a REAL HTTP Range request/response for the player,
  *  never a canned header (see `stub-server.mjs`'s `serveRangeableBytes`). Meeting 102 ("Design
  *  Review") is the fixture's one recording: recording id `700001`, audio media file id `800001`.

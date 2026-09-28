@@ -88,7 +88,7 @@ def normalise_email(email: str) -> str:
 
 
 def _signup_client_ip(request: Request) -> str:
-    """DB-76: what this process can actually see about the caller's address for `POST
+    """What this process can actually see about the caller's address for `POST
     /admin/users`, logged for abuse review — never used to block (no IP-based refusal anywhere
     in this module).
 
@@ -116,9 +116,9 @@ def _dev_mode() -> bool:
 
 
 def _billing_upgrade_url() -> Optional[str]:
-    """The dashboard's upgrade/pricing page, for DB-72's `quota_exceeded` refusal body.
+    """The dashboard's upgrade/pricing page, for the `quota_exceeded` refusal body.
 
-    A deployment that has not configured billing (DB-73 not wired, or self-hosted with no plans
+    A deployment that has not configured billing (not wired, or self-hosted with no plans
     sold) names no such page — `null`, never a hardcoded vexa.ai URL a self-host response would
     otherwise leak."""
     return os.getenv("BILLING_UPGRADE_URL") or None
@@ -141,7 +141,7 @@ def _google_calendar_env() -> dict:
 
 
 def _require_google_calendar() -> dict:
-    """Fail loud with a typed 503 — never a 500 — when DB-30's Google OAuth config is incomplete.
+    """Fail loud with a typed 503 — never a 500 — when the Google OAuth config is incomplete.
     Every Google-calendar route calls this FIRST (mirrors ``_require_stripe_billing``), so an
     unconfigured deployment's three routes are uniformly unavailable while ``/user/calendars``
     (ICS) is completely unaffected. Returns the env dict on success so callers need not re-read it."""
@@ -170,7 +170,7 @@ def _microsoft_calendar_env() -> dict:
 
 
 def _require_microsoft_calendar() -> dict:
-    """Fail loud with a typed 503 — never a 500 — when DB-32's Microsoft OAuth config is
+    """Fail loud with a typed 503 — never a 500 — when the Microsoft OAuth config is
     incomplete. Mirrors ``_require_google_calendar`` exactly: every Microsoft-calendar route calls
     this FIRST, so an unconfigured deployment's three routes are uniformly unavailable while
     ``/user/calendars`` (ICS) and the Google connector are completely unaffected."""
@@ -188,7 +188,7 @@ def _require_microsoft_calendar() -> dict:
 
 
 def _require_stripe_billing() -> None:
-    """Fail loud with a typed, actionable 503 — never a 500 — when DB-73's config is incomplete.
+    """Fail loud with a typed, actionable 503 — never a 500 — when the config is incomplete.
     Every one of checkout/portal/webhook calls this FIRST, so an unconfigured deployment's
     `/billing/*` surface is uniformly unavailable and names exactly what an operator must set,
     while the rest of admin-api is unaffected (config.v1 capability `stripe_billing`)."""
@@ -280,13 +280,13 @@ class PlatformBillingDataPatch(BaseModel):
 class UserAdminPatch(BaseModel):
     max_concurrent_bots: Optional[int] = Field(default=None, ge=0)
     data: Optional[PlatformBillingDataPatch] = None
-    #: DB-77 support comp: a catalog plan id (`billing.catalog.PLANS`) that wins over the
+    #: Support comp: a catalog plan id (`billing.catalog.PLANS`) that wins over the
     #: Stripe-derived tier in `resolve_plan`, or `None` to clear a previously-set override.
     #: Whether the field was supplied at all (vs. left out) is read from `model_fields_set`,
     #: never from this default, so "clear the override" (`{"plan_override": null}`) is
     #: distinguishable from "leave it alone" (the key omitted entirely).
     plan_override: Optional[str] = Field(default=None)
-    #: DB-77 support comp: extra meetings added to `meetings_per_month` for the CURRENT resolved
+    #: Support comp: extra meetings added to `meetings_per_month` for the CURRENT resolved
     #: period only (see `billing/entitlements.py`'s module docstring for why it does not carry
     #: over). `None` clears a previously-set bonus; a negative value is a 422 via `ge=0`.
     quota_bonus: Optional[int] = Field(default=None, ge=0)
@@ -368,7 +368,7 @@ class WebhookUpdate(BaseModel):
     webhook_events: Optional[Dict[str, bool]] = None
 
 
-# ── billing: Stripe checkout/portal request/response shapes (DB-73) ──────────────────────────────
+# ── billing: Stripe checkout/portal request/response shapes ──────────────────────────────
 class CheckoutRequest(BaseModel):
     """`plan`/`interval` name a catalog price via `billing.catalog.price_id_for` — never a raw
     Stripe price id from the client (the id lives only in this service's own env, per plan)."""
@@ -412,7 +412,7 @@ class CalendarCreate(BaseModel):
 
 
 class GoogleExchangeRequest(BaseModel):
-    """DB-31's callback page relays exactly these two fields from Google's redirect."""
+    """The callback page relays exactly these two fields from Google's redirect."""
     code: str
     state: str
 
@@ -427,7 +427,7 @@ class GoogleTokenRequest(BaseModel):
 
 
 class MicrosoftExchangeRequest(BaseModel):
-    """DB-32's callback page relays exactly these two fields from Microsoft's redirect."""
+    """The callback page relays exactly these two fields from Microsoft's redirect."""
     code: str
     state: str
 
@@ -657,7 +657,7 @@ def create_app() -> FastAPI:
             response.status_code = status.HTTP_200_OK
             return UserResponse.model_validate(existing)
 
-        # DB-76 trial-abuse floor, part 1: disposable-domain refusal. ONLY on the create path —
+        # Trial-abuse floor, part 1: disposable-domain refusal. ONLY on the create path —
         # an address already onboarded above returns 200 on the existing row without ever
         # reaching here, so a domain added to the list after someone signed up never locks them
         # out. `SIGNUP_ALLOW_DISPOSABLE=true` is the operator escape hatch (see
@@ -678,7 +678,7 @@ def create_app() -> FastAPI:
                 },
             )
 
-        # DB-76 trial-abuse floor, part 2: log the signup with the client address this request
+        # Trial-abuse floor, part 2: log the signup with the client address this request
         # actually carries, for review — never a block. See `_signup_client_ip`'s docstring for
         # exactly what that address is (and is not) today.
         log.info(
@@ -1001,10 +1001,10 @@ def create_app() -> FastAPI:
         await _save_calendar_connections(user, db, connections)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    # --- user tier: Google Calendar OAuth connect (DB-30) — two routes, scopes bot,tx (see
+    # --- user tier: Google Calendar OAuth connect — two routes, scopes bot,tx (see
     #     core/identity/routes.v1.json), fronted by the gateway exactly like /user/calendars.
     #     The client secret and the encrypted refresh token both live ONLY in this service; the
-    #     dashboard (DB-31) only ever sees the consent URL and relays {code, state} back here. ---
+    # dashboard only ever sees the consent URL and relays {code, state} back here. ---
     from uuid import uuid4
 
     from . import google_oauth, token_cipher
@@ -1031,7 +1031,7 @@ def create_app() -> FastAPI:
 
     @app.get("/user/calendars/google/authorize")
     async def google_calendar_authorize(user: User = Depends(get_current_user)):
-        """The Google consent-screen URL, carrying a fresh signed state bound to the caller. DB-31
+        """The Google consent-screen URL, carrying a fresh signed state bound to the caller. This
         redirects the browser here (or opens it directly, having fetched this JSON first)."""
         env = _require_google_calendar()
         state = google_oauth.sign_state(user.id)
@@ -1044,7 +1044,7 @@ def create_app() -> FastAPI:
     async def google_calendar_exchange(body: GoogleExchangeRequest,
                                        user: User = Depends(get_current_user_for_update),
                                        db: AsyncSession = Depends(get_db)):
-        """DB-31's callback page relays Google's ``code``+``state`` here. Verifies the state
+        """The callback page relays Google's ``code``+``state`` here. Verifies the state
         (signature, TTL, bound to THIS caller, single-use), exchanges the code at Google's token
         endpoint, encrypts the refresh token at rest, stores (or re-connects) the connection, and
         returns its masked shape — same response contract as ``POST /user/calendars``."""
@@ -1131,7 +1131,7 @@ def create_app() -> FastAPI:
         await _save_calendar_connections(user, db, connections)
         return masked_connection(created)
 
-    # --- user tier: Microsoft Graph Calendar OAuth connect (DB-32) — same shape as the Google
+    # --- user tier: Microsoft Graph Calendar OAuth connect — same shape as the Google
     #     pair above, two routes, scopes bot,tx (see core/identity/routes.v1.json), fronted by the
     #     gateway identically. The client secret and the encrypted refresh token both live ONLY in
     #     this service; the dashboard only ever sees the consent URL and relays {code, state}
@@ -1365,10 +1365,10 @@ def create_app() -> FastAPI:
             "token": _mask_secret(prefs.get("token")),
         }
 
-    # --- user tier: resolved billing entitlements (DB-70) — read-only, same auth as
-    #     /user/webhook and /user/transcription. DB-72 (spawn-time quota enforcement) reads the
+    # --- user tier: resolved billing entitlements — read-only, same auth as
+    # /user/webhook and /user/transcription. This (spawn-time quota enforcement) reads the
     #     SAME resolve_entitlements() this calls; nothing here writes billing fields — those come
-    #     from Stripe webhooks (DB-73), not from a GET. Usage (DB-71) is metered live from the
+    # from Stripe webhooks, not from a GET. Usage is metered live from the
     #     `meetings` table via MeetingsUsagePort — see billing/meetings_usage.py for which
     #     statuses count and why a query failure reports unknown, never 0.
     @app.get("/user/entitlements")
@@ -1400,13 +1400,13 @@ def create_app() -> FastAPI:
                 "meetings_used": resolved.usage.meetings_used,
                 "minutes_used": resolved.usage.minutes_used,
             },
-            # DB-77: surfaced so a comped user's dashboard/terminal can say why their plan or
+            # Surfaced so a comped user's dashboard/terminal can say why their plan or
             # allowance differs from what Stripe alone would resolve to.
             "plan_override": plan.plan_override,
             "quota_bonus_applied": plan.quota_bonus_applied,
         }
 
-    # --- user tier: Stripe checkout (DB-73). Creates the Stripe customer on first use (stored on
+    # --- user tier: Stripe checkout. Creates the Stripe customer on first use (stored on
     #     the user row so a second checkout, or the portal, reuses it) and a Checkout Session in
     #     mode=subscription for the requested catalog plan/interval. `client_reference_id` carries
     #     OUR user id so the webhook can resolve `checkout.session.completed` back to a user with
@@ -1445,7 +1445,7 @@ def create_app() -> FastAPI:
         )
         return CheckoutResponse(url=session["url"])
 
-    # --- user tier: Stripe Customer Portal (DB-73) — card changes, cancellation, invoices. Stripe
+    # --- user tier: Stripe Customer Portal — card changes, cancellation, invoices. Stripe
     #     hosts the whole surface; this route only mints the session. 409 when the caller has no
     #     Stripe customer yet (nothing to manage before a first checkout).
     @app.post("/billing/portal", response_model=PortalResponse)
@@ -1464,10 +1464,10 @@ def create_app() -> FastAPI:
         session = await client.create_portal_session(customer_id=customer_id, return_url=return_url)
         return PortalResponse(url=session["url"])
 
-    # --- Stripe webhook (DB-73) — authenticated ONLY by the Stripe-Signature header (HMAC-SHA256,
+    # --- Stripe webhook — authenticated ONLY by the Stripe-Signature header (HMAC-SHA256,
     #     constant-time compare, 300s timestamp tolerance; see billing/stripe_gateway.verify_signature).
     #     NOT a user-tier or admin-tier route: Stripe cannot present an X-API-Key. It is deliberately
-    #     absent from routes.v1.json/the gateway — see the DB-73 report for the ingress options this
+    # absent from routes.v1.json/the gateway — see the report for the ingress options this
     #     needs a coordinator decision on (the gateway's ROUTE RULE has no precedent for a public,
     #     unauthenticated, signature-gated inbound route; every existing gateway route requires
     #     x-api-key, including the "unscoped" ones). This handler exists and is fully tested against
@@ -1555,7 +1555,7 @@ def create_app() -> FastAPI:
         except Exception:  # noqa: BLE001 — a publish edge is not a dependency
             pass
 
-        # DB-78 — ONE dunning mail per failed invoice, same fire-and-forget contract, keyed to the
+        # ONE dunning mail per failed invoice, same fire-and-forget contract, keyed to the
         # invoice (not this event id) so a Stripe retry of the SAME unpaid invoice is also a
         # no-op on the flows side — see `events_mod.payment_failed_source_id`'s own docstring.
         if event_type == "invoice.payment_failed":
@@ -1602,7 +1602,7 @@ def create_app() -> FastAPI:
         await db.commit()
 
         scopes = list(api_token.scopes) if api_token.scopes else ["legacy"]
-        # DB-72: the concurrent-bot cap the gateway forwards as `x-user-limits` is the resolved
+        # The concurrent-bot cap the gateway forwards as `x-user-limits` is the resolved
         # PLAN's `concurrent_bots` combined with the pre-billing `max_concurrent_bots` column
         # (`billing.catalog.effective_concurrent_cap` — see its docstring for the combination rule
         # and the stated product change for existing Free users). `resolve_plan` is synchronous and
@@ -1823,7 +1823,7 @@ def create_app() -> FastAPI:
             configs.extend(internal_connections(data, u.id))
         return {"configs": configs}
 
-    # --- internal tier: Google access-token mint (DB-30) — meeting-api's sync calls this instead
+    # --- internal tier: Google access-token mint — meeting-api's sync calls this instead
     #     of ever reading identity's tables or an encrypted blob directly (P-book: the core owns
     #     its contracts). Body names the calendar because two internal-tier callers can share the
     #     X-Internal-Secret but must never share a connection's stored credential without saying
@@ -1862,7 +1862,7 @@ def create_app() -> FastAPI:
         except token_cipher.TokenCipherError as e:
             # A key rotation or a corrupted blob is indistinguishable from a revoked grant to the
             # SYNC side — both mean "this connection cannot get a token right now" — so it gets
-            # the same visible reconnect_needed state rather than a bare 500 (DB-30 acceptance).
+            # the same visible reconnect_needed state rather than a bare 500 (acceptance).
             connections = set_reconnect_needed(connections, calendar_id, True)
             await _save_calendar_connections(user, db, connections)
             raise HTTPException(status.HTTP_409_CONFLICT,
@@ -1889,7 +1889,7 @@ def create_app() -> FastAPI:
 
         return {"access_token": tokens.get("access_token"), "expires_in": tokens.get("expires_in")}
 
-    # --- internal tier: Microsoft access-token mint (DB-32) — meeting-api's sync calls this
+    # --- internal tier: Microsoft access-token mint — meeting-api's sync calls this
     #     instead of ever reading identity's tables or an encrypted blob directly. Same shape as
     #     the google-token edge above. ---
     @app.post("/internal/calendars/{calendar_id}/microsoft-token", include_in_schema=False)
@@ -2070,7 +2070,7 @@ def create_app() -> FastAPI:
 
     @app.get("/internal/users/{user_id}/bot-context", include_in_schema=False)
     async def get_bot_context(user_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-        """DB-72 addition: this door is `meeting_api.bot_spawn.service.request_bot`'s ONE best-effort
+        """Addition: this door is `meeting_api.bot_spawn.service.request_bot`'s ONE best-effort
         fetch per spawn attempt — every `POST /bots` AND every auto-join dispatch calls it already
         (for transcription/capture/bot-name), never the gateway's per-request `/internal/validate`
         hot path. That makes it the right place to meter the MONTHLY meeting quota: a real usage
@@ -2095,7 +2095,7 @@ def create_app() -> FastAPI:
                 plan.limits.concurrent_bots, user.max_concurrent_bots,
             ),
             "bot_name": data.get("calendar_bot_name") or "Vexa",
-            # DB-78: the RESOLVED plan id (Stripe tier, grace, admin override — the ONE resolver,
+            # The RESOLVED plan id (Stripe tier, grace, admin override — the ONE resolver,
             # `entitlements.resolve_plan` — all already applied). meeting-api's retention sweep
             # reads this per candidate recording's owner rather than re-deriving "is this user
             # Free" from `subscription_status`/`plan_override` itself, which would be a second
@@ -2163,7 +2163,7 @@ def create_app() -> FastAPI:
             resp["transcription"] = transcription
         return resp
 
-    # --- internal tier: the Free plan's retention ceiling, read live from the catalog (DB-78) ---
+    # --- internal tier: the Free plan's retention ceiling, read live from the catalog ---
     @app.get("/internal/billing/free-plan-retention", include_in_schema=False)
     async def get_free_plan_retention(request: Request):
         """ONE call per meeting-api retention-sweep TICK — not per user, not per recording — so

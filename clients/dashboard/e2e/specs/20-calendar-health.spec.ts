@@ -1,4 +1,4 @@
-/** DB-34 — `/calendar`: per-connection health (last sync, last error, events touched) and
+/** `/calendar`: per-connection health (last sync, last error, events touched) and
  *  Reconnect for a connection whose grant needs it. A failed feed shows that action (ICS: "Sync
  *  now" again; Google/Microsoft: "Reconnect") rather than going silently stale.
  */

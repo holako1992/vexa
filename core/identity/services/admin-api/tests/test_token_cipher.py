@@ -1,6 +1,6 @@
-"""DB-30a: ``token_cipher``'s AES-256-GCM spec — round trip, tamper (ciphertext/nonce/tag), wrong
+"""``token_cipher``'s AES-256-GCM spec — round trip, tamper (ciphertext/nonce/tag), wrong
 associated data (another user, another connection of the same user), wrong key, bad key
-lengths/encoding, and rejection of the old ``gcv1:`` (hand-built HMAC-CTR) envelope.
+lengths/encoding, and rejection of the legacy ``gcv1:`` (hand-built HMAC-CTR) envelope.
 
 Pure unit tests — no DB, no docker, no ``requires_docker`` marker, unlike
 ``test_google_calendar_oauth.py``'s route tests. Run with ``uv run python -m pytest
@@ -115,10 +115,10 @@ def test_rejects_empty_key(monkeypatch, bad_key):
 
 
 def test_rejects_old_hmac_ctr_envelope():
-    """DB-30a replaced the hand-built HMAC-CTR construction with AES-256-GCM. Since DB-31 (the
-    first caller that could ever persist a connection) ships after this module, no deployment can
-    hold a ``gcv1:`` envelope — this module refuses one with a "reconnect" error instead of
-    carrying legacy decrypt code for a format nothing ever wrote."""
+    """AES-256-GCM is the only envelope this module writes or reads. The first caller that could
+    ever persist a connection ships after this module, so no deployment can hold a ``gcv1:``
+    envelope — this module refuses one with a "reconnect" error instead of carrying legacy
+    decrypt code for a format nothing ever wrote."""
     old_format_envelope = "gcv1:" + base64.urlsafe_b64encode(b"\x00" * 64).decode()
     with pytest.raises(token_cipher.TokenCipherError, match="reconnect"):
         token_cipher.decrypt(old_format_envelope, user_id=1, calendar_id="cal-1")

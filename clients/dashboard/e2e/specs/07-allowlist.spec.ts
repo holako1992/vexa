@@ -2,7 +2,7 @@
  *  upstream request is made.
  *
  *  Expected: `/api/vexa/agent/chat` (a real gateway surface the dashboard does not proxy) and
- *  `/api/vexa/recordings/700001` (DB-50 admits the LIST and the master/media-byte routes, never
+ * `/api/vexa/recordings/700001` (admits the LIST and the master/media-byte routes, never
  *  single-recording detail — see `lib/upstream.ts`'s `resolveRecordingsUpstream` comment) both
  *  return 404 from the DASHBOARD, and the stub gateway's request log gains no entry for either
  *  path — a forwarded probe would be the real failure here, not the 404 itself.

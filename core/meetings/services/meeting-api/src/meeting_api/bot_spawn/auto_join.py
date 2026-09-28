@@ -348,11 +348,11 @@ async def auto_join_tick(
             await _stamp_error(row, str(e) or "bot concurrency limit reached")
             continue
         except MeetingQuotaExceeded as e:
-            # DB-72: the monthly meeting quota is spent — SKIP with a recorded reason rather than
+            # The monthly meeting quota is spent — SKIP with a recorded reason rather than
             # join (the task's explicit rule: a bot must never join and charge a meeting the quota
             # already refused). Same `_stamp_error` path as the concurrency/runtime rejections above,
             # so the reason surfaces on `data.auto_join_error` and the dashboard's Upcoming banner
-            # (DB-75) the same way every other auto-join skip does.
+            # the same way every other auto-join skip does.
             await _stamp_error(
                 row,
                 f"monthly meeting quota exceeded "

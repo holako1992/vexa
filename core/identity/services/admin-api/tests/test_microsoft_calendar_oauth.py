@@ -1,7 +1,7 @@
-"""DB-32: Microsoft Graph Calendar OAuth connect — state signing/expiry/replay/ownership (pure),
+"""Microsoft Graph Calendar OAuth connect — state signing/expiry/replay/ownership (pure),
 the exchange route (encrypted-at-rest storage, masking, 503 when unconfigured), and the internal
 microsoft-token edge (reconnect_needed on a revoked grant). Same shape as
-``test_google_calendar_oauth.py`` (DB-30) — see that file's docstring for why the pure state tests
+``test_google_calendar_oauth.py`` — see that file's docstring for why the pure state tests
 are grouped here under the same docker-gated marker rather than split out the way
 ``test_token_cipher.py`` was.
 
@@ -78,7 +78,7 @@ def _user_token(client, email="msft@vexa.ai", max_bots=4):
 
 
 # ── state: signature, expiry, replay, wrong-user (pure — no HTTP, no docker needed, but grouped
-#    here so the whole DB-32 spec lives in one file, same as DB-30's) ──────────────────────────
+# here so the whole it spec lives in one file, same as 's) ──────────────────────────
 
 def test_state_roundtrips_for_the_minting_user():
     token = microsoft_oauth.sign_state(42, nonce="fixed-nonce", now=1000.0)
@@ -113,7 +113,7 @@ def test_state_rejects_malformed_token():
 
 
 def test_google_and_microsoft_states_never_cross_validate():
-    """The two providers' state tokens are signed under domain-separated labels (DB-30's
+    """The two providers' state tokens are signed under domain-separated labels (the
     ``google_oauth.STATE_LABEL`` vs this module's own) — a state minted for one flow must never
     verify against the other's key derivation, even holding INTERNAL_API_SECRET constant."""
     from admin_api.app import google_oauth

@@ -27,13 +27,13 @@ export interface UpstreamRoute {
    *  per route rather than once globally. */
   query?: Record<string, QueryValidator>;
   /** For a write route: when present, the request body MUST satisfy this to be forwarded. Absent
-   *  means this route takes no body check at all — every write route that predates DB-74b (bots,
+   * means this route takes no body check at all — every write route that predates (bots,
    *  user/calendars, annotate, …) forwards its body unchecked, exactly as before; only the two
    *  billing routes below declare one, so `validateBody`/`route.ts` never change behavior for the
    *  routes that don't opt in. */
   body?: BodyValidator;
   /** True for the ONE shape of route this allowlist admits that is not JSON: the recording media
-   *  byte stream (`.../media/<id>/raw` and its `.../download` alias, DB-50). `route.ts` branches
+   * byte stream (`.../media/<id>/raw` and its `.../download` alias). `route.ts` branches
    *  on this BEFORE ever setting `Accept: application/json` — the response is audio/video bytes,
    *  forwarded with the caller's own `Range` header and streamed back verbatim, never parsed or
    *  buffered whole. Every other route on this table is `undefined` here, which is falsy the same
@@ -101,7 +101,7 @@ const SEARCH_QUERY: Record<string, QueryValidator> = { q: isSearchText, ...PAGIN
  *  in this file (`/^\d{1,20}$/`), just applied to a query value instead. */
 const isRowIdValue: QueryValidator = (v) => /^\d{1,20}$/.test(v);
 
-/** `GET /recordings`'s own query shape (DB-50): the same paging bounds every list route uses,
+/** `GET /recordings`'s own query shape: the same paging bounds every list route uses,
  *  plus `meeting_id` to scope the list to one meeting. */
 const RECORDINGS_LIST_QUERY: Record<string, QueryValidator> = { meeting_id: isRowIdValue, ...PAGING_QUERY };
 
@@ -122,14 +122,14 @@ const RECORDING_ID = /^\d{1,20}$/;
  *    meetings/<meetingId>            → /meetings/<meetingId>          (owner-scoped, row-keyed)
  *    transcripts/by-id/<meetingId>   → /transcripts/by-id/<meetingId> (owner-scoped, row-keyed)
  *    transcripts/<platform>/<native> → /transcripts/<platform>/<native>
- *    transcripts/search              → /transcripts/search            (DB-44, own `q` param)
+ * transcripts/search → /transcripts/search (own `q` param)
  *
  *  Every one is a read. The dashboard issues no writes, so `resolveUpstream` is only ever
  *  consulted for GET and the route refuses every other method before it is called.
  */
 export function resolveUpstream(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 1 && segments[0] === "meetings") {
-    // DB-48: the ONLY route a caller can page through today — meeting-api's `GET /meetings`
+    // The ONLY route a caller can page through today — meeting-api's `GET /meetings`
     // honours `limit`/`offset` (`meeting_api/collector/app.py`'s `get_meetings`) and nothing else
     // paging-shaped (no `cursor` param exists there); it returns no total and no `has_more`, which
     // is why `lib/meetings.ts`'s pagination infers "more may exist" from a full page rather than
@@ -137,7 +137,7 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
     return { path: "/meetings", query: PAGING_QUERY };
   }
 
-  // GET /transcripts/search?q=... — DB-44. Checked before the generic 3-segment transcripts
+  // GET /transcripts/search?q=.... Checked before the generic 3-segment transcripts
   // branch below since "search" would otherwise be read as a platform slug.
   if (segments.length === 2 && segments[0] === "transcripts" && segments[1] === "search") {
     return { path: "/transcripts/search", query: SEARCH_QUERY };
@@ -150,7 +150,7 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
     return { path: `/meetings/${encodeURIComponent(id)}` };
   }
 
-  // meetings/<id>/summary — the ONE door onto the post-meeting note (DB-60, docs/docs/how-to/
+  // meetings/<id>/summary — the ONE door onto the post-meeting note (docs/docs/how-to/
   // post-meeting-report.mdx). The browser never sees a workspace path: this composes the fixed
   // upstream `/agent/workspace/file?path=meetings/<id>/summary.md` itself from the numeric id
   // alone, so nothing the caller sends can steer which workspace file gets read. The `?path=`
@@ -193,7 +193,7 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
   return null;
 }
 
-/** DB-50 — the recordings surface's read paths. Kept as its own function (like
+/** The recordings surface's read paths. Kept as its own function (like
  *  `resolveReadExtras` below) so the table stays testable in one place: `GET /recordings` (the
  *  `/recordings` list page), `GET /recordings/<id>/master` (finalize-on-read metadata the player
  *  fetches first), and the ONE non-JSON route this allowlist admits — the media byte stream,
@@ -202,7 +202,7 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
  *  `core/gateway/services/gateway/src/gateway/app.py`'s `get_recording_media_download` — so this
  *  allowlist treats them identically rather than guessing at two different shapes). No
  *  `GET /recordings/<id>` (single-recording detail): nothing in this UI reads it — the list row
- *  and the master/raw pair are the whole surface DB-50/51/52 need, and an allowlist entry with no
+ * and the master/raw pair are the whole surface it needs, and an allowlist entry with no
  *  caller is just an untested door. */
 function resolveRecordingsUpstream(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 1 && segments[0] === "recordings") {
@@ -238,17 +238,17 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 2 && segments[0] === "meeting" && segments[1] === "jitsi-hosts") {
     return { path: "/meeting/jitsi-hosts" };
   }
-  // GET /bots/status — the caller's currently-running bots (DB-41's status badge)
+  // GET /bots/status — the caller's currently-running bots (the status badge)
   if (segments.length === 2 && segments[0] === "bots" && segments[1] === "status") {
     return { path: "/bots/status" };
   }
-  // GET /user/entitlements — the resolved plan, limits and usage (DB-74/DB-75's billing page and
+  // GET /user/entitlements — the resolved plan, limits and usage (the billing page and
   // the Send-Bot dialog's paywall copy). Read-only, owner-scoped by the gateway like every other
   // route here.
   if (segments.length === 2 && segments[0] === "user" && segments[1] === "entitlements") {
     return { path: "/user/entitlements" };
   }
-  // GET /user/calendars/google/authorize — DB-31's "Connect Google Calendar" button. Answers
+  // GET /user/calendars/google/authorize — the "Connect Google Calendar" button. Answers
   // `{authorize_url, state}`; the caller's own `isTrustedGoogleAuthorizeRedirect` (lib/security.ts)
   // checks `authorize_url` before ever navigating there, so this allowlist entry only needs to get
   // the request there and back.
@@ -259,7 +259,7 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
     return { path: "/user/calendars/google/authorize" };
   }
   // GET /user/calendars/microsoft/authorize — the Microsoft 365 sibling of the Google route just
-  // above (DB-32's core, this dashboard's connect button). Same rule: the caller's own
+  // above (the core, this dashboard's connect button). Same rule: the caller's own
   // `isTrustedMicrosoftAuthorizeRedirect` (lib/security.ts) checks `authorize_url` before ever
   // navigating there, so this entry only needs to get the request there and back.
   if (
@@ -270,7 +270,7 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   }
   // GET /user/calendars/<id>/sync — the connection's last sync stamp (`{last_sync, last_error,
   // counts}`, meeting_api/calendar_sync/runner.py), read-only. The calendar health surface
-  // (DB-34) reads this per connection; `POST` on the same path (`resolveWriteUpstream` below) is
+  // reads this per connection; `POST` on the same path (`resolveWriteUpstream` below) is
   // the existing "sync now" action.
   if (
     segments.length === 4 &&
@@ -340,7 +340,7 @@ function isGoogleExchangeBody(parsed: unknown): boolean {
   return isOAuthExchangeBody(parsed);
 }
 
-/** DB-32/DB-33's Microsoft sibling of `isGoogleExchangeBody` — see `isOAuthExchangeBody` above. */
+/** The Microsoft sibling of `isGoogleExchangeBody` — see `isOAuthExchangeBody` above. */
 function isMicrosoftExchangeBody(parsed: unknown): boolean {
   return isOAuthExchangeBody(parsed);
 }
@@ -354,7 +354,7 @@ function isEmptyBody(parsed: unknown): boolean {
 }
 
 /** `PATCH /meetings/<id>`'s ONLY admitted shape through this allowlist: exactly one key,
- *  `auto_join`, a boolean — DB-33's Join / Don't join override. See the route comment above for
+ * `auto_join`, a boolean — the Join / Don't join override. See the route comment above for
  *  why this is deliberately narrower than everything the producer's route actually accepts. */
 function isAutoJoinBody(parsed: unknown): boolean {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
@@ -382,7 +382,7 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
       return { path: `/user/calendars/${encodeURIComponent(segments[2])}/sync` };
     }
     // POST /meetings/<id>/annotate — the caller's own title/metadata, {title}. Used for the
-    // inline rename (DB-42): unlike PATCH /meetings/<id> below, meeting-api's annotate route
+    // inline rename: unlike PATCH /meetings/<id> below, meeting-api's annotate route
     // works in ANY meeting status, because it writes the caller's DESCRIPTION rather than the
     // dispatch instructions the FSM owns once a bot has been sent. A rename is exactly the case
     // annotate exists for — most meetings a person renames have already completed, and PATCH
@@ -393,7 +393,7 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     ) {
       return { path: `/meetings/${encodeURIComponent(segments[1])}/annotate` };
     }
-    // POST /user/calendars/google/exchange {code, state} — DB-31's callback page. Body checked
+    // POST /user/calendars/google/exchange {code, state} — the callback page. Body checked
     // by `isGoogleExchangeBody` above; `google` here is a fixed literal segment, never a calendar
     // id, so it is matched before the `/user/calendars/<id>/sync` branch below rather than
     // through `SAFE_CAL_ID` (which would also accept it, but for the wrong reason).
@@ -403,7 +403,7 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     ) {
       return { path: "/user/calendars/google/exchange", body: isGoogleExchangeBody };
     }
-    // POST /user/calendars/microsoft/exchange {code, state} — DB-32/DB-33's Microsoft 365
+    // POST /user/calendars/microsoft/exchange {code, state} — the Microsoft 365
     // connect button's callback page. Same rule as the Google entry just above: `microsoft` is a
     // fixed literal segment here, checked before the generic `/user/calendars/<id>/sync` branch.
     if (
@@ -412,13 +412,13 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     ) {
       return { path: "/user/calendars/microsoft/exchange", body: isMicrosoftExchangeBody };
     }
-    // POST /billing/checkout {plan, interval} — DB-74b's Upgrade button. `_require_stripe_billing`
+    // POST /billing/checkout {plan, interval} — the Upgrade button. `_require_stripe_billing`
     // on the core answers 503 when Stripe isn't configured on this deployment; that is the core's
     // decision to make, not this allowlist's — the check here is only the wire shape.
     if (segments.length === 2 && segments[0] === "billing" && segments[1] === "checkout") {
       return { path: "/billing/checkout", body: isCheckoutBody };
     }
-    // POST /billing/portal — DB-74b's Manage-subscription button. 409 with no body when the
+    // POST /billing/portal — the Manage-subscription button. 409 with no body when the
     // caller has never checked out (`create_billing_portal`, `main.py`) — the dashboard shows that
     // as a toast pointing back at Upgrade, never a generic error.
     if (segments.length === 2 && segments[0] === "billing" && segments[1] === "portal") {
@@ -434,7 +434,7 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
       return { path: `/user/calendars/${encodeURIComponent(segments[2])}` };
     }
     // PATCH /meetings/<id> {auto_join} — the Upcoming page's per-meeting Join / Don't join
-    // override (DB-33). meeting-api's `_apply_meeting_patch` (collector/app.py) accepts several
+    // override. meeting-api's `_apply_meeting_patch` (collector/app.py) accepts several
     // fields on this route (title, scheduled_at, meeting_url, workspace_id, auto_join); this
     // allowlist admits only the ONE shape the Upcoming page ever sends — a body with exactly the
     // key `auto_join`, a boolean — so this entry can never become a back door for the others.
@@ -459,14 +459,14 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     if (segments.length === 2 && segments[0] === "meetings" && /^\d{1,20}$/.test(segments[1])) {
       return { path: `/meetings/${encodeURIComponent(segments[1])}` };
     }
-    // DELETE /bots/<platform>/<native> — Stop recording (DB-41).
+    // DELETE /bots/<platform>/<native> — Stop recording.
     if (
       segments.length === 3 && segments[0] === "bots" &&
       PLATFORMS.has(segments[1]) && SAFE_SEGMENT.test(segments[2])
     ) {
       return { path: `/bots/${segments[1]}/${encodeURIComponent(segments[2])}` };
     }
-    // DELETE /recordings/<id> — DB-52's Delete recording button.
+    // DELETE /recordings/<id> — the Delete recording button.
     if (segments.length === 2 && segments[0] === "recordings" && RECORDING_ID.test(segments[1])) {
       return { path: `/recordings/${encodeURIComponent(segments[1])}` };
     }
@@ -476,7 +476,7 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
 
 /** Check a write route's raw request body text against the shape it declared (see `body` on
  *  `UpstreamRoute`). A route with no `body` validator admits anything, unchanged from before
- *  DB-74b. An empty string parses as `undefined` (no body sent) rather than throwing — the two
+ * An empty string parses as `undefined` (no body sent) rather than throwing — the two
  *  routes that DO check a body (checkout, portal) each decide for themselves whether an empty
  *  body is acceptable (`isEmptyBody` says yes; `isCheckoutBody` says no, since `undefined` is not
  *  an object with the right two keys). Malformed JSON on a route that checks its body is refused,
@@ -496,16 +496,15 @@ export function validateBody(route: UpstreamRoute, raw: string): boolean {
 /** Filter an incoming query string down to the ONE route's own declared `query` shape, preserving
  *  order.
  *
- *  This used to be one `ALLOWED_QUERY` set of names (`limit`/`offset`/`cursor`) applied to every
- *  proxied GET regardless of which route it was. That shape is unsafe by construction: any name
+ *  A single global `ALLOWED_QUERY` set of names (`limit`/`offset`/`cursor`) applied to every
+ *  proxied GET regardless of which route it was would be unsafe by construction: any name
  *  added to that one set would ride along to EVERY route this file resolves, including ones that
- *  never asked for it. DB-44 needed a free-text `q` param for `transcripts/search` — adding `q` to
- *  a global list would have forwarded a free-text parameter to `/meetings`, `/user/calendars`,
- *  every other GET here, none of which take one. So the allowlist moved onto `UpstreamRoute`
- *  itself: each route declares the exact params it takes, each with its own shape check (a bounded
- *  int for `limit`/`offset`, a length cap for `q`), and a param a route did not declare is dropped
- *  — never forwarded on the strength of its name alone. A route with no `query` at all (most of
- *  them) forwards no query string, full stop.
+ * never asked for it — `transcripts/search`'s free-text `q` param would forward to `/meetings`,
+ *  `/user/calendars`, every other GET here, none of which take one. So the allowlist lives on
+ *  `UpstreamRoute` itself: each route declares the exact params it takes, each with its own shape
+ *  check (a bounded int for `limit`/`offset`, a length cap for `q`), and a param a route did not
+ *  declare is dropped — never forwarded on the strength of its name alone. A route with no
+ *  `query` at all (most of them) forwards no query string, full stop.
  */
 export function filterQuery(route: UpstreamRoute, search: URLSearchParams): string {
   const allowed = route.query;

@@ -1,5 +1,5 @@
 "use client";
-/** Who was in the meeting, as far as the 0.12 core actually knows (DB-42). Reads
+/** Who was in the meeting, as far as the 0.12 core actually knows. Reads
  *  `GET /meetings/<platform>/<native>/participants`, which mixes two honest, distinct sources —
  *  `invite` (who was asked, from a calendar feed) and `speaker` (who was heard and named) — never
  *  merged, never inferred into attendance. A silent participant is absent by construction; the

@@ -1,6 +1,6 @@
 "use client";
 /** `/billing`: plan, usage meters, reset date, and any past-due / cancel-at-period-end state,
- *  read from `GET /api/vexa/user/entitlements` (DB-74) — plus the two write controls DB-74b adds:
+ * read from `GET /api/vexa/user/entitlements` — plus the two write controls it adds:
  *
  *   - **Upgrade** on a plan card → `POST /billing/checkout {plan, interval}` → redirect to the
  *     returned Stripe Checkout URL.

@@ -112,7 +112,7 @@ ONBOARDED = EventType("onboarding.completed")
 #: PUBLISHED BY IDENTITY, ALONGSIDE `subscription.changed`, ONLY for `invoice.payment_failed` —
 #: `core/identity/services/admin-api/src/admin_api/app/events.py`'s `EVENT_PAYMENT_FAILED`. Its
 #: refs are `{subject, invoice_id}`; see `payment_failed_source_id`'s docstring there for why the
-#: fact's id is keyed to the INVOICE and not the Stripe event id (DB-78).
+#: fact's id is keyed to the INVOICE and not the Stripe event id.
 PAYMENT_FAILED = EventType("payment.failed")
 
 NUDGE_EVERY_S = 15 * 60
@@ -1665,12 +1665,13 @@ def build(reg: Registry, db) -> None:
                                  provenance={"flow": "post_meeting", "step": "drop_to_attendees",
                                              "reaction_id": str(getattr(ctx, "reaction_id", "") or ""),
                                              "minted_by": str(uid)})
-            # THE ROOM IS THE INVITE, NOT THE MAILING LIST. This used to be
-            # `[organiser] + att["drops"]`, and `drops` is empty whenever the attendee MAIL was
-            # switched off (`attendee_followup`) or every attendee is outside the organiser's
-            # domain (PRD §16.2's allow-list, which governs mail and nothing else). A preference
-            # about mail was therefore silently a preference about whose desk the meeting reached
-            # — while `room_order` had already MOUNTED those same desks to write the report.
+            # THE ROOM IS THE INVITE, NOT THE MAILING LIST. Building it as
+            # `[organiser] + att["drops"]` would be wrong: `drops` is empty whenever the attendee
+            # MAIL was switched off (`attendee_followup`) or every attendee is outside the
+            # organiser's domain (PRD §16.2's allow-list, which governs mail and nothing else). A
+            # preference about mail would then silently become a preference about whose desk the
+            # meeting reached — while `room_order` had already MOUNTED those same desks to write
+            # the report.
             # Decision 20 says the drop goes into every attendee's workspace, creating it if
             # absent; decision 22a says the organiser's always does. `drops` now supplies one
             # thing only: that person's own share link, where they were mailed one.
@@ -1718,12 +1719,12 @@ def build(reg: Registry, db) -> None:
             f"every desk drop failed for meeting {mid} ({len(room)} person(s) in the room): "
             + " · ".join(failed), retryable=True)
 
-    # ── DB-60: the AI note, at a path the DASHBOARD can find from the row id alone ────────────
+    # ── the AI note, at a path the DASHBOARD can find from the row id alone ────────────
     # `drop_to_attendees` above already lands the mailed report on every desk in the room, but at
     # `kg/entities/meeting/<date>-<title-slug>.md` — a path only a mail RECIPIENT can resolve
     # (they have the date and the title from the mail they were just sent). The dashboard has
     # neither: it has the meetings-domain ROW id and nothing else, the same identity every other
-    # DB-60-adjacent read in this file insists on (R-B06, R-B19 — "by ROW id, never by the ref").
+    # -adjacent read in this file insists on (R-B06, R-B19 — "by ROW id, never by the ref").
     # So this is a SECOND, parallel recipe, not a reuse of `_note_path`: the two serve different
     # readers and must not be made to agree by convention, only by the row id both already carry.
     #
@@ -1732,7 +1733,7 @@ def build(reg: Registry, db) -> None:
     # that same receipt rather than dispatching a turn of its own. Two turns would double the
     # model cost per meeting and could ground two DIFFERENT reports differently; `_summary_v1`
     # below only reshapes text the gate has already cleared.
-    #: HOW MANY TRANSCRIPT SEGMENTS a meeting needs before a note is worth writing at all (DB-60
+    #: HOW MANY TRANSCRIPT SEGMENTS a meeting needs before a note is worth writing at all (
     #: "skip empties"). Below this a summary would describe a meeting the agent barely heard —
     #: more confident than the transcript earns. A flow param overrides it per deployment;
     #: `mt.transcript_segment_count`'s own three-way answer (`None`/`0`/`n`) is respected below:
@@ -1776,7 +1777,7 @@ def build(reg: Registry, db) -> None:
 
     def _summary_v1(*, row_id, status: str, generated_at: str, report: str = "",
                     reason: str = "") -> str:
-        """THE SHAPE (DB-60): front-matter `{type, version, meeting_id, status, generated_at
+        """THE SHAPE: front-matter `{type, version, meeting_id, status, generated_at
         [,reason]}` plus a markdown body — `status: complete` carries Overview/Decisions/Action
         items/Open questions (each explicitly empty rather than omitted, so a reader — or the
         dashboard's parser — never has to distinguish "we found nothing" from "we forgot to
@@ -1804,7 +1805,7 @@ def build(reg: Registry, db) -> None:
     # transcript to decide whether there is anything to summarize, and to re-check grounding.
     @reg.step(needs=("agent", "meetings"))
     def commit_meeting_summary(ctx: StepCtx):
-        """DB-60 — the Otter-style note, committed to a path the dashboard can resolve from the
+        """The Otter-style note, committed to a path the dashboard can resolve from the
         meeting's ROW ID ALONE: `meetings/<row_id>/summary.md`, in the ORGANISER's own workspace
         (the desk `email_minutes`/`drop_to_attendees` already address by row id, read back over
         the same `GET /agent/workspace/file?path=...` door documented in
@@ -1957,7 +1958,7 @@ def build(reg: Registry, db) -> None:
                    {"u": uid, "s": session, "h": "v1", "t": ctx.clock_now})
         return Done({"message_id": mid, "link": link, "excerpt": bool(excerpt)}, provider_ref=mid)
 
-    # ── dunning: one mail when a payment fails (DB-78) ────────────────────────────────────────
+    # ── dunning: one mail when a payment fails ────────────────────────────────────────
     @reg.step
     def email_payment_failed(ctx: StepCtx):
         """The ONE mail a subscriber gets when a Stripe invoice fails — identity's
@@ -2224,7 +2225,7 @@ def build(reg: Registry, db) -> None:
     # 3 were authored through the API against this same flow name and `match()` takes the newest
     # number wherever it came from; a code change that does not clear the highest DB version is
     # inert, which is exactly the defect `Registry.shadowing_versions` now warns about.
-    # VERSION 5 — `commit_meeting_summary` ADDED, last (DB-60). It reads process_meeting's already-
+    # VERSION 5 — `commit_meeting_summary` ADDED, last. It reads process_meeting's already-
     # grounded receipt and never blocks on the mail/drop side effects ahead of it: those are
     # idempotent by scratch/content-compare, so a retry of this step alone costs nothing extra if
     # the mail already went out.
@@ -2255,7 +2256,7 @@ def build(reg: Registry, db) -> None:
     # this flow existed it answered a brand-new person with an empty list.
     reg.flow(name="onboarding", version=1, on=ONBOARDED,
              steps=[s["first_meeting"]])
-    # THE DUNNING MAIL (DB-78). One step, the same shape as `onboarding`: a fact identity already
+    # THE DUNNING MAIL. One step, the same shape as `onboarding`: a fact identity already
     # emits exactly once per failed invoice (`payment_failed_source_id`), one reaction, one effect.
     reg.flow(name="dunning", version=1, on=PAYMENT_FAILED,
              steps=[s["email_payment_failed"]])

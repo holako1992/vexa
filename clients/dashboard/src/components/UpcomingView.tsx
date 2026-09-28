@@ -1,7 +1,7 @@
 "use client";
-/** `/upcoming` (DB-33): the meetings Vexa is watching for, grouped by day.
+/** `/upcoming`: the meetings Vexa is watching for, grouped by day.
  *
- *  The core owns the read: `GET /meetings` (already the list page's own source — DB-01/DB-48)
+ * The core owns the read: `GET /meetings` (already the list page's own source)
  *  returns every planned row a caller can see, calendar-synced or hand-scheduled alike, in one
  *  call. This view applies the SAME phase filter `MeetingsView`'s own "Upcoming" tab already
  *  applies (`lib/meetings.ts`'s `phaseOf`, `"scheduled"`) — it is not a second source, and not a
@@ -10,14 +10,14 @@
  *  Per meeting:
  *   - the source calendar chip (`data.calendar_name`, absent for a hand-scheduled plan)
  *   - the Join / Don't join override — a real `Toggle` bound to `data.auto_join`, written through
- *     `PATCH /api/vexa/meetings/<id> {auto_join}` (DB-33; `upstream.ts`'s narrow `isAutoJoinBody`
+ * `PATCH /api/vexa/meetings/<id> {auto_join}` (`upstream.ts`'s narrow `isAutoJoinBody`
  *     allowlist entry — see that file's comment for why this is PATCH on the row id, not `PUT
  *     .../intent`, which sets an unrelated FSM-external status and cannot express a join/skip
  *     decision at all)
  *   - the producer's own auto-join skip/failure reason (`data.auto_join_error`,
  *     `bot_spawn/auto_join.py`), shown verbatim, never reworded
  *
- *  "Sync now" runs the existing per-connection sync (`POST /user/calendars/<id>/sync`, DB-31's
+ * "Sync now" runs the existing per-connection sync (`POST /user/calendars/<id>/sync`, the
  *  Calendar tab) across every connected calendar, then reloads the list — the same action already
  *  in the Calendar tab, offered here too since this is where its result shows up.
  */

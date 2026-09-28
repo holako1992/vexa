@@ -1,4 +1,4 @@
-"""google_oauth.py — DB-30: the Google Calendar OAuth flow, server-side, client secret never
+"""google_oauth.py — the Google Calendar OAuth flow, server-side, client secret never
 leaving admin-api.
 
 Two request-time concerns and one I/O concern live here:
@@ -20,7 +20,7 @@ Scope: ``https://www.googleapis.com/auth/calendar.readonly`` — the READ-ONLY c
 covering both the calendar list (``calendarList.list`` — how a future "pick a calendar" step would
 enumerate a user's calendars beyond ``primary``) and event reads. The narrower
 ``calendar.events.readonly`` was considered and rejected: it does not grant ``calendarList.list``,
-and DB-30 already stores a ``google_calendar_ids`` list (default ``["primary"]``) that a later
+and it already stores a ``google_calendar_ids`` list (default ``["primary"]``) that a later
 UI needs to populate from the user's actual calendars — a scope that cannot list calendars would
 block that without a second consent round-trip. ``calendar.readonly`` is still the minimum: it
 grants no write, no ACL, no free/busy-of-other-people surface.
@@ -122,7 +122,7 @@ class GoogleOAuthError(RuntimeError):
         self.reason = reason
         # invalid_grant is Google's own error code for "this refresh token is revoked/expired" —
         # the one case that must become the connection's reconnect_needed state, not a generic
-        # failure (DB-30 acceptance: revoked/expired sets a VISIBLE state, never a silent failure).
+        # failure (acceptance: revoked/expired sets a VISIBLE state, never a silent failure).
         self.invalid_grant = invalid_grant
 
 

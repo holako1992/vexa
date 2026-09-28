@@ -1,4 +1,4 @@
-/** Property 11 — the shell is usable at 375px (DB-04's stated floor), not just responsive down to
+/** Property 11 — the shell is usable at 375px (the stated floor), not just responsive down to
  *  tablet width.
  *
  *  Expected: at 375×812, the meetings list and a meeting's detail page both render with no

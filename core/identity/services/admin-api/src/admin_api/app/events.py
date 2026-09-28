@@ -34,11 +34,11 @@ import os
 from typing import Optional
 
 EVENT_ONBOARDING_COMPLETED = "onboarding.completed"
-#: DB-73 — the Stripe webhook hands this to flows beside `onboarding.completed`, same publish
+#: the Stripe webhook hands this to flows beside `onboarding.completed`, same publish
 #: edge, same best-effort/swallowed contract (see `publish()` below). Identity tells; it does not
 #: ask, here as everywhere else in this module.
 EVENT_SUBSCRIPTION_CHANGED = "subscription.changed"
-#: DB-78 — the Stripe webhook hands this to flows in ADDITION to `subscription.changed`, ONLY for
+#: the Stripe webhook hands this to flows in ADDITION to `subscription.changed`, ONLY for
 #: `invoice.payment_failed`. It exists as its own fact rather than something flows infers from
 #: `subscription.changed`'s `status == "past_due"` because a Stripe subscription can arrive at
 #: `past_due` from more than one delivery (a redelivered `invoice.payment_failed`, a reordered
@@ -182,7 +182,7 @@ def onboarding_refs(subject, org, seat) -> dict:
 
 def subscription_changed_source_id(user_id, stripe_event_id) -> str:
     """The fact's id, keyed to the Stripe delivery that produced it. flows admits on
-    `(source_event_id, flow)`, so a Stripe redelivery (the whole point of DB-73's webhook design,
+    `(source_event_id, flow)`, so a Stripe redelivery (the whole point of the webhook design,
     see `billing/stripe_webhook.py`) is a no-op there too — the SAME event id always produces the
     SAME source_event_id, however many times Stripe resends it."""
     return f"subscription-{user_id}-{stripe_event_id}"

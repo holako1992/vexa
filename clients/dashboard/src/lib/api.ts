@@ -14,7 +14,7 @@ export class ApiError extends Error {
     url: string,
     /** The parsed JSON error body, when the response had one — `undefined` for a network
      *  failure or a non-JSON body. `detail` above is a squashed string derived from it for the
-     *  generic case; a caller that needs to branch on a specific error SHAPE (DB-72's unwrapped
+     * generic case; a caller that needs to branch on a specific error SHAPE (the unwrapped
      *  `{"error": "quota_exceeded", ...}` 402 body, with no `{"detail": ...}` envelope) reads
      *  this field directly rather than re-parsing `detail`. */
     public readonly body?: unknown,

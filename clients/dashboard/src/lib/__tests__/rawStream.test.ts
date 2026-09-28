@@ -1,4 +1,4 @@
-/** DB-50's header pass-through, weighted the same way `upstream.test.ts` is: what gets forwarded,
+/** The header pass-through, weighted the same way `upstream.test.ts` is: what gets forwarded,
  *  and — the part that matters for a proxy that must never leak more than it means to — what
  *  does not. */
 import { describe, expect, it } from "vitest";

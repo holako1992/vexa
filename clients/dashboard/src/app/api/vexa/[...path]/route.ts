@@ -110,7 +110,7 @@ async function forwardWrite(req: NextRequest, ctx: { params: Promise<{ path: str
 
   // A route that declares a `body` shape (currently only billing/checkout, billing/portal — see
   // upstream.ts) gets it checked before anything is forwarded; a route with no shape declared
-  // admits any body unchanged, exactly as before DB-74b.
+  // admits any body unchanged, exactly as before.
   if (!validateBody(route, body ?? "")) return json({ error: "invalid_body" }, 400);
 
   let upstream: Response;

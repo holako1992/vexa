@@ -1,4 +1,4 @@
-/** DB-74b — the two write controls the billing page grows over DB-74/DB-75's read-only page:
+/** The two write controls the billing page grows over the read-only page:
  *  Upgrade (`POST /billing/checkout {plan, interval}` → redirect) and Manage subscription
  *  (`POST /billing/portal` → redirect, or a 409 toast when there's no subscription yet).
  *

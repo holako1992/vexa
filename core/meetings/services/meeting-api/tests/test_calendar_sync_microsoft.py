@@ -1,4 +1,4 @@
-"""DB-32: the Microsoft Graph Calendar adapter beside the ICS and Google ones.
+"""The Microsoft Graph Calendar adapter beside the ICS and Google ones.
 
 ``parse_microsoft_events`` turns Microsoft Graph ``calendarView`` items into the SAME
 ``{"events": [...], "cancelled_uids": [...]}`` shape ``parse_ics``/``parse_google_events``

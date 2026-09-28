@@ -1,4 +1,4 @@
-/** DB-31 — Google's OAuth redirect target: `GOOGLE_CALENDAR_REDIRECT_URI` is set to this exact
+/** Google's OAuth redirect target: `GOOGLE_CALENDAR_REDIRECT_URI` is set to this exact
  *  page (see `docs/docs/how-to/calendar-sync.mdx`'s self-hosting section). No nav-rail entry —
  *  reached only from Google's own redirect, the same way `/search` is reached only from the
  *  search box (`Shell.tsx`'s header comment). Renders the provider-shared

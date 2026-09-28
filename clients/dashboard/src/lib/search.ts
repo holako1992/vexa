@@ -1,4 +1,4 @@
-/** DB-44 — global search: the shapes `GET /transcripts/search` returns, and the two pure
+/** Global search: the shapes `GET /transcripts/search` returns, and the two pure
  *  transforms the `/search` page needs (grouping by meeting, highlighting the matched terms in a
  *  snippet). Both are presentation only, same rule as `meetings.ts`: nothing here re-ranks a hit,
  *  re-orders one meeting's hits against another's, or invents a title the producer didn't send.

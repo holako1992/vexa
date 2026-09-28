@@ -1415,7 +1415,7 @@ function gateLiteMakefile() {
   return true;
 }
 
-// gate:dashboard-e2e (DB-02) — the dashboard's Playwright specs (clients/dashboard/e2e), the
+// gate:dashboard-e2e — the dashboard's Playwright specs (clients/dashboard/e2e), the
 // browser loop layered on top of its vitest unit tests: a real `next dev`, talking to a real
 // (stubbed) gateway + admin-api over actual HTTP — nothing mocked at the `fetch` layer, unlike
 // every other dashboard test. Green-on-empty before the harness exists. GREEN-OR-SKIP, not

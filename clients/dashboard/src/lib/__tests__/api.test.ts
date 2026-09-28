@@ -1,5 +1,5 @@
 /** `presentError` / `ApiError` — the fetch helper's failure surface. Weighted toward the shape
- *  DB-72's `402 quota_exceeded` body actually has (unwrapped: `{"error": "quota_exceeded", ...}`,
+ * The `402 quota_exceeded` body actually has (unwrapped: `{"error": "quota_exceeded", ...}`,
  *  no `{"detail": ...}` envelope) versus the older `{"detail": "..."}` shape most other refusals
  *  still use, since a caller that only ever reads `detail` loses the quota fields entirely. */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -61,7 +61,7 @@ describe("presentError — quota_exceeded (402)", () => {
   });
 });
 
-describe("presentError — the old {detail} envelope", () => {
+describe("presentError — the plain {detail} envelope", () => {
   it("still renders the status-keyed sentence regardless of detail content", () => {
     const e = new ApiError(404, "Meeting not found", "/api/vexa/meetings/9", { detail: "Meeting not found" });
     expect(presentError(e)).toBe("Not found.");

@@ -1,4 +1,4 @@
-/** DB-32/DB-33 — Microsoft's OAuth redirect target: `MICROSOFT_CALENDAR_REDIRECT_URI` is set to
+/** Microsoft's OAuth redirect target: `MICROSOFT_CALENDAR_REDIRECT_URI` is set to
  *  this exact page (see `docs/docs/how-to/calendar-sync.mdx`'s self-hosting section). No nav-rail
  *  entry — reached only from Microsoft's own redirect, the same way `/search` is reached only
  *  from the search box (`Shell.tsx`'s header comment). Renders the provider-shared

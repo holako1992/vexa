@@ -395,7 +395,7 @@ def test_plural_calendar_routes_forward_to_owning_services():
 
 
 def test_google_calendar_oauth_routes_forward_to_admin_api():
-    """DB-30: both the consent-URL mint and the code/state exchange are identity's (admin-api
+    """Both the consent-URL mint and the code/state exchange are identity's (admin-api
     owns the client secret and the encrypted refresh token) — never meeting-api's."""
     client, downstream = _client()
     r = client.get("/user/calendars/google/authorize", headers=AUTH)
@@ -412,7 +412,7 @@ def test_google_calendar_oauth_routes_forward_to_admin_api():
 
 
 def test_microsoft_calendar_oauth_routes_forward_to_admin_api():
-    """DB-32: same shape as the Google pair above — both routes are identity's."""
+    """Same shape as the Google pair above — both routes are identity's."""
     client, downstream = _client()
     r = client.get("/user/calendars/microsoft/authorize", headers=AUTH)
     assert r.status_code == 200

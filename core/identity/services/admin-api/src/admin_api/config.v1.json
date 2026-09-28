@@ -152,8 +152,8 @@
   {
    "key": "BILLING_UPGRADE_URL",
    "class": "defaulted",
-   "default": "(unset — the DB-72 quota_exceeded refusal body then names no upgrade page: upgrade_url is null)",
-   "description": "the dashboard's upgrade/pricing page, named in DB-72's quota_exceeded refusal body (main.py:_billing_upgrade_url). A self-host that has not wired billing at all — DB-73 not configured, or no plans sold — names no such page rather than leaking a hardcoded vexa.ai URL into a self-hosted response.",
+   "default": "(unset — the quota_exceeded refusal body then names no upgrade page: upgrade_url is null)",
+   "description": "the dashboard's upgrade/pricing page, named in the quota_exceeded refusal body (main.py:_billing_upgrade_url). A self-host that has not wired billing at all — not configured, or no plans sold — names no such page rather than leaking a hardcoded vexa.ai URL into a self-hosted response.",
    "targets": ["compose"]
   },
   {
@@ -161,7 +161,7 @@
    "class": "capability",
    "capability": "stripe_billing",
    "secret": true,
-   "description": "Stripe's account secret key (sk_...), bearer-authenticates every REST call `billing/stripe_gateway.StripeClient` makes — create customer, create checkout/portal session, and the webhook handler's re-read of a subscription's current state. Unset ⇒ POST /billing/checkout, POST /billing/portal and POST /billing/webhook all answer a typed 503 naming the missing key(s); the rest of admin-api is unaffected (DB-73).",
+   "description": "Stripe's account secret key (sk_...), bearer-authenticates every REST call `billing/stripe_gateway.StripeClient` makes — create customer, create checkout/portal session, and the webhook handler's re-read of a subscription's current state. Unset ⇒ POST /billing/checkout, POST /billing/portal and POST /billing/webhook all answer a typed 503 naming the missing key(s); the rest of admin-api is unaffected.",
    "targets": ["compose"]
   },
   {
@@ -225,7 +225,7 @@
    "key": "GOOGLE_CALENDAR_CLIENT_ID",
    "class": "capability",
    "capability": "google_calendar",
-   "description": "the OAuth client id (google_oauth.py) DB-30's Google Calendar connect flow presents to Google — a DIFFERENT OAuth client than the dashboard's own sign-in GOOGLE_CLIENT_ID (a different consent: read-only calendar access vs. 'sign in with Google'). ONE Google Cloud OAuth client MAY serve both purposes if both redirect URIs are registered on it (see docs/docs/how-to/calendar-sync.mdx for the exact console steps) — but the two env keys must never be conflated in code, because calendar_readonly consent must never be silently granted by a sign-in flow the user did not see as a calendar request.",
+   "description": "the OAuth client id (google_oauth.py) the Google Calendar connect flow presents to Google — a DIFFERENT OAuth client than the dashboard's own sign-in GOOGLE_CLIENT_ID (a different consent: read-only calendar access vs. 'sign in with Google'). ONE Google Cloud OAuth client MAY serve both purposes if both redirect URIs are registered on it (see docs/docs/how-to/calendar-sync.mdx for the exact console steps) — but the two env keys must never be conflated in code, because calendar_readonly consent must never be silently granted by a sign-in flow the user did not see as a calendar request.",
    "targets": ["compose"]
   },
   {
@@ -240,7 +240,7 @@
    "key": "GOOGLE_CALENDAR_REDIRECT_URI",
    "class": "capability",
    "capability": "google_calendar",
-   "description": "the dashboard's public OAuth callback page (DB-31), e.g. https://dashboard.vexa.ai/calendar/google/callback — MUST exactly match a redirect URI registered on the Google Cloud OAuth client (GOOGLE_CALENDAR_CLIENT_ID), or Google refuses the consent screen with redirect_uri_mismatch. Never guessed from another env var: DB-31's callback page relays {code, state} to POST /user/calendars/google/exchange through the dashboard's own proxy, and this is the exact address that page must live at.",
+   "description": "the dashboard's public OAuth callback page, e.g. https://dashboard.vexa.ai/calendar/google/callback — MUST exactly match a redirect URI registered on the Google Cloud OAuth client (GOOGLE_CALENDAR_CLIENT_ID), or Google refuses the consent screen with redirect_uri_mismatch. Never guessed from another env var: the callback page relays {code, state} to POST /user/calendars/google/exchange through the dashboard's own proxy, and this is the exact address that page must live at.",
    "targets": ["compose"]
   },
   {
@@ -255,7 +255,7 @@
    "key": "MICROSOFT_CALENDAR_CLIENT_ID",
    "class": "capability",
    "capability": "microsoft_calendar",
-   "description": "the OAuth client (application) id (microsoft_oauth.py) DB-32's Microsoft Graph Calendar connect flow presents to Microsoft — a DIFFERENT Azure AD app registration than any dashboard sign-in client, same rule GOOGLE_CALENDAR_CLIENT_ID follows for Google: calendar-scope consent must never be silently granted by a sign-in flow the user did not see as a calendar request. See docs/docs/how-to/calendar-sync.mdx for the exact Azure app-registration steps.",
+   "description": "the OAuth client (application) id (microsoft_oauth.py) the Microsoft Graph Calendar connect flow presents to Microsoft — a DIFFERENT Azure AD app registration than any dashboard sign-in client, same rule GOOGLE_CALENDAR_CLIENT_ID follows for Google: calendar-scope consent must never be silently granted by a sign-in flow the user did not see as a calendar request. See docs/docs/how-to/calendar-sync.mdx for the exact Azure app-registration steps.",
    "targets": ["compose"]
   },
   {
@@ -277,14 +277,14 @@
    "key": "SIGNUP_ALLOW_DISPOSABLE",
    "class": "defaulted",
    "default": "false",
-   "description": "DB-76 operator override: `true` disables the disposable-email-domain refusal on `POST /admin/users` entirely (app/main.py create_user, disposable_domains.py). Any other value (unset, empty, a typo) leaves the block ON — read at call time, never a boot-time snapshot. Never affects an address that has already signed up.",
+   "description": "Operator override: `true` disables the disposable-email-domain refusal on `POST /admin/users` entirely (app/main.py create_user, disposable_domains.py). Any other value (unset, empty, a typo) leaves the block ON — read at call time, never a boot-time snapshot. Never affects an address that has already signed up.",
    "targets": ["compose"]
   },
   {
    "key": "SIGNUP_DISPOSABLE_EXTRA_DOMAINS",
    "class": "defaulted",
    "default": "(unset — only the vendored list applies)",
-   "description": "DB-76: comma-separated extra domains to treat as disposable on `POST /admin/users`, ADDED to the vendored list (`data/disposable_email_domains.txt`) rather than replacing it. For an operator-observed abuse domain the upstream list has not caught yet — no redeploy needed. Read at call time (disposable_domains.py `_extra_domains`).",
+   "description": "comma-separated extra domains to treat as disposable on `POST /admin/users`, ADDED to the vendored list (`data/disposable_email_domains.txt`) rather than replacing it. For an operator-observed abuse domain the upstream list has not caught yet — no redeploy needed. Read at call time (disposable_domains.py `_extra_domains`).",
    "targets": ["compose"]
   },
   {
@@ -302,12 +302,12 @@
    "when_unconfigured": "all three /billing/* routes answer a typed 503 naming the missing key(s); every other admin-api route is unaffected"
   },
   "google_calendar": {
-   "description": "DB-30's Google Calendar OAuth connect flow (GET /user/calendars/google/authorize, POST /user/calendars/google/exchange) and the internal access-token edge meeting-api's sync calls (POST /internal/calendars/{id}/google-token)",
+   "description": "the Google Calendar OAuth connect flow (GET /user/calendars/google/authorize, POST /user/calendars/google/exchange) and the internal access-token edge meeting-api's sync calls (POST /internal/calendars/{id}/google-token)",
    "mode": "all",
    "when_unconfigured": "all three routes answer a typed 503 naming the missing key(s); the ICS calendar-connect surface (/user/calendars, /user/calendar) is completely unaffected"
   },
   "microsoft_calendar": {
-   "description": "DB-32's Microsoft Graph Calendar OAuth connect flow (GET /user/calendars/microsoft/authorize, POST /user/calendars/microsoft/exchange) and the internal access-token edge meeting-api's sync calls (POST /internal/calendars/{id}/microsoft-token)",
+   "description": "the Microsoft Graph Calendar OAuth connect flow (GET /user/calendars/microsoft/authorize, POST /user/calendars/microsoft/exchange) and the internal access-token edge meeting-api's sync calls (POST /internal/calendars/{id}/microsoft-token)",
    "mode": "all",
    "when_unconfigured": "all three routes answer a typed 503 naming the missing key(s); the ICS calendar-connect surface and the Google connector are completely unaffected"
   }

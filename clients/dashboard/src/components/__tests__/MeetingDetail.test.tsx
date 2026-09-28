@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-// MeetingDetail's delete flow (DB-42) navigates away with `useRouter()`, and DB-44's
+// MeetingDetail's delete flow navigates away with `useRouter`, and the
 // scroll-to-segment link reads `?t=` with `useSearchParams()` — both from `next/navigation`,
 // which throws outside an actual App Router tree ("invariant expected app router to be
 // mounted"). Every other component under test here renders under plain RTL, not Next's router,
@@ -23,7 +23,7 @@ vi.mock("next/navigation", () => ({
 import { MeetingDetail } from "../MeetingDetail";
 import { ToastProvider } from "../ui";
 
-// MeetingActions/BotControls now call useToast() (DB-41/DB-42), which throws outside a
+// MeetingActions/BotControls now call useToast, which throws outside a
 // <ToastProvider> exactly like `next/navigation`'s router does — same reason, same fix as
 // `SendBotDialog.test.tsx`.
 function renderDetail(meetingId: string) {

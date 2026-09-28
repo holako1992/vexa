@@ -1,4 +1,4 @@
-/** DB-32/DB-33 — Connect Microsoft 365, the Google connect flow's sibling.
+/** Connect Microsoft 365, the Google connect flow's sibling.
  *
  *  Same properties `06-calendar.spec.ts` proves for Google, against
  *  `login.microsoftonline.com` instead of `accounts.google.com`, and `/calendar/microsoft/

@@ -1,4 +1,4 @@
-"""DB-30: the Google Calendar adapter beside the ICS one.
+"""The Google Calendar adapter beside the ICS one.
 
 ``parse_google_events`` turns Google Calendar API ``events.list(singleEvents=true)`` items into
 the SAME ``{"events": [...], "cancelled_uids": [...]}`` shape ``parse_ics`` produces, so

@@ -449,7 +449,7 @@ async def request_bot(
     """Run the spawn flow and return a MeetingResponse-shaped dict.
 
     Raises ``DuplicateMeeting`` (409), ``MaxBotsExceeded`` / ``QuotaExceeded`` (429),
-    ``MeetingQuotaExceeded`` (402, DB-72's monthly meeting quota), or ``SpawnFailed`` (502/failed).
+    ``MeetingQuotaExceeded`` (402, the monthly meeting quota), or ``SpawnFailed`` (502/failed).
 
     ``continue_meeting`` (P3c): if the prior meeting for (platform, native_id) is TERMINAL, reuse
     that row + add a new session instead of creating a fresh meeting. ``max_concurrent`` (P3e): the
@@ -539,7 +539,7 @@ async def request_bot(
                 f"{int(_STT_VERDICT_MAX_AGE_S)}s, or call /health?force=1 to re-probe now"
             )
 
-    # 1d. Monthly meeting quota (DB-72) — admin-api resolves the caller's plan + this calendar
+    # 1d. Monthly meeting quota — admin-api resolves the caller's plan + this calendar
     #     period's usage ONCE per spawn attempt, off the SAME best-effort `bot_context` fetch above
     #     (no second call). This runs for BOTH admission paths (a manual POST /bots and an
     #     auto-join dispatch both call `request_bot`), BEFORE any DB write — same property as the
@@ -548,7 +548,7 @@ async def request_bot(
     #     `quota` is absent when billing is not configured (no ADMIN_API_URL/INTERNAL_API_SECRET →
     #     `bot_context` is `{}`) or when the resolved plan is unlimited (admin-api omits the key
     #     entirely for a `None` `meetings_per_month`) — either way, no pre-check: a deployment with
-    #     no billing wired behaves exactly as before DB-72.
+    # no billing wired behaves exactly as before.
     #
     #     `used is None` means admin-api's own usage query failed (UNKNOWN, never coerced to 0 —
     #     see billing/meetings_usage.py). A FINITE limit with UNKNOWN usage fails CLOSED here: we

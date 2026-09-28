@@ -1,4 +1,4 @@
-"""DB-76 trial-abuse floor: the disposable-email-domain check for `POST /admin/users`.
+"""The trial-abuse floor: the disposable-email-domain check for `POST /admin/users`.
 
 Refuses sign-up (never an existing account — see `main.py:create_user`) when the address's
 registrable domain, or any of its subdomains, is a known disposable/throwaway mail provider. This

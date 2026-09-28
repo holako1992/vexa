@@ -1,4 +1,4 @@
-"""DB-73 — `POST /billing/webhook`, end to end: signature-gated, writes the right `users.data`
+"""`POST /billing/webhook`, end to end: signature-gated, writes the right `users.data`
 fields per event type, is a no-op on redelivery, converges to Stripe's CURRENT state under
 reordering, ignores an unrecognized price, and (`customer.subscription.deleted`) resolves to free
 AT PERIOD END through `entitlements.resolve_plan` — not immediately, matching Stripe's own "paid

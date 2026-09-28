@@ -61,12 +61,12 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const isLive = useRef(false);
   const lineRefs = useRef<Array<HTMLLIElement | null>>([]);
   const playerRef = useRef<AudioPlayerHandle>(null);
-  // DB-51: the audio element's own playback position, read off `AudioPlayer`'s `onTimeUpdate` —
+  // The audio element's own playback position, read off `AudioPlayer`'s `onTimeUpdate` —
   // `null` until the player has fired at least once (nothing has played yet), which is exactly
   // what keeps `activeSegmentIndex` from highlighting segment zero before playback starts.
   const [currentTime, setCurrentTime] = useState<number | null>(null);
 
-  // DB-44: a link from a global-search result carries `?t=<seconds>` — the matched segment's
+  // A link from a global-search result carries `?t=<seconds>` — the matched segment's
   // start offset. Scroll to, and highlight, the transcript line closest to it once the transcript
   // has loaded. `null` when the param is absent or not a finite number, so an ordinary visit to
   // the meeting page (no `t`) never highlights anything.
@@ -97,7 +97,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
     lineRefs.current[highlightIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlightIndex]);
 
-  // DB-51: the segment playing right now, from the audio element's own position — takes over the
+  // The segment playing right now, from the audio element's own position — takes over the
   // highlight from `highlightIndex` (the `?t=` search-result link) once playback actually starts,
   // since at that point "what's playing" is the more useful thing to show than where a link once
   // pointed. Never drives the scroll-into-view effect above: auto-scrolling the transcript on
@@ -105,7 +105,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const playingIndex = useMemo(() => activeSegmentIndex(lines, currentTime), [lines, currentTime]);
   const activeIndex = playingIndex ?? highlightIndex;
 
-  /** DB-51: clicking a transcript segment seeks the player to its own `start` and highlights it
+  /** Clicking a transcript segment seeks the player to its own `start` and highlights it
    *  while playing (`activeIndex` above) — a no-op when this meeting has no recording. */
   function seekToLine(at: number | null) {
     if (at == null) return;
@@ -295,7 +295,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
           {lines.map((line, i) => {
             const dim = matches !== null && !matches.has(i);
             const isHighlighted = i === activeIndex;
-            // DB-51: a segment is clickable to seek only when there is a player to seek AND this
+            // A segment is clickable to seek only when there is a player to seek AND this
             // segment carries its own offset — a segment `toTranscript` mapped to `at: null`
             // (the producer gave none) has nowhere meaningful to seek to.
             const seekable = !!(meeting.hasRecording && meeting.recordingId) && line.at != null;

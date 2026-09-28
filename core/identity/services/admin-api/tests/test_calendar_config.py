@@ -231,7 +231,7 @@ def test_internal_bot_context(client):
                    headers={"X-Internal-Secret": INTERNAL_SECRET})
     assert r.status_code == 200, r.text
     ctx = r.json()
-    # DB-72 (billing/catalog.py:effective_concurrent_cap, commit 1404bf23): a user with no
+    # This (billing/catalog.py:effective_concurrent_cap, commit 1404bf23): a user with no
     # subscription is on the free plan, and the effective cap is the LOWER of the plan's
     # concurrent_bots and the stored column — never the stored column alone. Expressed via the
     # same function /internal/validate itself calls, so this asserts the RULE, not a re-derived

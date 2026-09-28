@@ -3,16 +3,16 @@
 Feed URLs are credentials.  Only ``internal_connections`` includes them; every
 user-facing representation goes through ``masked_connection``.
 
-DB-30 adds a SECOND connection ``kind`` beside the original ICS feed: ``"google"``, an OAuth
+This adds a SECOND connection ``kind`` beside the original ICS feed: ``"google"``, an OAuth
 connection holding the Google account's email (for display), the selected calendar ids
 (default ``["primary"]``), and a reference to the encrypted refresh token — never the token
 itself (see ``token_cipher.py``: the ciphertext is a separate field, ``google_refresh_token_enc``,
 and it crosses ``masked_connection`` and ``internal_connections`` alike NEVER — only
 ``main.py``'s internal google-token edge reads it, decrypts it, and immediately discards the
 plaintext after the refresh call). Every connection dict now carries ``kind`` (``"ics"`` is the
-default for every row written before DB-30, so existing connections keep working unchanged).
+default for every row written before, so existing connections keep working unchanged).
 
-DB-32 adds a THIRD kind, ``"microsoft"`` (Microsoft Graph, ``Calendars.Read`` + ``offline_access``),
+This adds a THIRD kind, ``"microsoft"`` (Microsoft Graph, ``Calendars.Read`` + ``offline_access``),
 the same shape as ``"google"``: ``microsoft_email``, ``microsoft_calendar_ids`` (default
 ``["primary"]``), and ``microsoft_refresh_token_enc`` — encrypted the same way, by the same
 ``token_cipher.py`` (its AEAD associated data is already provider-agnostic: user id + calendar id),
@@ -152,7 +152,7 @@ def new_google_connection(*, id: Optional[str] = None, name: str, google_email: 
 def new_microsoft_connection(*, id: Optional[str] = None, name: str, microsoft_email: str,
                              refresh_token_enc: str, microsoft_calendar_ids: Optional[list] = None,
                              auto_join: bool = True, bot_name: str = "Vexa") -> dict:
-    """A ``kind: "microsoft"`` connection (DB-32) — same shape as ``new_google_connection``, same
+    """A ``kind: "microsoft"`` connection — same shape as ``new_google_connection``, same
     rule: ``refresh_token_enc`` is the ALREADY-ENCRYPTED blob, and this module never stores a
     plaintext refresh token."""
     cleaned_name = name.strip() or microsoft_email
@@ -204,7 +204,7 @@ def masked_connection(connection: dict) -> dict:
         # The refresh token NEVER appears here — not even masked. The account email is not a
         # secret (it is what the user picked in the Google consent screen a moment ago); the
         # calendar ids are the user's own configuration. ``reconnect_needed`` surfaces a
-        # revoked/expired grant instead of a silent sync failure (DB-30 acceptance).
+        # revoked/expired grant instead of a silent sync failure (acceptance).
         base.update({
             "google_email": connection.get("google_email"),
             "google_calendar_ids": connection.get("google_calendar_ids") or list(DEFAULT_GOOGLE_CALENDAR_IDS),
@@ -212,7 +212,7 @@ def masked_connection(connection: dict) -> dict:
         })
         return base
     if kind == "microsoft":
-        # Same rule as "google" above, for the Microsoft Graph refresh token (DB-32).
+        # Same rule as "google" above, for the Microsoft Graph refresh token.
         base.update({
             "microsoft_email": connection.get("microsoft_email"),
             "microsoft_calendar_ids": connection.get("microsoft_calendar_ids")
@@ -282,7 +282,7 @@ def internal_connections(data: dict, user_id: int) -> list[dict]:
                 "reconnect_needed": bool(connection.get("reconnect_needed", False)),
             })
         elif kind == "microsoft":
-            # Same rule as "google" above (DB-32): the refresh token never crosses this hop —
+            # Same rule as "google" above: the refresh token never crosses this hop —
             # meeting-api mints a fresh access token over the internal microsoft-token edge.
             out.append({
                 **entry,

@@ -1,4 +1,4 @@
-"""DB-72 — `billing.catalog.effective_concurrent_cap`: combining the resolved plan's
+"""`billing.catalog.effective_concurrent_cap`: combining the resolved plan's
 `concurrent_bots` with the pre-billing `users.max_concurrent_bots` column into the ONE number
 `/internal/validate` and `/internal/users/{id}/bot-context` both return as `max_concurrent`.
 
@@ -15,7 +15,7 @@ from admin_api.app.billing.catalog import (
 
 def test_untouched_default_lets_the_plan_decide_alone():
     """The column still reads the legacy default (3) — nobody has ever PATCHed it — so a Free
-    user's plan (1) applies UNCLAMPED, not raised to 3. This is DB-72's stated product change."""
+    user's plan (1) applies UNCLAMPED, not raised to 3. This is the stated product change."""
     assert effective_concurrent_cap(1, LEGACY_MAX_CONCURRENT_BOTS_DEFAULT) == 1
 
 
@@ -39,7 +39,7 @@ def test_explicit_lower_override_narrows_below_the_plan():
 
 
 def test_explicit_higher_value_still_never_exceeds_the_plan():
-    """Until DB-77 ships a real override/bonus field, this column cannot raise a user ABOVE their
+    """Until it ships a real override/bonus field, this column cannot raise a user ABOVE their
     plan — that would be building the override this task is told not to build."""
     assert effective_concurrent_cap(1, 10) == 1
     assert effective_concurrent_cap(2, 10) == 2

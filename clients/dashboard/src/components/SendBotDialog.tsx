@@ -9,8 +9,8 @@
  *   • "Calendar" — list connected ICS calendars, toggle auto-join, sync, connect new, disconnect.
  *
  * Built on the shared primitives in `./ui`: `Dialog` (focus trap, Escape, backdrop click, focus
- * return — there is no second hand-rolled `role="dialog"` here any more) and `Toggle` (a real
- * `role="switch"`, replacing the `<span role="checkbox">` this file used to fake auto-join with).
+ * return — the one `role="dialog"` here) and `Toggle` (a real `role="switch"` for auto-join,
+ * not a hand-rolled `<span role="checkbox">`).
  */
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -42,8 +42,8 @@ import { Button, Dialog, Input, Toggle, useToast } from "./ui";
 
 interface CalendarConnection {
   id: string;
-  /** `masked_connection` (`admin_api/app/calendars.py`) always sets this, defaulting pre-DB-30
-   *  rows to `"ics"` server-side — never missing on the wire. */
+  /** `masked_connection` (`admin_api/app/calendars.py`) always sets this, defaulting a connection
+   *  row with no stored `kind` to `"ics"` server-side — never missing on the wire. */
   kind: "ics" | "google" | "microsoft";
   name: string;
   ics_url_set?: boolean;
@@ -51,7 +51,7 @@ interface CalendarConnection {
   /** Google-only fields — never present on any other `kind`. */
   google_email?: string | null;
   google_calendar_ids?: string[];
-  /** Microsoft-only fields (DB-32/DB-33) — never present on any other `kind`. */
+  /** Microsoft-only fields — never present on any other `kind`. */
   microsoft_email?: string | null;
   microsoft_calendar_ids?: string[];
   reconnect_needed?: boolean;
@@ -114,7 +114,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 
 // ─── Meeting-link tab ─────────────────────────────────────────────────────────
 
-/** DB-75's paywall message for a refused send: what happened, when the allowance resets, and a
+/** The paywall message for a refused send: what happened, when the allowance resets, and a
  *  link — to the producer's own `upgrade_url` when it sent one, else to the dashboard's own
  *  billing page. */
 interface QuotaResult {
@@ -172,7 +172,7 @@ function MeetingLinkTab({ onSent }: { onSent: () => void }) {
       setUrl("");
       onSent();
     } catch (e) {
-      // DB-75: branch on the RESPONSE BODY's `error` field, never on the 402 status alone — a
+      // Branch on the RESPONSE BODY's `error` field, never on the 402 status alone — a
       // 402 with a different body is a different failure, and presentError's generic 402 text
       // would lose the reset date and upgrade link this shape carries.
       if (e instanceof ApiError && isQuotaExceeded(e.body)) {
@@ -250,7 +250,7 @@ function MeetingLinkTab({ onSent }: { onSent: () => void }) {
         {sending ? "Sending…" : "Send Bot"}
       </Button>
 
-      {/* DB-75: informational only, never a disable condition — see the effect above. */}
+      {/* Informational only, never a disable condition — see the effect above. */}
       {remaining && <p className="text-center text-xs text-ink-3">{remaining}</p>}
 
       <p className="text-center text-xs text-ink-3">
@@ -530,7 +530,7 @@ function CalendarTab() {
         </div>
       )}
 
-      {/* DB-31/DB-33: the primary path — one OAuth click each, no address to find or paste. */}
+      {/* The primary path — one OAuth click each, no address to find or paste. */}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button
           variant="primary"
@@ -678,7 +678,7 @@ interface SendBotDialogProps {
   /** Called after a bot is successfully sent, so the meeting list can reload. */
   onBotSent: () => void;
   /** Which tab opens first. Defaults to "link" — `MeetingsView` passes "calendar" when the
-   *  dialog is being reopened after returning from Google's OAuth consent screen (DB-31), so the
+   * dialog is being reopened after returning from Google's OAuth consent screen, so the
    *  person lands back where they started instead of the meeting-link tab. */
   initialTab?: TabId;
 }

@@ -1,4 +1,4 @@
-/** DB-74 (billing page, read-only half) and DB-75 (paywall / upgrade prompts) — against a REAL
+/** The billing page's read-only half, and the paywall / upgrade prompts — against a REAL
  *  running stub, like every other spec in this directory.
  *
  *  Expected:
@@ -7,7 +7,7 @@
  *     usage the meter hasn't reported yet (which must show "Usage unavailable", never "0").
  *   - a past-due plan shows its grace-period note.
  *   - the Send-Bot dialog shows a remaining-allowance line under Send for a finite plan.
- *   - a `POST /bots` refused with DB-72's unwrapped 402 `quota_exceeded` body shows the paywall
+ * - a `POST /bots` refused with the unwrapped 402 `quota_exceeded` body shows the paywall
  *     message (what happened, when it resets) and a link — to `upgrade_url` when the body carries
  *     one, else to `/billing`.
  *   - the summary panel's `_none recorded in this meeting._` placeholder renders as italic text,

@@ -1,4 +1,4 @@
-/** `/upcoming` (DB-33): meetings Vexa is watching for, grouped by day, with the per-meeting
+/** `/upcoming`: meetings Vexa is watching for, grouped by day, with the per-meeting
  *  Join / Don't join override and "Sync now". See `src/components/UpcomingView.tsx` for the view
  *  itself and where its data comes from. */
 import { redirect } from "next/navigation";

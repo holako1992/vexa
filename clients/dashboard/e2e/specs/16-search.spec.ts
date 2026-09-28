@@ -1,4 +1,4 @@
-/** DB-44 — global search: `Ctrl+K` reaches the shell's search box from any page, results land on
+/** Global search: `Ctrl+K` reaches the shell's search box from any page, results land on
  *  `/search` grouped by meeting with the matched text highlighted, and a hit links to its meeting
  *  with `?t=<start>` so `MeetingDetail` can scroll to and highlight the matching segment.
  *

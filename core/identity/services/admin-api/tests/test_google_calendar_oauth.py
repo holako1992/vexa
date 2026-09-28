@@ -1,4 +1,4 @@
-"""DB-30: Google Calendar OAuth connect — state signing/expiry/replay/ownership (pure), the
+"""Google Calendar OAuth connect — state signing/expiry/replay/ownership (pure), the
 exchange route (encrypted-at-rest storage, masking, 503 when unconfigured), and the internal
 google-token edge (reconnect_needed on a revoked grant).
 
@@ -75,7 +75,7 @@ def _user_token(client, email="goog@vexa.ai", max_bots=4):
 
 
 # ── state: signature, expiry, replay, wrong-user (pure — no HTTP, no docker needed, but grouped
-#    here so the whole DB-30 spec lives in one file) ────────────────────────────────────────────
+# here so the whole it spec lives in one file) ────────────────────────────────────────────
 
 def test_state_roundtrips_for_the_minting_user():
     token = google_oauth.sign_state(42, nonce="fixed-nonce", now=1000.0)

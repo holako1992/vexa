@@ -1,4 +1,4 @@
-/** DB-41 (bot controls) + DB-42 (rename, delete, participants) against a REAL running stub. */
+/** Bot controls plus rename, delete and participants, against a REAL running stub. */
 import { test, expect } from "@playwright/test";
 import { gatewayRequests, resetStub, signIn, testEmail } from "./helpers";
 

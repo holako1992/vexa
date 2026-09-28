@@ -1,5 +1,5 @@
 "use client";
-/** The meeting page's audio player (DB-50). Two hops, exactly the flow
+/** The meeting page's audio player. Two hops, exactly the flow
  *  `docs/docs/how-to/recordings.mdx` documents:
  *
  *   1. `GET /recordings/<id>/master?type=audio` — finalize-on-read: builds the master if it
@@ -10,7 +10,7 @@
  *      stream, Range-streamed end to end (`route.ts`'s `route.raw` branch forwards the browser's
  *      own `Range` header and passes back `206`/`Content-Range` untouched).
  *
- *  `seekTo` is exposed via a ref (DB-51: `MeetingDetail` calls it when a transcript segment is
+ * `seekTo` is exposed via a ref (`MeetingDetail` calls it when a transcript segment is
  *  clicked) rather than taking a controlled `currentTime` prop — an `<audio>` element owns its
  *  own playback position; fighting that with a prop on every render would fight the browser's own
  *  seek/scrub gestures too.
@@ -20,7 +20,7 @@ import { getJson, presentError } from "@/lib/api";
 import { ErrorState, LoadingState } from "./EmptyState";
 
 export interface AudioPlayerHandle {
-  /** Seek to this many seconds and resume playback — DB-51's click-a-segment-to-seek. A stopped
+  /** Seek to this many seconds and resume playback — the click-a-segment-to-seek. A stopped
    *  player starts playing so the click's result is immediately audible, not just a moved
    *  scrubber. */
   seekTo(seconds: number): void;
@@ -72,7 +72,7 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, { recordingId: string; 
         el.currentTime = seconds;
         void el.play().catch(() => {
           // Autoplay can be refused before the person has interacted with the page at all; the
-          // scrubber has still moved, which is the part DB-51 promises.
+          // scrubber has still moved, which is the part it promises.
         });
       },
     }));

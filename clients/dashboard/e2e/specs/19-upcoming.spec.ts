@@ -1,4 +1,4 @@
-/** DB-33 — `/upcoming`: grouped by day, the source calendar chip, the Join / Don't join
+/** `/upcoming`: grouped by day, the source calendar chip, the Join / Don't join
  *  override, the auto-join skip reason shown verbatim, and "Sync now".
  *
  *  The fixture carries three "scheduled"-phase rows (`../fixtures.mjs`): 103 (Roadmap Planning,

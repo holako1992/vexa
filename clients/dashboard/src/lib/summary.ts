@@ -1,4 +1,4 @@
-/** Parse the `summary.v1` note DB-60 writes to a completed meeting's workspace
+/** Parse the `summary.v1` note it writes to a completed meeting's workspace
  *  (`meetings/<row_id>/summary.md`, `docs/docs/how-to/post-meeting-report.mdx`).
  *
  *  Dependency-free and pure, like `upstream.ts` — no markdown/yaml library. The document shape

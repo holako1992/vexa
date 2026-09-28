@@ -1,8 +1,8 @@
-"""DB-78 — `email_payment_failed`, the `dunning` flow's one step: the mail a subscriber gets when
+"""`email_payment_failed`, the `dunning` flow's one step: the mail a subscriber gets when
 a Stripe invoice fails, reacting to `payment.failed` (`core/identity/services/admin-api/src/
 admin_api/app/events.py`'s `EVENT_PAYMENT_FAILED`).
 
-THE FOUR PROPERTIES this file holds, matching DB-78's own list:
+THE FOUR PROPERTIES this file holds, matching the own list:
   1. exactly one mail, addressed to the failed invoice's subscriber, with a `/billing` link;
   2. no link when `VEXA_FLOWS_DASHBOARD_URL` is unset;
   3. a redelivered fact (or a step retry within one reaction) sends no second mail —

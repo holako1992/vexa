@@ -49,9 +49,9 @@ async def run_user_sync(
 ) -> dict:
     """Run one full sync for ``cfg`` → the status stamp. Three config shapes, same downstream path:
     an ICS ``cfg = {user_id, ics_url, auto_join, ...}`` (``kind`` absent or ``"ics"``), a Google
-    ``cfg = {user_id, kind: "google", google_calendar_ids, auto_join, ...}`` (DB-30), or a
+    ``cfg = {user_id, kind: "google", google_calendar_ids, auto_join, ...}``, or a
     Microsoft ``cfg = {user_id, kind: "microsoft", microsoft_calendar_ids, auto_join, ...}``
-    (DB-32). All three resolve to the identical ``{"events": [...], "cancelled_uids": [...]}``
+     All three resolve to the identical ``{"events": [...], "cancelled_uids": [...]}``
     shape before ``sync_user`` ever sees them, so any of the three providers produces identical
     planned-meeting rows for an equivalent event.
 

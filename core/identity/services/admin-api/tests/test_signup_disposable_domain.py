@@ -1,4 +1,4 @@
-"""DB-76 trial-abuse floor at the `POST /admin/users` boundary — docker-gated (mirrors
+"""This trial-abuse floor at the `POST /admin/users` boundary — docker-gated (mirrors
 `test_email_case_folding.py`'s fixture shape exactly). Pure matching/override logic is covered
 without docker in `test_disposable_domains.py`; this file proves the wiring: the refusal is a
 typed 422, an existing account is never locked out, and the operator override works end to end.

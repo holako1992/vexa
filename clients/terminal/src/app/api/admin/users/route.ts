@@ -1,4 +1,4 @@
-/** DB-77 admin overrides — user lookup for the panel's "Users" tab. GET ?email=... resolves a
+/** Admin overrides — user lookup for the panel's "Users" tab. GET ?email=... resolves a
  *  user by email through admin-api's admin tier (X-Admin-API-Key, never sent to the browser).
  *  Same gate + 404-hiding as every other /api/admin/* route (../gate.ts): a verified admin gets
  *  the user record (including `data.plan_override`/`data.quota_bonus`), everyone else gets 404.
