@@ -9,6 +9,8 @@
   reason; see `components/Shell.tsx`'s header comment for why search lives in the top bar rather
   than a nav-rail entry.
 - `billing/page.tsx` — DB-74's read-only billing page: plan, usage, reset date.
+- `recordings/page.tsx` — DB-50/DB-52's `/recordings`: every recording, newest first, with
+  Download and Delete. The player itself lives on the meeting page (`meetings/[meetingId]/`).
 - `upcoming/page.tsx` — DB-33's `/upcoming`: every planned meeting grouped by day, with the
   per-meeting Join / Don't join override and "Sync now".
 - `calendar/page.tsx` — DB-34's `/calendar`: per-connection health (last sync, last error, events

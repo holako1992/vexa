@@ -13,8 +13,9 @@
  *     write allowlist and never overlap with the read allowlist.
  */
 import type { NextRequest } from "next/server";
-import { resolveUpstream, resolveWriteUpstream, filterQuery, validateBody } from "@/lib/upstream";
+import { resolveUpstream, resolveWriteUpstream, filterQuery, validateBody, type UpstreamRoute } from "@/lib/upstream";
 import { sessionToken } from "@/lib/session";
+import { rawRequestHeaders, rawResponseHeaders } from "@/lib/rawStream";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -36,9 +37,38 @@ function passThrough(upstream: Response): Response {
   return new Response(upstream.body, { status: upstream.status, headers: NO_STORE });
 }
 
+/** The ONE non-JSON hop: the recording media byte stream (`route.raw`, see `upstream.ts`).
+ *  Forwards the caller's own `Range` header (and nothing else off the client request — see
+ *  `rawRequestHeaders`) and streams the response straight through, `upstream.body` to
+ *  `Response`, so a multi-minute recording is never buffered whole into this server's memory just
+ *  to be re-emitted. Status is passed verbatim (`200`, a Range's `206`, a `404`/`416` the core
+ *  itself decided) — this proxy invents none of its own. */
+async function forwardRaw(url: string, token: string, req: NextRequest): Promise<Response> {
+  // The timeout bounds the wait for response headers only; once the stream starts it runs as long
+  // as the recording does, and the browser disconnecting cancels it.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  req.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  let upstream: Response;
+  try {
+    upstream = await fetch(url, {
+      method: "GET",
+      headers: { "X-API-Key": token, ...rawRequestHeaders(req.headers.get("range")) },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const detail = err instanceof Error && err.message ? err.message : "upstream unreachable";
+    return json({ error: "upstream_unreachable", detail }, 502);
+  } finally {
+    clearTimeout(timer);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: rawResponseHeaders(upstream.headers) });
+}
+
 export async function GET(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }): Promise<Response> {
   const { path } = await ctx.params;
-  const route = resolveUpstream(path);
+  const route: UpstreamRoute | null = resolveUpstream(path);
   if (!route) return json({ error: "not_found" }, 404);
 
   const token = await gatewayKey();
@@ -49,6 +79,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // entirely rather than appended, so a browser-supplied `?path=...` can never reach it.
   const query = route.path.includes("?") ? "" : filterQuery(route, req.nextUrl.searchParams);
   const url = `${GATEWAY_URL}${route.path}${query}`;
+
+  if (route.raw) return forwardRaw(url, token, req);
+
   let upstream: Response;
   try {
     upstream = await fetch(url, {

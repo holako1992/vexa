@@ -18,6 +18,7 @@ import {
   type MeetingRowDTO,
   type SegmentDTO,
   type TranscriptLine,
+  activeSegmentIndex,
   formatClock,
   initialsOf,
   speakerIndex,
@@ -33,6 +34,7 @@ import { SummaryPanel } from "./SummaryPanel";
 import { BotControls } from "./BotControls";
 import { MeetingActions } from "./MeetingActions";
 import { Participants } from "./Participants";
+import { AudioPlayer, type AudioPlayerHandle } from "./AudioPlayer";
 
 /** Avatar hues, in the same family as the accent so a busy transcript still reads calm.
  *
@@ -58,6 +60,11 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const [copied, setCopied] = useState(false);
   const isLive = useRef(false);
   const lineRefs = useRef<Array<HTMLLIElement | null>>([]);
+  const playerRef = useRef<AudioPlayerHandle>(null);
+  // DB-51: the audio element's own playback position, read off `AudioPlayer`'s `onTimeUpdate` —
+  // `null` until the player has fired at least once (nothing has played yet), which is exactly
+  // what keeps `activeSegmentIndex` from highlighting segment zero before playback starts.
+  const [currentTime, setCurrentTime] = useState<number | null>(null);
 
   // DB-44: a link from a global-search result carries `?t=<seconds>` — the matched segment's
   // start offset. Scroll to, and highlight, the transcript line closest to it once the transcript
@@ -89,6 +96,21 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
     if (highlightIndex == null) return;
     lineRefs.current[highlightIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlightIndex]);
+
+  // DB-51: the segment playing right now, from the audio element's own position — takes over the
+  // highlight from `highlightIndex` (the `?t=` search-result link) once playback actually starts,
+  // since at that point "what's playing" is the more useful thing to show than where a link once
+  // pointed. Never drives the scroll-into-view effect above: auto-scrolling the transcript on
+  // every `timeupdate` while a recording plays would fight a person reading ahead or back.
+  const playingIndex = useMemo(() => activeSegmentIndex(lines, currentTime), [lines, currentTime]);
+  const activeIndex = playingIndex ?? highlightIndex;
+
+  /** DB-51: clicking a transcript segment seeks the player to its own `start` and highlights it
+   *  while playing (`activeIndex` above) — a no-op when this meeting has no recording. */
+  function seekToLine(at: number | null) {
+    if (at == null) return;
+    playerRef.current?.seekTo(at);
+  }
 
   const load = useCallback(async () => {
     let row: MeetingRowDTO;
@@ -227,6 +249,12 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
 
       <BotControls meeting={meeting} onStopped={() => void load()} />
 
+      {meeting.hasRecording && meeting.recordingId && (
+        <div className="mb-6 rounded-card border border-line bg-card p-4">
+          <AudioPlayer ref={playerRef} recordingId={meeting.recordingId} onTimeUpdate={setCurrentTime} />
+        </div>
+      )}
+
       <SummaryPanel meetingId={meetingId} meeting={meeting} />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -266,7 +294,11 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
         <ol className="space-y-4">
           {lines.map((line, i) => {
             const dim = matches !== null && !matches.has(i);
-            const isHighlighted = i === highlightIndex;
+            const isHighlighted = i === activeIndex;
+            // DB-51: a segment is clickable to seek only when there is a player to seek AND this
+            // segment carries its own offset — a segment `toTranscript` mapped to `at: null`
+            // (the producer gave none) has nowhere meaningful to seek to.
+            const seekable = !!(meeting.hasRecording && meeting.recordingId) && line.at != null;
 
             return (
               <li
@@ -274,9 +306,24 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
                 ref={(el) => {
                   lineRefs.current[i] = el;
                 }}
+                role={seekable ? "button" : undefined}
+                tabIndex={seekable ? 0 : undefined}
+                aria-label={seekable ? `Play from ${formatClock(line.at)}` : undefined}
+                onClick={seekable ? () => seekToLine(line.at) : undefined}
+                onKeyDown={
+                  seekable
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          seekToLine(line.at);
+                        }
+                      }
+                    : undefined
+                }
                 className={
                   (dim ? "opacity-35 " : "") +
                   "transition-opacity " +
+                  (seekable ? "cursor-pointer rounded-lg hover:bg-raised " : "") +
                   (isHighlighted ? "-mx-2 rounded-lg bg-accent-soft px-2 py-1 ring-2 ring-accent" : "")
                 }
               >

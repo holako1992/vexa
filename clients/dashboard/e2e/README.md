@@ -24,7 +24,11 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   those transcripts, shaped exactly like meeting-api's own `GET /transcripts/search` response.
   `freshMeetings()` / `freshCalendars()` return deep clones so the stub's mutations during one
   spec never leak into the next. `E2E_GOOGLE_EMAIL` / `E2E_MICROSOFT_EMAIL` are the fixed accounts
-  each provider's OAuth exchange always resolves to (DB-31, DB-32/DB-33).
+  each provider's OAuth exchange always resolves to (DB-31, DB-32/DB-33). DB-50 adds meeting 102's
+  `data.recordings[]` (one finished audio recording, numeric id, one media file) and
+  `makeSilentWav()` — a short 16-bit PCM WAV **generated in code**, never a committed binary blob;
+  `RECORDING_AUDIO_SECONDS` is its real length, so a spec that seeks within it can tell a real seek
+  from one silently clamped to zero.
 - `stub-server.mjs` — the stub backend itself: plain `node:http`, no dependency, because the
   fixtures are the point, not a framework. Runs two listeners in one process (the gateway and
   admin-api) plus a `/__control/*` remote control the specs use to reset state, inspect exactly
@@ -53,7 +57,12 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   {auto_join}` — the Upcoming page's Join / Don't join override. Every write route added since
   DB-33 also records its exact parsed body on its own `gatewayLog` entry
   (`readAndLogBody`/`LoggedRequest.body`), not just that the route was called — the mechanism
-  `19-upcoming.spec.ts` uses to prove the toggle's PATCH body reaches the stub unchanged. See the
+  `19-upcoming.spec.ts` uses to prove the toggle's PATCH body reaches the stub unchanged. DB-50/52
+  add `GET /recordings` (`limit`/`offset`/`meeting_id`, newest `created_at` first — the same
+  JSONB-scan-across-meetings shape the real `list_recordings` uses, never a second collection),
+  `GET /recordings/<id>/master`, the `raw`/`download` media-byte pair (both served by
+  `serveRangeableBytes` — a REAL `Range` parser, not a canned `206` — against the one generated
+  `RECORDING_AUDIO_BYTES` clip every recording plays), and `DELETE /recordings/<id>`. See the
   file's own header comment for the full route table.
 - `playwright.config.ts` — boots BOTH servers via Playwright's `webServer` (the stub, then
   `next dev` pointed at it with the matching env vars) so `npm run test:e2e` runs everything from
@@ -61,7 +70,7 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   `npm run dev` (`next dev --port ${PORT:-3001}`) because npm always runs package scripts through
   `cmd.exe` on Windows regardless of the invoking shell, and that bash-style `${VAR:-default}`
   never expands there.
-- `specs/` — the twenty specs. See `specs/README.md`.
+- `specs/` — the twenty-one specs. See `specs/README.md`.
 
 ## Running it
 

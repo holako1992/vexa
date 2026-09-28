@@ -27,7 +27,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", label: "Meetings", icon: LayoutGrid, implemented: true },
   { href: "/upcoming", label: "Upcoming", icon: Clock, implemented: true },
   { href: "/calendar", label: "Calendar", icon: CalendarDays, implemented: true },
-  { href: "/recordings", label: "Recordings", icon: Video, implemented: false },
+  { href: "/recordings", label: "Recordings", icon: Video, implemented: true },
   { href: "/settings", label: "Settings", icon: Settings, implemented: false },
   { href: "/billing", label: "Billing", icon: CreditCard, implemented: true },
 ];

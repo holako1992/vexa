@@ -38,7 +38,15 @@ import {
   QUOTA_EXCEEDED_BODY,
   E2E_GOOGLE_EMAIL,
   E2E_MICROSOFT_EMAIL,
+  makeSilentWav,
 } from "./fixtures.mjs";
+
+// DB-50: the recordings fixture's own audio bytes — generated ONCE at stub startup (never a
+// committed binary blob, see `fixtures.mjs`'s header comment on `makeSilentWav`). Every media
+// file this stub serves plays the SAME silent clip regardless of which recording/media-file id
+// was asked for — the point of the e2e specs is proving the DASHBOARD's Range/seek/download
+// plumbing, not a second copy of the core's own audio-assembly tests.
+const RECORDING_AUDIO_BYTES = makeSilentWav();
 
 const RUNNING_STATUSES = new Set(["requested", "joining", "awaiting_admission", "needs_help", "active", "stopping"]);
 const SUPPORTED_STOP_PLATFORMS = new Set(["google_meet", "teams", "zoom", "jitsi"]);
@@ -171,6 +179,83 @@ async function readAndLogBody(req, entry) {
   const body = await readJsonBody(req);
   if (entry) entry.body = body;
   return body;
+}
+
+/** Find the recording `id` across every fixture meeting's `data.recordings[]` — there is no
+ *  recordings table on the real core either (`meeting_api/recordings/adapters.py`'s
+ *  `list_meeting_recordings` does the same JSONB scan), so this stub mirrors that shape rather
+ *  than keeping a second, separate recordings collection that could drift from `meetings`.
+ *  Returns `{ meeting, rec }`, or `null`. */
+function findRecording(recordingId) {
+  for (const m of meetings) {
+    const recs = (m.data && m.data.recordings) || [];
+    const rec = recs.find((r) => String(r.id) === String(recordingId));
+    if (rec) return { meeting: m, rec };
+  }
+  return null;
+}
+
+/** DB-50: serve `buffer` honoring a real HTTP `Range` request — the same contract
+ *  `meeting_api/recordings/router.py`'s `get_recording_media_raw` implements against real object
+ *  storage (a `206` with `Content-Range`/`Accept-Ranges` for a satisfiable range, `416` with
+ *  `Content-Range: bytes *\/<total>` for one past the end, a full `200` with no `Range` header at
+ *  all). Every e2e recording plays the SAME `buffer` (`RECORDING_AUDIO_BYTES`) — see that
+ *  constant's own comment. */
+function serveRangeableBytes(req, res, buffer, contentType) {
+  const total = buffer.length;
+  const rangeHeader = req.headers.range;
+  if (!rangeHeader || !rangeHeader.toLowerCase().startsWith("bytes=")) {
+    res.writeHead(200, { "Content-Type": contentType, "Content-Length": String(total), "Accept-Ranges": "bytes" });
+    res.end(buffer);
+    return;
+  }
+  const spec = rangeHeader.slice(6).split(",")[0].trim(); // multi-range: honor the first, like the core
+  const sep = spec.indexOf("-");
+  if (sep < 0) {
+    res.writeHead(200, { "Content-Type": contentType, "Content-Length": String(total), "Accept-Ranges": "bytes" });
+    res.end(buffer);
+    return;
+  }
+  const startStr = spec.slice(0, sep).trim();
+  const endStr = spec.slice(sep + 1).trim();
+  let start;
+  let end;
+  if (startStr === "") {
+    const suffix = Number.parseInt(endStr, 10);
+    if (!Number.isFinite(suffix) || suffix <= 0) {
+      res.writeHead(200, { "Content-Type": contentType, "Content-Length": String(total), "Accept-Ranges": "bytes" });
+      res.end(buffer);
+      return;
+    }
+    start = Math.max(0, total - suffix);
+    end = total - 1;
+  } else {
+    start = Number.parseInt(startStr, 10);
+    end = endStr === "" ? total - 1 : Number.parseInt(endStr, 10);
+  }
+  if (!Number.isFinite(start) || start < 0 || start >= total) {
+    res.writeHead(416, {
+      "Content-Type": "application/json",
+      "Content-Range": `bytes */${total}`,
+      "Accept-Ranges": "bytes",
+    });
+    res.end(JSON.stringify({ detail: "Requested range not satisfiable" }));
+    return;
+  }
+  end = Math.min(end, total - 1);
+  if (end < start) {
+    res.writeHead(200, { "Content-Type": contentType, "Content-Length": String(total), "Accept-Ranges": "bytes" });
+    res.end(buffer);
+    return;
+  }
+  const slice = buffer.subarray(start, end + 1);
+  res.writeHead(206, {
+    "Content-Type": contentType,
+    "Content-Length": String(slice.length),
+    "Content-Range": `bytes ${start}-${end}/${total}`,
+    "Accept-Ranges": "bytes",
+  });
+  res.end(slice);
 }
 
 // ── the gateway ──────────────────────────────────────────────────────────────────────────────
@@ -626,9 +711,82 @@ async function handleGateway(req, res) {
     return sendJson(res, 204, null);
   }
 
+  // GET /recordings — DB-50's list, the same JSONB-scan shape `list_recordings` builds
+  // (`meeting_api/recordings/router.py`): every fixture meeting's `data.recordings[]`, newest
+  // `created_at` first, honoring `limit`/`offset`/`meeting_id` exactly like `GET /meetings` above.
+  if (req.method === "GET" && parts.length === 1 && parts[0] === "recordings") {
+    const all = [];
+    for (const m of meetings) {
+      for (const r of (m.data && m.data.recordings) || []) all.push({ ...r, meeting_id: m.id });
+    }
+    all.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    const meetingIdFilter = url.searchParams.get("meeting_id");
+    const filtered = meetingIdFilter ? all.filter((r) => String(r.meeting_id) === meetingIdFilter) : all;
+    const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : filtered.length;
+    const offset = url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0;
+    const effectiveLimit = Number.isFinite(limit) ? limit : filtered.length;
+    const page = filtered.slice(offset, offset + effectiveLimit);
+    return sendJson(res, 200, {
+      recordings: page,
+      total: filtered.length,
+      limit: effectiveLimit,
+      offset,
+      has_more: offset + page.length < filtered.length,
+    });
+  }
+
+  // GET /recordings/<id>/master?type=audio|video — DB-50's finalize-on-read metadata. Mirrors
+  // `get_recording_master`: 404 for an unknown/unowned recording id, 404 when this recording has
+  // no media file of the requested `type` yet.
+  if (req.method === "GET" && parts.length === 3 && parts[0] === "recordings" && parts[2] === "master") {
+    const found = findRecording(parts[1]);
+    if (!found) return sendJson(res, 404, { detail: "Recording not found" });
+    const type = url.searchParams.get("type") || "audio";
+    const mf = (found.rec.media_files || []).find((m) => m.type === type);
+    if (!mf) return sendJson(res, 404, { detail: "No such media file to finalize" });
+    return sendJson(res, 200, {
+      id: found.rec.id,
+      type,
+      storage_path: `e2e/recordings/${found.rec.id}/master.${mf.format}`,
+      media_file_id: mf.id,
+      raw_url: `/recordings/${found.rec.id}/media/${mf.id}/raw?type=${type}`,
+      duration_seconds: mf.duration_seconds ?? null,
+    });
+  }
+
+  // GET /recordings/<id>/media/<media_file_id>/raw — and its `.../download` alias, which the real
+  // gateway forwards to the SAME handler verbatim (`gateway/app.py`'s
+  // `get_recording_media_download`) — so this stub answers both from one branch too. Real Range
+  // handling (`serveRangeableBytes`): a spec's `Range: bytes=...` request gets back a genuine
+  // `206`, not a canned header.
+  if (
+    req.method === "GET" && parts.length === 5 && parts[0] === "recordings" && parts[2] === "media" &&
+    (parts[4] === "raw" || parts[4] === "download")
+  ) {
+    const found = findRecording(parts[1]);
+    if (!found) return sendJson(res, 404, { detail: "Recording not found" });
+    const mf = (found.rec.media_files || []).find((m) => String(m.id) === parts[3]);
+    if (!mf) return sendJson(res, 404, { detail: "No such media file" });
+    const contentType = mf.format === "wav" ? "audio/wav" : "application/octet-stream";
+    serveRangeableBytes(req, res, RECORDING_AUDIO_BYTES, contentType);
+    return;
+  }
+
+  // DELETE /recordings/<id> — DB-52's Delete button. Mirrors `delete_recording`'s 404 for an
+  // unknown/unowned id; this stub has no storage backend to fail, so it always succeeds otherwise.
+  if (req.method === "DELETE" && parts.length === 2 && parts[0] === "recordings") {
+    const found = findRecording(parts[1]);
+    if (!found) return sendJson(res, 404, { detail: "Recording not found" });
+    found.meeting.data.recordings = (found.meeting.data.recordings || []).filter(
+      (r) => String(r.id) !== String(parts[1]),
+    );
+    return sendJson(res, 200, { status: "deleted", id: found.rec.id });
+  }
+
   // Anything else — including the paths the dashboard's own allowlist must never forward
-  // (e.g. /recordings, /agent/chat). If a spec sees THIS response in its own network log, the
-  // dashboard proxy forwarded a request its allowlist should have refused with a 404 of its own.
+  // (e.g. /agent/chat, GET /recordings/<id> single-detail). If a spec sees THIS response in its
+  // own network log, the dashboard proxy forwarded a request its allowlist should have refused
+  // with a 404 of its own.
   return sendJson(res, 404, { error: "not_found", note: "stub: no such gateway route" });
 }
 

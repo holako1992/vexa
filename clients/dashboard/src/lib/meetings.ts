@@ -80,6 +80,12 @@ export interface Meeting {
   durationSeconds: number | null;
   attendees: { email: string; name?: string }[];
   hasRecording: boolean;
+  /** The id of this meeting's own recording (`data.recordings[0].id` — one recording per meeting
+   *  in practice, `source: "bot"`; see `recordings/adapters.py`'s `list_meeting_recordings`, which
+   *  reads this exact same array). `null` when `hasRecording` is false. DB-50's audio player reads
+   *  `GET /recordings/<recordingId>/master` from this — never a second lookup by meeting id, since
+   *  the row already carries it. */
+  recordingId: string | null;
   shared: boolean;
   nativeId: string | null;
   meetingUrl: string | null;
@@ -135,6 +141,18 @@ function durationOf(start: string | null, end: string | null): number | null {
 
 /** Map one row. The title falls back honestly: a user-given title wins, then platform · code,
  *  and a link-less plan is "Untitled meeting" rather than a fabricated label. */
+/** The one field this reader needs off a recording entry in `data.recordings[]` — everything else
+ *  there (media_files, session_uid, …) is upload bookkeeping the meeting row never surfaces; the
+ *  player reads the rest from `GET /recordings/<id>/master` instead, never from this row. */
+function firstRecordingId(recordings: unknown[] | undefined): string | null {
+  const first = recordings?.[0];
+  if (first && typeof first === "object" && "id" in first) {
+    const id = (first as { id?: unknown }).id;
+    if (typeof id === "number" || typeof id === "string") return String(id);
+  }
+  return null;
+}
+
 export function toMeeting(d: MeetingRowDTO): Meeting {
   const native = d.native_meeting_id;
   const startTime = d.start_time ?? null;
@@ -152,6 +170,7 @@ export function toMeeting(d: MeetingRowDTO): Meeting {
     durationSeconds: durationOf(startTime, endTime),
     attendees: d.data?.attendees ?? [],
     hasRecording: !!d.data?.recordings?.length,
+    recordingId: firstRecordingId(d.data?.recordings),
     shared: !!d.shared,
     nativeId: native,
     meetingUrl: d.constructed_meeting_url ?? null,
@@ -280,6 +299,22 @@ export function toTranscript(segments: readonly SegmentDTO[] | undefined | null)
       text: (s.text || "").trim(),
     }))
     .filter((l) => l.text.length > 0);
+}
+
+/** The transcript line whose `at` is the LATEST one at or before `currentTime` — DB-51's "the
+ *  segment playing right now" highlight. `null` while nothing has played yet (or `lines` isn't
+ *  loaded), and it stays on the LAST segment once playback runs past it — there is no "next"
+ *  segment to hand off to. Segments are already producer-ordered (never re-sorted anywhere in
+ *  this file), so one forward scan is enough; a segment with no `at` at all is skipped rather
+ *  than treated as "always current". */
+export function activeSegmentIndex(lines: readonly TranscriptLine[] | null, currentTime: number | null): number | null {
+  if (lines == null || currentTime == null) return null;
+  let best: number | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const at = lines[i]!.at;
+    if (at != null && at <= currentTime) best = i;
+  }
+  return best;
 }
 
 /** mm:ss, or h:mm:ss past an hour. Used for both a transcript offset and a duration. */

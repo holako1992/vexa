@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   type Meeting,
   type MeetingRowDTO,
+  type TranscriptLine,
+  activeSegmentIndex,
   filterMeetings,
   formatClock,
   groupUpcomingByDay,
@@ -46,6 +48,24 @@ describe("toMeeting", () => {
     expect(toMeeting(row({ start_time: start, end_time: "2026-09-01T10:41:30Z" })).durationSeconds).toBe(2490);
     expect(toMeeting(row({ start_time: start })).durationSeconds).toBeNull();
     expect(toMeeting(row({ start_time: start, end_time: "2026-09-01T09:00:00Z" })).durationSeconds).toBeNull();
+  });
+});
+
+describe("toMeeting — recordingId (DB-50)", () => {
+  it("reads the first recording's id, and hasRecording tracks the same array", () => {
+    const m = toMeeting(row({ data: { recordings: [{ id: 555001 }, { id: 555002 }] } }));
+    expect(m.hasRecording).toBe(true);
+    expect(m.recordingId).toBe("555001");
+  });
+
+  it("is null when there is no recording, an empty list, or an id-less entry", () => {
+    expect(toMeeting(row()).recordingId).toBeNull();
+    expect(toMeeting(row({ data: { recordings: [] } })).recordingId).toBeNull();
+    expect(toMeeting(row({ data: { recordings: [{ status: "in_progress" }] } as never })).recordingId).toBeNull();
+  });
+
+  it("stringifies a numeric id without losing precision-looking digits", () => {
+    expect(toMeeting(row({ data: { recordings: [{ id: "100200300400" }] } })).recordingId).toBe("100200300400");
   });
 });
 
@@ -140,6 +160,39 @@ describe("toTranscript", () => {
     expect(toTranscript(undefined)).toEqual([]);
     expect(toTranscript(null)).toEqual([]);
     expect(toTranscript([{ text: "no offset" }])).toEqual([{ at: null, speaker: "Unknown speaker", text: "no offset" }]);
+  });
+});
+
+describe("activeSegmentIndex (DB-51)", () => {
+  const lines: TranscriptLine[] = [
+    { at: 0, speaker: "Ada", text: "one" },
+    { at: 8.5, speaker: "Bea", text: "two" },
+    { at: 21, speaker: "Ada", text: "three" },
+  ];
+
+  it("is null before anything has played, or before lines have loaded", () => {
+    expect(activeSegmentIndex(lines, null)).toBeNull();
+    expect(activeSegmentIndex(null, 5)).toBeNull();
+  });
+
+  it("picks the LATEST segment at or before currentTime, never the nearest", () => {
+    expect(activeSegmentIndex(lines, 0)).toBe(0);
+    expect(activeSegmentIndex(lines, 8.4)).toBe(0); // just before the second segment starts
+    expect(activeSegmentIndex(lines, 8.5)).toBe(1); // exactly at its start
+    expect(activeSegmentIndex(lines, 15)).toBe(1); // between two and three: still "two"
+  });
+
+  it("stays on the last segment once playback runs past it", () => {
+    expect(activeSegmentIndex(lines, 999)).toBe(2);
+  });
+
+  it("skips a segment with no offset rather than treating it as always-current", () => {
+    const withGap: TranscriptLine[] = [
+      { at: null, speaker: "Ada", text: "no offset" },
+      { at: 10, speaker: "Bea", text: "has one" },
+    ];
+    expect(activeSegmentIndex(withGap, 0)).toBeNull();
+    expect(activeSegmentIndex(withGap, 10)).toBe(1);
   });
 });
 

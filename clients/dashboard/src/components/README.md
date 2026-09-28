@@ -47,7 +47,26 @@ Client components. They receive identity as props (resolved on the server) and f
   read once via `useSearchParams`, so the meeting page's own route needs a `Suspense` boundary
   (see `app/meetings/[meetingId]/page.tsx`). Composes the four pieces below, all of which check
   `meeting.shared` themselves rather than trusting the caller to gate them — a shared meeting (the
-  viewer isn't the owner) renders none of them.
+  viewer isn't the owner) renders none of them. DB-50/51 add the audio player: when
+  `meeting.hasRecording`, an `AudioPlayer` renders above `SummaryPanel`; clicking a transcript
+  line (when it carries an offset) seeks the player to it via `AudioPlayerHandle.seekTo` (a ref,
+  not a controlled prop — an `<audio>` element owns its own playback position) and the segment
+  playing right now is highlighted (`lib/meetings.ts`'s `activeSegmentIndex`, driven off the
+  player's own `onTimeUpdate`), taking over from the `?t=` link's highlight once playback starts.
+- `AudioPlayer` — DB-50's player: `GET /api/vexa/recordings/<id>/master?type=audio` for the
+  `media_file_id`, then an `<audio src="/api/vexa/recordings/<id>/media/<media_file_id>/raw">` —
+  Range-streamed end to end through `route.ts`'s `raw: true` branch, never buffered. Exposes
+  `seekTo(seconds)` via `forwardRef`/`useImperativeHandle` for `MeetingDetail`'s DB-51 click
+  handler.
+- `RecordingsView` — `/recordings` (DB-50's list, DB-52's Download/Delete): `GET /api/vexa/
+  recordings`, newest first, "Load more" like `MeetingsView`'s pagination. Each row links to its
+  meeting (where the player lives), a Download link to the `.../download` alias route (a real
+  `<a download>`, not a fetch — the route reads the session cookie server-side the same as any
+  page load), and a Delete button behind `ui/Dialog`'s confirm, same pattern as
+  `MeetingActions`'s meeting-delete. The retention note reads `GET /api/vexa/user/entitlements`'s
+  `limits.recording_retention_days` — informational only; DB-70's resolver has no boolean
+  recordings-enabled flag on any plan, so this view gates no control on plan (see the file's own
+  header comment).
 - `SummaryPanel` — the post-meeting AI note (DB-60), above the transcript. Reads `GET
   /api/vexa/meetings/<id>/summary`, parses it with `lib/summary.ts`, and renders five distinct
   states (not-ended, shared-owner-only, pending/polling, skipped, complete) — never a single

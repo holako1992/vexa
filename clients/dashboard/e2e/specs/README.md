@@ -111,6 +111,16 @@ spec's body is only the property, not the plumbing.
   producer's `last_error` verbatim with "Sync now" still offered (an ICS feed is never
   `reconnect_needed`); and a Google connection needing reconnect shows Reconnect instead of
   Sync now, driving the SAME OAuth flow `06-calendar.spec.ts` proves, and clears on success.
+- `21-recordings.spec.ts` (DB-50/51/52) — `/recordings` lists the fixture's one recording and
+  links to its meeting; the retention note reads the plan's own `recording_retention_days`; the
+  meeting page's `<audio>` element gets back a REAL `206 Partial Content` with `Content-Range`/
+  `Accept-Ranges` for its own Range request (`stub-server.mjs`'s `serveRangeableBytes`, never a
+  canned header); clicking a transcript segment seeks the player to its own `start` (proven by
+  reading the audio element's real `currentTime`, waited for past the browser's own metadata-load
+  race) and highlights it while playing; the Download link points at the exact
+  `.../media/<id>/download` URL and actually serves `audio/wav` bytes; and Delete goes through the
+  same confirm-dialog-then-toast shape `13-meeting-controls.spec.ts` proves for a meeting, ending
+  on the list's own empty state once the one fixture recording is gone.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

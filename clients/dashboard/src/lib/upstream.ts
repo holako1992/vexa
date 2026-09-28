@@ -32,6 +32,14 @@ export interface UpstreamRoute {
    *  billing routes below declare one, so `validateBody`/`route.ts` never change behavior for the
    *  routes that don't opt in. */
   body?: BodyValidator;
+  /** True for the ONE shape of route this allowlist admits that is not JSON: the recording media
+   *  byte stream (`.../media/<id>/raw` and its `.../download` alias, DB-50). `route.ts` branches
+   *  on this BEFORE ever setting `Accept: application/json` — the response is audio/video bytes,
+   *  forwarded with the caller's own `Range` header and streamed back verbatim, never parsed or
+   *  buffered whole. Every other route on this table is `undefined` here, which is falsy the same
+   *  way an absent `query`/`body` is: this is additive, not a second code path for routes that
+   *  don't need it. */
+  raw?: boolean;
 }
 
 /** Platform ids meeting-api accepts. A transcript path is only built for one of these — an
@@ -86,6 +94,26 @@ const isSearchText: QueryValidator = (v) => v.length >= 1 && v.length <= SEARCH_
  *  uses. Declared here, not merged into `PAGING_QUERY` itself, so `q` only ever reaches the one
  *  route that declares it — see the security note on `filterQuery` below. */
 const SEARCH_QUERY: Record<string, QueryValidator> = { q: isSearchText, ...PAGING_QUERY };
+
+/** A numeric row id, as a query VALUE rather than a path segment — `GET /recordings?meeting_id=`
+ *  (meeting_api/recordings/router.py's `list_recordings`), scoping the list to one meeting's own
+ *  recordings the way the meeting page's player will use it. Same shape as every numeric path id
+ *  in this file (`/^\d{1,20}$/`), just applied to a query value instead. */
+const isRowIdValue: QueryValidator = (v) => /^\d{1,20}$/.test(v);
+
+/** `GET /recordings`'s own query shape (DB-50): the same paging bounds every list route uses,
+ *  plus `meeting_id` to scope the list to one meeting. */
+const RECORDINGS_LIST_QUERY: Record<string, QueryValidator> = { meeting_id: isRowIdValue, ...PAGING_QUERY };
+
+/** `type=audio|video` — the ONLY value `GET /recordings/{id}/master` and the media byte routes
+ *  accept (`meeting_api/recordings/router.py`'s `type: str = "audio"` param); anything else is
+ *  dropped here rather than forwarded on the hope the producer will reject it. */
+const isMediaType: QueryValidator = (v) => v === "audio" || v === "video";
+const MEDIA_TYPE_QUERY: Record<string, QueryValidator> = { type: isMediaType };
+
+/** A bare numeric id — recording ids and media-file ids are both generated the same way
+ *  (`recordings/jsonb.py`'s `new_recording_numeric_id`), so one shape check covers both. */
+const RECORDING_ID = /^\d{1,20}$/;
 
 /** Map a `/api/vexa/<...segments>` GET to its gateway path, or null to refuse.
  *
@@ -144,6 +172,9 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
     return { path: `/meetings/${platform}/${encodeURIComponent(native)}/participants` };
   }
 
+  const recording = resolveRecordingsUpstream(segments);
+  if (recording) return recording;
+
   const extra = resolveReadExtras(segments);
   if (extra) return extra;
 
@@ -159,6 +190,40 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
     return null;
   }
 
+  return null;
+}
+
+/** DB-50 — the recordings surface's read paths. Kept as its own function (like
+ *  `resolveReadExtras` below) so the table stays testable in one place: `GET /recordings` (the
+ *  `/recordings` list page), `GET /recordings/<id>/master` (finalize-on-read metadata the player
+ *  fetches first), and the ONE non-JSON route this allowlist admits — the media byte stream,
+ *  `GET /recordings/<id>/media/<media_file_id>/raw` and its `.../download` alias (both marked
+ *  `raw: true`; the gateway forwards `download` to the SAME `.../raw` handler verbatim —
+ *  `core/gateway/services/gateway/src/gateway/app.py`'s `get_recording_media_download` — so this
+ *  allowlist treats them identically rather than guessing at two different shapes). No
+ *  `GET /recordings/<id>` (single-recording detail): nothing in this UI reads it — the list row
+ *  and the master/raw pair are the whole surface DB-50/51/52 need, and an allowlist entry with no
+ *  caller is just an untested door. */
+function resolveRecordingsUpstream(segments: readonly string[]): UpstreamRoute | null {
+  if (segments.length === 1 && segments[0] === "recordings") {
+    return { path: "/recordings", query: RECORDINGS_LIST_QUERY };
+  }
+  if (segments.length === 3 && segments[0] === "recordings" && segments[2] === "master") {
+    if (!RECORDING_ID.test(segments[1])) return null;
+    return { path: `/recordings/${encodeURIComponent(segments[1])}/master`, query: MEDIA_TYPE_QUERY };
+  }
+  if (
+    segments.length === 5 && segments[0] === "recordings" && segments[2] === "media" &&
+    (segments[4] === "raw" || segments[4] === "download")
+  ) {
+    const [, recordingId, , mediaFileId, verb] = segments as [string, string, string, string, string];
+    if (!RECORDING_ID.test(recordingId) || !RECORDING_ID.test(mediaFileId)) return null;
+    return {
+      path: `/recordings/${encodeURIComponent(recordingId)}/media/${encodeURIComponent(mediaFileId)}/${verb}`,
+      query: MEDIA_TYPE_QUERY,
+      raw: true,
+    };
+  }
   return null;
 }
 
@@ -400,6 +465,10 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
       PLATFORMS.has(segments[1]) && SAFE_SEGMENT.test(segments[2])
     ) {
       return { path: `/bots/${segments[1]}/${encodeURIComponent(segments[2])}` };
+    }
+    // DELETE /recordings/<id> — DB-52's Delete recording button.
+    if (segments.length === 2 && segments[0] === "recordings" && RECORDING_ID.test(segments[1])) {
+      return { path: `/recordings/${encodeURIComponent(segments[1])}` };
     }
   }
   return null;

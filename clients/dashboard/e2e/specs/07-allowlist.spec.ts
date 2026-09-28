@@ -1,17 +1,18 @@
 /** Property 7 — the allowlist refuses what it does not recognise, and refuses it BEFORE any
  *  upstream request is made.
  *
- *  Expected: `/api/vexa/recordings` and `/api/vexa/agent/chat` (real gateway surfaces the
- *  dashboard does not proxy) both return 404 from the DASHBOARD, and the stub gateway's request
- *  log gains no entry for either path — a forwarded probe would be the real failure here, not the
- *  404 itself.
+ *  Expected: `/api/vexa/agent/chat` (a real gateway surface the dashboard does not proxy) and
+ *  `/api/vexa/recordings/700001` (DB-50 admits the LIST and the master/media-byte routes, never
+ *  single-recording detail — see `lib/upstream.ts`'s `resolveRecordingsUpstream` comment) both
+ *  return 404 from the DASHBOARD, and the stub gateway's request log gains no entry for either
+ *  path — a forwarded probe would be the real failure here, not the 404 itself.
  */
 import { test, expect } from "@playwright/test";
 import { gatewayRequests, resetStub, signIn, testEmail } from "./helpers";
 
 test.beforeEach(async ({ request }) => { await resetStub(request); });
 
-for (const path of ["/api/vexa/recordings", "/api/vexa/agent/chat"]) {
+for (const path of ["/api/vexa/recordings/700001", "/api/vexa/agent/chat"]) {
   test(`${path} is a 404 from the dashboard and never reaches the gateway`, async ({ page, request }) => {
     await signIn(page, testEmail("allowlist"));
     // Wait for the list's own first load to land before snapshotting — signIn only waits for the

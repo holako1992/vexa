@@ -4,8 +4,8 @@ description: "List recordings and stream the audio — from your own object stor
 ---
 
 <Note>
-Recording retrieval is **API-only today** — the terminal has no built-in player yet. The endpoints below
-are live and covered by service tests. Browser playback and seeking work **through the gateway**: a `Range`
+The **dashboard** plays, downloads and deletes recordings (see [In the dashboard](#in-the-dashboard)); the
+terminal has no built-in player yet. The endpoints below are live and covered by service tests. Browser playback and seeking work **through the gateway**: a `Range`
 request returns a `206 Partial Content` with its `Content-Range` and `Accept-Ranges` headers intact.
 See the [capability truth table](/roadmap/status#capability-truth-table).
 </Note>
@@ -60,6 +60,17 @@ curl -I -H "X-API-Key: $API_KEY" -H "Range: bytes=0-1023" \
 # Accept-Ranges: bytes
 # Content-Range: bytes 0-1023/<total>
 ```
+
+## In the dashboard
+
+- **Recordings** in the sidebar (`/recordings`) lists your recordings with **Download** and **Delete**
+  (delete asks for confirmation and follows the same rules as the API below). The page shows your plan's
+  retention period from `GET /user/entitlements`.
+- A meeting page with a recording shows an **audio player** above the transcript. Click any transcript line
+  to jump the audio to that moment; the line being spoken is highlighted while it plays.
+- The dashboard streams audio through its own proxy. The proxy forwards only your browser's `Range` header,
+  passes back `206`, `Content-Range`, `Accept-Ranges`, `Content-Length` and a media `Content-Type`, and never
+  buffers the whole file.
 
 ## Where it's stored
 

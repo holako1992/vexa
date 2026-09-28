@@ -43,7 +43,24 @@ const MEETING_ROWS = [
     data: {
       title: "Design Review",
       attendees: [{ email: "carla@e2e.test", name: "Carla" }, { email: "dev@e2e.test", name: "Dev" }],
-      recordings: [{ id: "rec-1" }],
+      // DB-50/51/52: one finished audio recording, the same shape
+      // `recordings/adapters.py`'s `list_meeting_recordings` reads off `meeting.data['recordings']`
+      // — a numeric id (real recording ids are always numeric, `jsonb.py`'s
+      // `new_recording_numeric_id`), one media file, audio only. `RECORDING_AUDIO_SECONDS`
+      // (`stub-server.mjs`) is this fixture's own generated WAV's real length — kept in sync here
+      // so a spec that seeks past it can tell "clamped to duration" from "seek did nothing".
+      recordings: [
+        {
+          id: 700001,
+          status: "completed",
+          created_at: "2026-09-15T14:42:00Z",
+          completed_at: "2026-09-15T14:42:05Z",
+          deletion_pending: false,
+          media_files: [
+            { id: 800001, type: "audio", format: "wav", duration_seconds: 12, file_size_bytes: 96044 },
+          ],
+        },
+      ],
     },
   },
   {
@@ -373,6 +390,40 @@ export function unknownUsageEntitlements() {
   const e = freeEntitlements();
   e.usage = { meetings_used: null, minutes_used: null };
   return e;
+}
+
+// ── DB-50: the recordings fixture's own audio bytes ─────────────────────────────────────────────
+//
+// A short SILENT WAV, generated in code at stub startup — never a committed binary blob. 16-bit
+// PCM mono (silence is exactly `0x00`, unlike 8-bit PCM's `0x80` midpoint) at a low sample rate,
+// which keeps the whole thing well under 100KB while still giving `MEETING_102_RECORDING`'s
+// transcript segments (the ones a spec can click, `start` up to ~12s) real seconds to seek into —
+// `RECORDING_AUDIO_SECONDS` is the fixture's own duration, exported so a spec (or another fixture)
+// never has to hardcode it a second time.
+
+export const RECORDING_AUDIO_SECONDS = 12;
+const RECORDING_SAMPLE_RATE = 4000;
+
+/** A minimal, valid 16-bit PCM mono WAV: the standard 44-byte header followed by all-zero sample
+ *  data (already silence — nothing to fill in). */
+export function makeSilentWav(durationSeconds = RECORDING_AUDIO_SECONDS, sampleRate = RECORDING_SAMPLE_RATE) {
+  const numSamples = Math.round(durationSeconds * sampleRate);
+  const dataSize = numSamples * 2; // 16-bit mono: 2 bytes/sample
+  const buffer = Buffer.alloc(44 + dataSize); // zero-filled — the sample data IS the silence
+  buffer.write("RIFF", 0, "ascii");
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8, "ascii");
+  buffer.write("fmt ", 12, "ascii");
+  buffer.writeUInt32LE(16, 16); // fmt chunk size (PCM)
+  buffer.writeUInt16LE(1, 20); // audio format: 1 = PCM
+  buffer.writeUInt16LE(1, 22); // channels: mono
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28); // byte rate = sampleRate * blockAlign
+  buffer.writeUInt16LE(2, 32); // block align: 2 bytes/frame
+  buffer.writeUInt16LE(16, 34); // bits per sample
+  buffer.write("data", 36, "ascii");
+  buffer.writeUInt32LE(dataSize, 40);
+  return buffer;
 }
 
 /** The unwrapped 402 body DB-72's quota enforcement sends (`meeting_api/bot_spawn/router.py`) —
