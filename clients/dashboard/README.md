@@ -56,13 +56,23 @@ docker compose up -d --force-recreate dashboard-next    # http://<host-ip>:13002
 Open port 13002 in the host firewall / cloud security group. Only the dashboard is published; the
 gateway, admin-api and the rest stay on loopback, because the dashboard proxies to them server-side.
 
+**Signing in through the terminal, then opening the dashboard** works on an IP the same way it does on
+localhost. The terminal (`:13000`) and the dashboard (`:13002`) share the `vexa-token` cookie, and a
+cookie is scoped to the host, not the port. Publish both (`TERMINAL_BIND=0.0.0.0` as well) and use the
+**same address for both**: signed in at `http://203.0.113.10:13000`, then open
+`http://203.0.113.10:13002`. A different hostname for each (an IP for one, a domain for the other) is a
+different cookie jar and asks you to sign in again. If you set `NEXTAUTH_URL` to an `https://` origin
+for one app, set the other to `https://` too, or the Secure cookie will not be sent to the plain-http one.
+
 What plain `http://<ip>` does and does not give you:
 
 - The session cookie is not `Secure` and traffic is unencrypted. Anyone on the path can read it.
 - Google and Microsoft refuse a bare-IP redirect URI (only `localhost` is exempt), so their sign-in
   buttons cannot work on an IP. That leaves the password-less email door
   (`DASHBOARD_NEXT_ALLOW_EMAIL_LOGIN`), which proves no ownership of an address — never enable it on a
-  reachable host.
+  reachable host. **The terminal has its own version of that door and it is always on**: it signs in
+  any address containing `test` with no password and mints a real API token. On a reachable host, that
+  means anyone who can reach port 13000 can create accounts.
 - For real use, point a domain at the host, terminate TLS in a reverse proxy, keep
   `DASHBOARD_NEXT_BIND` on loopback, set `DASHBOARD_NEXT_URL=https://your-domain`, and set
   `DASHBOARD_NEXT_TRUST_PROXY=true`. Register `${DASHBOARD_NEXT_URL}/api/auth/callback/google` (and

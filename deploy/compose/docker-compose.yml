@@ -933,7 +933,9 @@ services:
         RUNTIME_DEPS: ${TERMINAL_RUNTIME_DEPS:-prod}
     image: vexaai/v012-terminal:${IMAGE_TAG:-dev}
     ports:
-      - "127.0.0.1:${TERMINAL_PORT:-13000}:3000"
+      # Loopback by default. TERMINAL_BIND=0.0.0.0 publishes the terminal on every interface — read
+      # the exposure notes next to TERMINAL_BIND in .env.example first.
+      - "${TERMINAL_BIND:-127.0.0.1}:${TERMINAL_PORT:-13000}:3000"
     environment:
       - NODE_ENV=production
       # HTTP scheme: the terminal's REST proxy fetches GATEWAY_URL as http; server.mjs converts it to
