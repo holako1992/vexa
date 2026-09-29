@@ -3,6 +3,7 @@
 - **`session.ts`** — the ONE place a request's identity is established and the only writer of the
   session cookies. Two tiers, kept distinct: `sessionToken()` is the credential sent upstream;
   `currentUser()` is the identity, verified against admin-api's oracle where configured.
+- **`startupConfig.ts`** — the production start-up refusal (`src/instrumentation.ts` calls it): a production server without `VEXA_INTERNAL_API_SECRET` does not start; dev, test and the build phase are never refused.
 - **`adminApi.ts`** — server-only admin-api client: find-or-create by email (forwarding the user's
   address as `X-Forwarded-For` on the create call, recording how the sign-in proved the address —
   provenance on create, a verified upgrade on an existing account — and returning a typed refusal on failure), mint the login token,

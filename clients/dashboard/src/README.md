@@ -1,9 +1,10 @@
 # `src/` — the dashboard's source
 
-Three layers and one file that sits above them.
+Three layers and two files that sit above them.
 
 - **`middleware.ts`** — every request enters here. It gates unauthenticated access and stamps the
   security headers (including the per-response CSP nonce) onto whatever the app returns.
+- **`instrumentation.ts`** — runs once when the server starts; a production server without `VEXA_INTERNAL_API_SECRET` throws here, naming it (`lib/startupConfig.ts`).
 - **`app/`** — routes. Server components resolve identity and hand it down; the `api/` handlers are
   the only code that talks to a backend.
 - **`components/`** — the UI. Client components, given their data as props or fetched through

@@ -1,6 +1,6 @@
 # `src/lib/__tests__/` — behavioral tests
 
-Fourteen files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
+Fifteen files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
 
 - `upstream.test.ts` — the allowlist as a table, weighted towards what it **refuses**: unknown
   edges, traversal segments, a non-numeric row id, an unknown platform or separator-bearing native
@@ -24,6 +24,7 @@ Fourteen files, covering the parts where being wrong is expensive (plus `api.tes
 - `authProvenance.test.ts` — what each sign-in door tells admin-api about the address: Google's
   `email_verified` is read literally (only a boolean `true` verifies; absent, string, numeric and
   non-object profiles do not) and a Microsoft sign-in counts as verified.
+- `startupConfig.test.ts` — only a production server without the oracle secret is refused (blank and whitespace count as missing); development, test and the production build phase never are.
 - `signInRefusal.test.ts` — admin-api's typed disposable-domain refusal becomes a code; an unknown
   code, unparseable body or non-4xx failure becomes the generic or "unavailable" code; and a
   `?error=` value that is not a known code (NextAuth names, hostile text, `__proto__`) yields the

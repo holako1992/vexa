@@ -1023,12 +1023,12 @@ services:
       # admin-api, for find-or-create + token mint at sign-in. Unset → sign-in answers 503 and says why.
       - VEXA_ADMIN_API_URL=http://admin-api:8001
       - VEXA_ADMIN_API_KEY=${ADMIN_TOKEN:-}
-      # The identity oracle (/internal/validate): the signed-in identity is VERIFIED on every page render
-      # and /api/auth/me never reports verified:false. REQUIRED, no default and no placeholder (A19).
-      # `:?` is right here where the flows lanes above avoid it: INTERNAL_API_SECRET is already
-      # required by admin-api, the gateway and agent-api (they refuse to boot without it), so no stack
-      # that runs is newly refused — this only fails `compose config` earlier, naming the variable.
-      - VEXA_INTERNAL_API_SECRET=${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set (run deploy/compose/mint-dev-env.sh) - the dashboard verifies every signed-in identity against admin-api with it}
+      # The identity oracle (/internal/validate): the signed-in identity is VERIFIED on every page render.
+      # REQUIRED, with no default and no placeholder (A19) and no `:?` — that fails `compose config`
+      # for the whole stack, including `down` and deployments that do not run the dashboard. The
+      # refusal belongs to the process that needs the secret: the dashboard refuses to start in
+      # production without it (src/instrumentation.ts), naming the variable.
+      - VEXA_INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-dev-nextauth-secret}
       # Public origin when self-hosting behind a domain/reverse-proxy. An https:// value also flips the
       # session cookies to Secure and turns on HSTS.
