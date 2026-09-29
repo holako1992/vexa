@@ -72,6 +72,9 @@ absent).
 - **Agent inference** — bring your own: point the agent at your endpoint so no inference leaves the
   network (`VEXA_AGENT_MODEL` / mounted credentials).
 - **Secrets** — `ADMIN_TOKEN`, `INTERNAL_API_SECRET`, DB credentials. Set real values before exposing.
+  `INTERNAL_API_SECRET` is also what the dashboard verifies every signed-in identity with, so the
+  compose file refuses to render (naming the variable) when it is unset; `deploy/compose/mint-dev-env.sh`
+  mints one.
 
 ## Transcription (the separate GPU unit)
 

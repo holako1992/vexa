@@ -92,7 +92,7 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
 |---|---|
 | `GATEWAY_URL` | The gateway the proxy forwards to. Default `http://127.0.0.1:18056`. |
 | `VEXA_ADMIN_API_URL` / `VEXA_ADMIN_API_KEY` | admin-api, for find-or-create + token mint at sign-in. Without them, sign-in returns 503 and says so. |
-| `VEXA_INTERNAL_API_SECRET` | Enables the identity oracle (`/internal/validate`). Set → the signed-in identity is *verified*; unset → it degrades to "a session token is present" and `/api/auth/me` reports `verified: false`. |
+| `VEXA_INTERNAL_API_SECRET` | The identity oracle's secret (`/internal/validate`) — **required in production**; the compose file (`INTERNAL_API_SECRET`) refuses to render without it. Set → the signed-in identity is *verified* on every request. Unset (local `npm run dev` only) → it degrades to "a session token is present" and `/api/auth/me` reports `verified: false`. |
 | `NEXTAUTH_SECRET` | Required for the OAuth flow. |
 | `NEXTAUTH_URL` / `DASHBOARD_URL` | The public origin. An `https://` value flips the session cookies to `Secure` and turns on HSTS. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Enables the Google button. Redirect URI: `${NEXTAUTH_URL}/api/auth/callback/google`. |
