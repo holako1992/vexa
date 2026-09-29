@@ -10,6 +10,7 @@ import {
   formatResetDate,
   isQuotaExceeded,
   planStatusLabel,
+  reasonMessage,
   type Entitlements,
 } from "../entitlements";
 
@@ -128,6 +129,31 @@ describe("planStatusLabel", () => {
   it("flags cancel-at-period-end without a grace date", () => {
     const label = planStatusLabel(entitlements({ status: "canceled", will_renew: false }));
     expect(label).toBe("Cancels at the end of the billing period");
+  });
+});
+
+describe("reasonMessage", () => {
+  it("has fixed copy for identity_unverified", () => {
+    expect(reasonMessage("identity_unverified")).toMatch(/isn't verified/);
+  });
+
+  it("is null for every code it has no words for, never echoing the input", () => {
+    for (const r of ["other", "", null, undefined, 3, {}, "__proto__", "constructor", "toString"]) {
+      expect(reasonMessage(r)).toBeNull();
+    }
+  });
+});
+
+describe("formatRemainingAllowance with a reason", () => {
+  it("states the reason instead of a zero-of-zero allowance line", () => {
+    const line = formatRemainingAllowance({
+      plan_id: "free",
+      limits: { ...FREE_LIMITS, meetings_per_month: 0 },
+      usage: { meetings_used: 0, minutes_used: 0 },
+      period: { start: "2026-09-01T00:00:00+00:00", end: "2026-10-01T00:00:00+00:00" },
+      reason: "identity_unverified",
+    });
+    expect(line).toBe(reasonMessage("identity_unverified"));
   });
 });
 

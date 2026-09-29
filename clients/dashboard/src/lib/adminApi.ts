@@ -77,11 +77,29 @@ function findUserByEmail(email: string): Promise<AdminResult<AdminUser>> {
   return adminRequest<AdminUser>(`/admin/users/email/${encodeURIComponent(email)}`, { method: "GET" });
 }
 
-function createUser(email: string, clientIp?: string | null): Promise<AdminResult<AdminUser>> {
+/** How the sign-in proved the address: the door it came through and whether that door vouches
+ *  for it. It rides to admin-api, which records it and gates the Free allowance on it. */
+export interface IdentityProvenance {
+  provider: "google" | "microsoft" | "email";
+  emailVerified: boolean;
+}
+
+function provenanceBody(p: IdentityProvenance): { identity_provider: string; email_verified: boolean } {
+  return { identity_provider: p.provider, email_verified: p.emailVerified };
+}
+
+function createUser(email: string, clientIp?: string | null, provenance?: IdentityProvenance): Promise<AdminResult<AdminUser>> {
   return adminRequest<AdminUser>(`/admin/users`, {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, ...(provenance ? provenanceBody(provenance) : {}) }),
     headers: forwardedForHeader(clientIp),
+  });
+}
+
+function recordProvenance(userId: string | number, provenance: IdentityProvenance): Promise<AdminResult<AdminUser>> {
+  return adminRequest<AdminUser>(`/admin/users/${encodeURIComponent(String(userId))}`, {
+    method: "PATCH",
+    body: JSON.stringify(provenanceBody(provenance)),
   });
 }
 
@@ -212,9 +230,18 @@ export type SignInResult =
  *
  *  `clientIp` is the end user's address as `clientAddress()` resolved it (null when unknown); it
  *  rides to admin-api on the create call so the sign-up log records the person, not this server.
+ *  `provenance` is how this sign-in proved the address. A new account records it as-is. An
+ *  existing account is only ever UPGRADED: a verified claim is sent (best-effort, a failure never
+ *  fails the sign-in), an unverified one is not — signing in through the debug email door must not
+ *  mark an account that has no record, or one Google already verified, as unverified.
+ *
  *  A failure carries a typed `refusal` — the code `/login` maps to words.
  */
-export async function findOrCreateUserToken(email: string, clientIp?: string | null): Promise<SignInResult> {
+export async function findOrCreateUserToken(
+  email: string,
+  clientIp?: string | null,
+  provenance?: IdentityProvenance,
+): Promise<SignInResult> {
   const fail = (status: number, error: string, body?: string): SignInResult => ({
     ok: false,
     status,
@@ -227,8 +254,14 @@ export async function findOrCreateUserToken(email: string, clientIp?: string | n
   let user: AdminUser;
   if (found.ok && found.data) {
     user = found.data;
+    if (provenance?.emailVerified) {
+      const recorded = await recordProvenance(user.id, provenance);
+      if (!recorded.ok) {
+        console.warn(`[dashboard-auth] identity provenance not recorded for user ${user.id} (sign-in continues): ${recorded.error}`);
+      }
+    }
   } else if (found.notFound) {
-    const created = await createUser(email, clientIp);
+    const created = await createUser(email, clientIp, provenance);
     if (!created.ok || !created.data) {
       return fail(created.status || 500, created.error || "Failed to create user", created.error);
     }

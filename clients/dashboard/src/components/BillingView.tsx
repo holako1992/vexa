@@ -17,7 +17,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CreditCard } from "lucide-react";
 import { getJson, mutateJson, presentError, ApiError } from "@/lib/api";
-import { formatDayMonth, formatMeetingsUsage, formatMinutesUsage, planStatusLabel, type Entitlements } from "@/lib/entitlements";
+import { formatDayMonth, formatMeetingsUsage, formatMinutesUsage, planStatusLabel, reasonMessage, type Entitlements } from "@/lib/entitlements";
 import { isTrustedBillingRedirect } from "@/lib/security";
 import { Button, Tab, Tabs, useToast } from "./ui";
 import { ErrorState, LoadingState } from "./EmptyState";
@@ -104,6 +104,7 @@ export function BillingView() {
   const minutesLine = formatMinutesUsage(data.usage);
   const resetDay = formatDayMonth(data.period.end);
   const statusNote = planStatusLabel(data);
+  const reasonNote = reasonMessage(data.reason);
 
   function redirectTo(url: string): boolean {
     if (!isTrustedBillingRedirect(url)) {
@@ -165,6 +166,13 @@ export function BillingView() {
           <p role="status" className="mt-2 flex items-center gap-1.5 text-xs text-warn">
             <AlertTriangle size={13} aria-hidden />
             {statusNote}
+          </p>
+        )}
+
+        {reasonNote && (
+          <p role="status" className="mt-2 flex items-center gap-1.5 text-xs text-warn">
+            <AlertTriangle size={13} aria-hidden />
+            {reasonNote}
           </p>
         )}
 

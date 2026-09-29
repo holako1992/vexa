@@ -37,6 +37,23 @@ export interface Entitlements {
   period: EntitlementsPeriod;
   limits: EntitlementsLimits;
   usage: EntitlementsUsage;
+  /** Machine-readable why the allowance is below the plan's catalog figure, or null. */
+  reason?: string | null;
+}
+
+/** The one reason code the core states today: a Free account whose recorded sign-in did not verify
+ *  its email address. Anything else is not rendered — a reason this client has no words for must
+ *  never surface as raw text. */
+export const IDENTITY_UNVERIFIED = "identity_unverified";
+
+const REASON_MESSAGES: Record<string, string> = {
+  [IDENTITY_UNVERIFIED]:
+    "Your email address isn't verified, so the free meeting isn't available. Sign in with Google or Microsoft to verify it, or upgrade your plan.",
+};
+
+/** The fixed sentence for a known reason code, else `null`. */
+export function reasonMessage(reason: unknown): string | null {
+  return typeof reason === "string" && Object.hasOwn(REASON_MESSAGES, reason) ? REASON_MESSAGES[reason] : null;
 }
 
 /** The unwrapped `402` body `POST /bots` sends when the monthly meeting quota is exhausted
@@ -48,6 +65,7 @@ export interface QuotaExceededBody {
   used: number | null;
   resets_at: string | null;
   upgrade_url: string | null;
+  reason?: string | null;
 }
 
 export function isQuotaExceeded(body: unknown): body is QuotaExceededBody {
@@ -97,8 +115,10 @@ export function formatMinutesUsage(usage: EntitlementsUsage): string {
  *  never use it to disable sending — the server is the authority on whether a send is admitted,
  *  because a stale client read must never refuse a legitimate one. */
 export function formatRemainingAllowance(
-  e: Pick<Entitlements, "plan_id" | "limits" | "usage" | "period">,
+  e: Pick<Entitlements, "plan_id" | "limits" | "usage" | "period"> & { reason?: string | null },
 ): string | null {
+  const why = reasonMessage(e.reason);
+  if (why) return why;
   const limit = e.limits.meetings_per_month;
   if (limit == null) return null;
   const used = e.usage.meetings_used;

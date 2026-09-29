@@ -103,6 +103,55 @@ describe("findOrCreateUserToken", () => {
     }
   });
 
+  const body = (c: { init: RequestInit }) => JSON.parse(String(c.init.body));
+
+  it("sends the provenance on the create call for a new account", async () => {
+    responder = happyPath;
+    await findOrCreateUserToken("a@b.co", null, { provider: "google", emailVerified: true });
+    const create = calls.find((c) => c.url.endsWith("/admin/users") && c.init.method === "POST")!;
+    expect(body(create)).toEqual({ email: "a@b.co", identity_provider: "google", email_verified: true });
+  });
+
+  it("sends an unverified provenance on create, and nothing when there is no provenance", async () => {
+    responder = happyPath;
+    await findOrCreateUserToken("a@b.co", null, { provider: "email", emailVerified: false });
+    expect(body(calls.find((c) => c.url.endsWith("/admin/users"))!)).toEqual({
+      email: "a@b.co", identity_provider: "email", email_verified: false,
+    });
+    calls.length = 0;
+    await findOrCreateUserToken("a@b.co");
+    expect(body(calls.find((c) => c.url.endsWith("/admin/users"))!)).toEqual({ email: "a@b.co" });
+  });
+
+  const existing = (url: string, init: RequestInit) => {
+    if (url.includes("/admin/users/email/")) return json(200, { id: 7, email: "a@b.co" });
+    if (url.includes("/tokens") && init.method === "POST") return json(200, { id: 1, token: "tok" });
+    return json(200, {});
+  };
+
+  it("upgrades an existing account with a verified provenance via PATCH, and does not create", async () => {
+    responder = existing;
+    const r = await findOrCreateUserToken("a@b.co", null, { provider: "microsoft", emailVerified: true });
+    expect(r.ok).toBe(true);
+    const patch = calls.find((c) => c.init.method === "PATCH")!;
+    expect(patch.url).toBe("http://admin.test/admin/users/7");
+    expect(body(patch)).toEqual({ identity_provider: "microsoft", email_verified: true });
+    expect(calls.some((c) => c.url.endsWith("/admin/users") && c.init.method === "POST")).toBe(false);
+  });
+
+  it("never sends an unverified claim for an existing account", async () => {
+    responder = existing;
+    const r = await findOrCreateUserToken("a@b.co", null, { provider: "email", emailVerified: false });
+    expect(r.ok).toBe(true);
+    expect(calls.some((c) => c.init.method === "PATCH")).toBe(false);
+  });
+
+  it("a failed provenance upgrade does not fail the sign-in", async () => {
+    responder = (url, init) => (init.method === "PATCH" ? json(500, { detail: "boom" }) : existing(url, init));
+    const r = await findOrCreateUserToken("a@b.co", null, { provider: "google", emailVerified: true });
+    expect(r.ok).toBe(true);
+  });
+
   it("returns unavailable when admin-api is down", async () => {
     responder = () => json(503, { detail: "down" });
     const r = await findOrCreateUserToken("a@b.co");

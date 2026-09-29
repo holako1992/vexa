@@ -50,6 +50,15 @@ describe("presentError — quota_exceeded (402)", () => {
     expect(msg).toContain("Resets 1 October");
   });
 
+  it("states the fixed reason copy for identity_unverified, and ignores an unknown reason", () => {
+    const base = { error: "quota_exceeded", limit: 0, used: 0, resets_at: "2026-10-01T00:00:00Z", upgrade_url: null };
+    const known = presentError(new ApiError(402, "quota_exceeded", "/api/vexa/bots", { ...base, reason: "identity_unverified" }));
+    expect(known).toContain("isn't verified");
+    const unknown = presentError(new ApiError(402, "quota_exceeded", "/api/vexa/bots", { ...base, reason: "<b>x</b>" }));
+    expect(unknown).not.toContain("<b>");
+    expect(unknown).toContain("allowance");
+  });
+
   it("falls back to a generic 402 message when the body isn't the quota_exceeded shape", () => {
     const e = new ApiError(402, "", "/api/vexa/bots", { detail: "some other reason" });
     expect(presentError(e)).toBe("Payment required.");

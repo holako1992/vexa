@@ -126,6 +126,11 @@ spec's body is only the property, not the plumbing.
   the copy for a known code and only the generic sentence for anything else, so a hostile value is
   never reflected; and the stub's admin-api log shows the caller's `X-Forwarded-For` on
   `POST /admin/users`. The stub refuses addresses whose local part starts with `disposable`.
+- `23-identity-provenance.spec.ts` — the email door's create call carries `identity_provider: "email"`
+  and `email_verified: false`, and a returning email-door sign-in sends no provenance update; an
+  account whose entitlements state `identity_unverified` sees the fixed explanation on `/billing` and
+  in the Send Bot dialog (allowance line and the 402 refusal, which carries no plan link) and never
+  the raw code.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

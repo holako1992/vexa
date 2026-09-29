@@ -1,6 +1,6 @@
 # `src/lib/__tests__/` — behavioral tests
 
-Thirteen files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
+Fourteen files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
 
 - `upstream.test.ts` — the allowlist as a table, weighted towards what it **refuses**: unknown
   edges, traversal segments, a non-numeric row id, an unknown platform or separator-bearing native
@@ -21,11 +21,16 @@ Thirteen files, covering the parts where being wrong is expensive (plus `api.tes
   `raw`/`download` media-byte pair (`type=audio|video` only, a non-numeric recording or media-file
   id refused, `download` and `raw` proven to resolve to the SAME gateway path since the gateway
   itself treats them as aliases), and `DELETE /recordings/<id>`.
+- `authProvenance.test.ts` — what each sign-in door tells admin-api about the address: Google's
+  `email_verified` is read literally (only a boolean `true` verifies; absent, string, numeric and
+  non-object profiles do not) and a Microsoft sign-in counts as verified.
 - `signInRefusal.test.ts` — admin-api's typed disposable-domain refusal becomes a code; an unknown
   code, unparseable body or non-4xx failure becomes the generic or "unavailable" code; and a
   `?error=` value that is not a known code (NextAuth names, hostile text, `__proto__`) yields the
   generic sentence, never itself.
-- `adminApi.test.ts` — `clientAddress()` with trust-proxy off (a client-set `X-Forwarded-For` is not an
+- `adminApi.test.ts` (also: the identity provenance goes out on the create call; an existing account is
+  only ever upgraded, by a PATCH that carries a verified claim, never an unverified one, and a failed
+  upgrade does not fail the sign-in) — `clientAddress()` with trust-proxy off (a client-set `X-Forwarded-For` is not an
   address) and on; `forwardedForHeader()` sends only a plain IP literal (a list or a header-injection
   string is dropped); and `findOrCreateUserToken` sends `X-Forwarded-For` on the create call only,
   omits it when the address is unknown, and returns a typed refusal for the 422.

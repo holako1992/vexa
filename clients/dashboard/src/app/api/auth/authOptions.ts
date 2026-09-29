@@ -15,13 +15,23 @@ import { type AuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { headers } from "next/headers";
-import { findOrCreateUserToken } from "@/lib/adminApi";
+import { findOrCreateUserToken, type IdentityProvenance } from "@/lib/adminApi";
 import { setSessionCookies } from "@/lib/session";
 import { clientAddress } from "@/lib/rateLimit";
 import { isSecureDeployment } from "@/lib/security";
 
 export const googleEnabled = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 export const microsoftEnabled = () => !!(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
+
+/** What the provider vouches for. Google states it per sign-in in the profile's `email_verified`
+ *  claim, and only a literal `true` counts. Microsoft (Entra) accounts are provisioned and
+ *  verified by their tenant, and its ID token carries no comparable claim, so a completed
+ *  Microsoft sign-in is treated as verified. */
+export function provenanceFor(provider: "google" | "microsoft", profile: unknown): IdentityProvenance {
+  if (provider === "microsoft") return { provider, emailVerified: true };
+  const claim = (profile as { email_verified?: unknown } | null | undefined)?.email_verified;
+  return { provider, emailVerified: claim === true };
+}
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -56,11 +66,15 @@ export const authOptions: AuthOptions = {
   callbacks: {
     /** The load-bearing step: a verified OAuth identity becomes the dashboard's session cookies.
      *  Any failure denies the sign-in, with its refusal code on `/login`, rather than landing the user in a half-authenticated shell. */
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       const provider = account?.provider;
       if ((provider !== "google" && provider !== "microsoft") || !user.email) return false;
 
-      const result = await findOrCreateUserToken(user.email.toLowerCase(), clientAddress(await headers()));
+      const result = await findOrCreateUserToken(
+        user.email.toLowerCase(),
+        clientAddress(await headers()),
+        provenanceFor(provider, profile),
+      );
       if (!result.ok) {
         console.error(`[dashboard-auth] ${provider} sign-in failed for ${user.email}: ${result.error}`);
         // A URL return sends the browser to /login with the refusal CODE; the page owns the words.

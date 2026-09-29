@@ -32,6 +32,7 @@ import {
   formatRemainingAllowance,
   formatResetDate,
   isQuotaExceeded,
+  reasonMessage,
   type Entitlements,
   type QuotaExceededBody,
 } from "@/lib/entitlements";
@@ -120,10 +121,14 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 interface QuotaResult {
   ok: false;
   msg: string;
-  link: { href: string; label: string };
+  link?: { href: string; label: string };
 }
 
 function quotaResultFrom(body: QuotaExceededBody): QuotaResult {
+  // A stated reason replaces the generic "allowance spent" wording: an unverified account has not
+  // spent anything, and the way out is not a plan link.
+  const why = reasonMessage(body.reason);
+  if (why) return { ok: false, msg: why };
   const reset = formatResetDate(body.resets_at);
   const limitPart = body.limit != null ? ` your ${body.limit} meeting${body.limit === 1 ? "" : "s"}` : " your meeting allowance";
   const msg = `You've used${limitPart} for this billing period.${reset ? ` ${reset}.` : ""}`;

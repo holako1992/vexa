@@ -90,7 +90,10 @@ export async function setEntitlements(request: APIRequestContext, data: unknown)
 
 /** Make the stub's `POST /bots` answer the unwrapped 402 `quota_exceeded` body
  *  (`../fixtures.mjs`'s `QUOTA_EXCEEDED_BODY`) instead of dispatching — spec 14's paywall proof. */
-export async function forceBotsQuotaExceeded(request: APIRequestContext, on = true): Promise<void> {
+export async function forceBotsQuotaExceeded(
+  request: APIRequestContext,
+  on: boolean | "identity_unverified" = true,
+): Promise<void> {
   await request.post(`${GATEWAY_URL}/__control/force`, { data: { botsQuota: on } });
 }
 

@@ -5,7 +5,7 @@
  *  renders "the server refused / is unreachable" instead of an empty list that looks like "you
  *  have no meetings". A 200 with an empty body is not an error — an empty result is a result.
  */
-import { formatResetDate, isQuotaExceeded, type QuotaExceededBody } from "./entitlements";
+import { formatResetDate, isQuotaExceeded, reasonMessage, type QuotaExceededBody } from "./entitlements";
 
 export class ApiError extends Error {
   constructor(
@@ -32,6 +32,8 @@ export function presentError(e: unknown): string {
     if (e.status === 402) {
       if (isQuotaExceeded(e.body)) {
         const q = e.body as QuotaExceededBody;
+        const why = reasonMessage(q.reason);
+        if (why) return why;
         const reset = formatResetDate(q.resets_at);
         return `You've used your plan's meeting allowance for this billing period.${reset ? ` ${reset}.` : ""}`;
       }

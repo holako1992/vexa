@@ -4,7 +4,8 @@
   session cookies. Two tiers, kept distinct: `sessionToken()` is the credential sent upstream;
   `currentUser()` is the identity, verified against admin-api's oracle where configured.
 - **`adminApi.ts`** — server-only admin-api client: find-or-create by email (forwarding the user's
-  address as `X-Forwarded-For` on the create call, and returning a typed refusal on failure), mint the login token,
+  address as `X-Forwarded-For` on the create call, recording how the sign-in proved the address —
+  provenance on create, a verified upgrade on an existing account — and returning a typed refusal on failure), mint the login token,
   cap the login tokens, validate a token. It mirrors the terminal's slice rather than importing it
   — the two clients are separate npm projects, and a client must not depend on another client at
   runtime.
@@ -59,4 +60,6 @@
   page, DB-75's paywall): usage meters that never render unknown (`null`) as `0`, an unlimited
   plan's limit (`null`) that never renders as a number, the reset date in words, and
   `isQuotaExceeded`, which recognizes DB-72's unwrapped `402 {"error": "quota_exceeded", ...}`
-  body — the shape `POST /bots` actually sends, with no `{"detail": ...}` envelope.
+  body — the shape `POST /bots` actually sends, with no `{"detail": ...}` envelope; and
+  `reasonMessage`, the fixed sentence for the core's `identity_unverified` reason (any code it has no
+  words for renders as nothing, never as raw text).

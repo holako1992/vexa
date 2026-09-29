@@ -386,6 +386,15 @@ export function pastDueEntitlements() {
   };
 }
 
+/** A Free account whose recorded sign-in did not verify its email: the core resolves 0 included
+ *  meetings and states `reason: "identity_unverified"`. */
+export function identityUnverifiedEntitlements() {
+  const e = freeEntitlements();
+  e.limits.meetings_per_month = 0;
+  e.reason = "identity_unverified";
+  return e;
+}
+
 export function unknownUsageEntitlements() {
   const e = freeEntitlements();
   e.usage = { meetings_used: null, minutes_used: null };
@@ -435,4 +444,12 @@ export const QUOTA_EXCEEDED_BODY = {
   used: 1,
   resets_at: "2026-10-01T00:00:00Z",
   upgrade_url: null,
+};
+
+/** The same refusal for an unverified identity: a zero allowance plus the core's reason code. */
+export const QUOTA_EXCEEDED_UNVERIFIED_BODY = {
+  ...QUOTA_EXCEEDED_BODY,
+  limit: 0,
+  used: 0,
+  reason: "identity_unverified",
 };

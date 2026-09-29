@@ -77,7 +77,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = await findOrCreateUserToken(normalized, clientAddress(request.headers));
+  const result = await findOrCreateUserToken(normalized, clientAddress(request.headers), {
+    provider: "email",
+    emailVerified: false, // this door never proves the caller owns the address
+  });
   if (!result.ok) {
     console.error(`[dashboard-auth] email sign-in failed for ${normalized}: ${result.error}`);
     const { code } = result.refusal;

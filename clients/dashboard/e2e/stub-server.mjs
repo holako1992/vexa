@@ -36,6 +36,7 @@ import {
   JITSI_HOSTS,
   freeEntitlements,
   QUOTA_EXCEEDED_BODY,
+  QUOTA_EXCEEDED_UNVERIFIED_BODY,
   E2E_GOOGLE_EMAIL,
   E2E_MICROSOFT_EMAIL,
   makeSilentWav,
@@ -60,7 +61,7 @@ const bots = []; // every POST /bots body, in arrival order
 const gatewayLog = [];
 const adminLog = [];
 /** Forced response overrides, keyed by a short name a spec asks for. Cleared on reset.
- * `botsQuota: true` makes `POST /bots` answer the unwrapped 402 `quota_exceeded` body
+ * `botsQuota: "identity_unverified"` answers the same 402 with the core's reason code. `botsQuota: true` makes `POST /bots` answer the unwrapped 402 `quota_exceeded` body
  *  instead of dispatching — spec 14's paywall proof. */
 let force = {
   meetings: null, meetingDetail: null, botsQuota: false, search: null,
@@ -626,7 +627,9 @@ async function handleGateway(req, res) {
     // `force.botsQuota` mirrors meeting-api's monthly-quota refusal — an unwrapped
     // 402, no `{"detail": ...}` envelope. The dashboard's paywall must branch on the `error`
     // field this body carries, never on the 402 status alone (see SendBotDialog.tsx).
-    if (force.botsQuota) return sendJson(res, 402, QUOTA_EXCEEDED_BODY);
+    if (force.botsQuota) {
+      return sendJson(res, 402, force.botsQuota === "identity_unverified" ? QUOTA_EXCEEDED_UNVERIFIED_BODY : QUOTA_EXCEEDED_BODY);
+    }
     const body = await readAndLogBody(req, logEntry);
     bots.push(body);
     return sendJson(res, 200, { id: 900 + bots.length, status: "requested", ...body });
@@ -810,7 +813,7 @@ async function handleAdmin(req, res) {
   // The internal oracle uses a different header (X-Internal-Secret), checked per-route below.
   if (url.pathname !== "/internal/validate" && !checkAdminKey(req, res)) return;
 
-  logRequest(adminLog, req);
+  const adminEntry = logRequest(adminLog, req);
 
   // GET /admin/users/email/<email>
   if (req.method === "GET" && parts.length === 4 && parts[0] === "admin" && parts[1] === "users" && parts[2] === "email") {
@@ -822,7 +825,7 @@ async function handleAdmin(req, res) {
 
   // POST /admin/users
   if (req.method === "POST" && parts.length === 2 && parts[0] === "admin" && parts[1] === "users") {
-    const body = await readJsonBody(req);
+    const body = await readAndLogBody(req, adminEntry);
     const email = body.email;
     let user = users.get(email);
     // The real core refuses a disposable domain on the create path only (a FastAPI 422 with a
@@ -839,6 +842,17 @@ async function handleAdmin(req, res) {
     if (!user) {
       user = { id: nextUserId++, email, name: null };
       users.set(email, user);
+    }
+    return sendJson(res, 200, user);
+  }
+
+  // PATCH /admin/users/<id> — the provenance upgrade (the only patch the dashboard sends)
+  if (req.method === "PATCH" && parts.length === 3 && parts[0] === "admin" && parts[1] === "users") {
+    const body = await readAndLogBody(req, adminEntry);
+    const user = [...users.values()].find((u) => u.id === Number(parts[2]));
+    if (!user) return sendJson(res, 404, { error: "not_found" });
+    if (typeof body.identity_provider !== "string" || typeof body.email_verified !== "boolean") {
+      return sendJson(res, 422, { detail: "identity_provider and email_verified must be supplied together" });
     }
     return sendJson(res, 200, user);
   }
