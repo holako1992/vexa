@@ -40,6 +40,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from ...identity_provenance import is_explicitly_unverified
 from .catalog import CATALOG_VERSION, DEFAULT_PLAN_ID, PAST_DUE_GRACE_DAYS, PLANS, PlanLimits, get_plan
 from .ports import NullUsagePort, UsagePort, UsageSnapshot
 
@@ -48,6 +49,10 @@ log = logging.getLogger("admin_api.billing.entitlements")
 #: Subscription statuses that resolve to their tier's plan outright (no grace, no period check
 #: beyond falling back to the calendar month when no Stripe period is stored).
 _PAID_STATUSES = ("active", "trialing")
+
+
+#: `ResolvedPlan.reason` for a Free account whose recorded sign-in did not verify its email.
+IDENTITY_UNVERIFIED = "identity_unverified"
 
 
 @dataclass(frozen=True)
@@ -83,7 +88,10 @@ class ResolvedPlan:
     #: the plan's meetings are already unlimited. Reported so a caller can show "+1 comped" rather
     #: than re-deriving it from the raw stored fields.
     quota_bonus_applied: int = 0
-
+    #: Machine-readable why the allowance is below the plan's catalog figure. `IDENTITY_UNVERIFIED`
+    #: when the account's recorded sign-in says `email_verified: false` and the resolved plan is
+    #: Free; `None` otherwise. It travels with the exhausted-quota answer so a client can say why.
+    reason: Optional[str] = None
 
 @dataclass(frozen=True)
 class ResolvedEntitlements:
@@ -145,7 +153,24 @@ def resolve_plan(data: Dict[str, Any], now: datetime) -> ResolvedPlan:
     `PlatformBillingDataPatch` fields, plus the `plan_override`/`quota_bonus`/
     `quota_bonus_period_start`; anything else in the blob is ignored). Admin overrides are the
     LAST step, applied uniformly on whatever `_resolve_subscription_plan` below produced."""
-    return _apply_admin_overrides(_resolve_subscription_plan(data, now), data)
+    return _apply_admin_overrides(
+        _apply_identity_gate(_resolve_subscription_plan(data, now), data), data,
+    )
+
+
+def _apply_identity_gate(plan: ResolvedPlan, data: Dict[str, Any]) -> ResolvedPlan:
+    """The Free allowance belongs to verified identities: a Free resolution for an account whose
+    stored identity record says `email_verified: false` gets 0 included meetings and the reason
+    `identity_unverified`. An account with NO record (legacy, terminal- or API-created) is
+    unchanged, and a paid resolution is never touched. Admin overrides apply after this, so a
+    `plan_override` replaces the gated plan outright and a `quota_bonus` adds to its 0."""
+    if plan.plan_id != DEFAULT_PLAN_ID or not is_explicitly_unverified(data):
+        return plan
+    return replace(
+        plan,
+        limits=replace(plan.limits, meetings_per_month=0),
+        reason=IDENTITY_UNVERIFIED,
+    )
 
 
 def _apply_admin_overrides(plan: ResolvedPlan, data: Dict[str, Any]) -> ResolvedPlan:
@@ -187,6 +212,7 @@ def _apply_admin_overrides(plan: ResolvedPlan, data: Dict[str, Any]) -> Resolved
         plan,
         plan_id=plan_id,
         limits=limits,
+        reason=None if applied_override is not None else plan.reason,
         plan_override=applied_override,
         unrecognized_plan_override=unrecognized_override,
         quota_bonus_applied=quota_bonus_applied,

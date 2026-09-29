@@ -111,6 +111,25 @@ async def _async_return(value):
     return value
 
 
+def test_identity_unverified_reason_rides_the_402_body(monkeypatch):
+    """A zero allowance admin-api attributes to an unverified identity is refused at the first
+    attempt, and the machine-readable reason is relayed verbatim in the refusal body."""
+    context = _quota_context(limit=0, used=0)
+    context["quota"]["reason"] = "identity_unverified"
+    client, _repo, runtime = _client(monkeypatch, context=context)
+    r = _spawn(client)
+    assert r.status_code == 402, r.text
+    assert r.json() == {
+        "error": "quota_exceeded",
+        "limit": 0,
+        "used": 0,
+        "resets_at": RESETS_AT,
+        "upgrade_url": "https://vexa.ai/pricing",
+        "reason": "identity_unverified",
+    }
+    assert len(runtime.specs) == 0
+
+
 def test_pro_shaped_context_no_quota_key_never_checked(monkeypatch):
     """An unlimited plan's bot-context has NO `quota` key at all (admin-api omits it for a `None`
     `meetings_per_month`) — repeated spawns are never refused on this axis."""

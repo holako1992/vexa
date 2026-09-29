@@ -542,16 +542,16 @@ def build_router(
             # who they say they are (401/403 do not fit); it is not a burst-rate problem the caller
             # can just retry (429 does not fit either); it is that the plan's allowance for this
             # billing period is spent, which is exactly what 402 names.
-            return JSONResponse(
-                status_code=402,
-                content={
-                    "error": "quota_exceeded",
-                    "limit": e.limit,
-                    "used": e.used,
-                    "resets_at": e.resets_at,
-                    "upgrade_url": e.upgrade_url,
-                },
-            )
+            body = {
+                "error": "quota_exceeded",
+                "limit": e.limit,
+                "used": e.used,
+                "resets_at": e.resets_at,
+                "upgrade_url": e.upgrade_url,
+            }
+            if e.reason:
+                body["reason"] = e.reason
+            return JSONResponse(status_code=402, content=body)
         except SpawnFailed as e:
             raise HTTPException(status_code=502, detail=str(e) or "Failed to start bot workload")
 

@@ -353,8 +353,9 @@ class MeetingQuotaExceeded(Exception):
     entirely, so this is never raised for one). Distinct from both ``MaxBotsExceeded`` (the
     concurrency pre-check) and ``QuotaExceeded`` (the runtime kernel's owner-quota backstop) — a
     different axis (meetings per calendar month, not bots running right now), with its own response
-    shape: ``{"error": "quota_exceeded", "limit", "used", "resets_at", "upgrade_url"}``. The
-    dashboard branches on the ``error`` field, never the HTTP status.
+    shape: ``{"error": "quota_exceeded", "limit", "used", "resets_at", "upgrade_url"}``, plus
+    ``"reason"`` (``identity_unverified``) when admin-api states one. The dashboard branches on
+    the ``error`` field, never the HTTP status.
 
     ``used=None`` means admin-api could not determine usage (its own query failed) — the caller
     raises this rather than admitting: a finite plan with UNKNOWN usage fails CLOSED, because
@@ -363,11 +364,14 @@ class MeetingQuotaExceeded(Exception):
     UNKNOWN-vs-zero distinction ``billing.ports.UsageSnapshot`` states)."""
 
     def __init__(self, *, limit: int, used: Optional[int], resets_at: Optional[str],
-                 upgrade_url: Optional[str]):
+                 upgrade_url: Optional[str], reason: Optional[str] = None):
         self.limit = limit
         self.used = used
         self.resets_at = resets_at
         self.upgrade_url = upgrade_url
+        # admin-api's machine-readable why (`identity_unverified`), relayed verbatim; None when
+        # the allowance is simply spent.
+        self.reason = reason
         super().__init__(
             f"monthly meeting quota exceeded "
             f"({'unknown' if used is None else used} of {limit} used this period)"

@@ -357,7 +357,8 @@ async def auto_join_tick(
                 row,
                 f"monthly meeting quota exceeded "
                 f"({'unknown' if e.used is None else e.used} of {e.limit} used, "
-                f"resets {e.resets_at}) — auto-join skipped",
+                f"resets {e.resets_at}"
+                f"{f'; {e.reason}' if e.reason else ''}) — auto-join skipped",
                 event="auto_join_quota_exceeded",
             )
             continue

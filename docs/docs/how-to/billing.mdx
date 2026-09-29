@@ -113,15 +113,23 @@ through to the account-creation call. `_signup_client_ip` in `app/main.py` reads
 `X-Forwarded-For` first if a future dashboard change starts sending it, so wiring that through is
 a dashboard-side change with no core change needed.
 
-**Free allowance and identity verification (DB-12).** The product intent is that the Free
-plan's monthly meeting allowance applies only once an identity is verified. Today `admin-api`'s
-`users` table stores no verified/`email_verified` flag at all — the dev email-sign-in door
-(`DASHBOARD_ALLOW_EMAIL_LOGIN`) and the Google/Microsoft OAuth doors both resolve to the exact
-same `find_or_create` call with nothing distinguishing "an OAuth provider vouched for this
-address" from "nobody checked." Until that fact is captured somewhere in core (an OAuth-vs-other
-provenance field on the account, populated at `POST /admin/users` time or on first login),
-`resolve_entitlements` has no verified signal to read and none was added here — see this page's
-governing issue for the exact schema/plumbing DB-12 still needs.
+**The Free allowance belongs to verified identities.** Each sign-in door records how it proved the
+address, in the account's `users.data` under `identity`:
+`{"provider": "google" | "microsoft" | "email", "email_verified": true | false, "verified_at": "<iso8601>"}`
+(`verified_at` only when verified). The dashboard sends it at sign-in: Google reports
+`email_verified` in its profile; a Microsoft sign-in counts as verified; the development email door
+(`DASHBOARD_ALLOW_EMAIL_LOGIN`) proves nothing and records `email_verified: false`. It rides on
+`POST /admin/users` (`identity_provider` + `email_verified`, supplied together, provider one of the
+three above) and, for an existing account, on `PATCH /admin/users/{id}` with the same two fields.
+A recorded `email_verified: true` is never downgraded by a later, weaker sign-in.
+
+An account whose record says `email_verified: false` resolves on the Free plan with **0 included
+meetings**, and `reason: "identity_unverified"` appears on `GET /user/entitlements` and in the
+`402` `quota_exceeded` body of `POST /bots` (the dashboard shows fixed copy for it: sign in with
+Google or Microsoft to verify, or upgrade). An account with **no** record — created before the record
+existed, or through the terminal or the API — is unchanged. Paid plans and a `plan_override` win over
+the rule; a `quota_bonus` adds to the zero. Signing in again through Google or Microsoft upgrades
+the record.
 
 ## Dunning and grace (a payment fails)
 

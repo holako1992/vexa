@@ -568,6 +568,7 @@ async def request_bot(
                 raise MeetingQuotaExceeded(
                     limit=quota_limit, used=quota_used,
                     resets_at=quota.get("resets_at"), upgrade_url=quota.get("upgrade_url"),
+                    reason=quota.get("reason"),
                 )
 
     # 1e. Per-plan minute cap — off the SAME best-effort `bot_context` fetch above (no

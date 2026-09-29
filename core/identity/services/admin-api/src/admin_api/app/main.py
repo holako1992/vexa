@@ -23,11 +23,11 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response, Security, status
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_serializer, field_validator, model_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import config_preflight
 from .. import disposable_domains as disposable_domains_mod
+from .. import identity_provenance as identity_mod
 from ..schema.models import APIToken, PlatformSetting, User
 from ..token_scope import VALID_SCOPES, generate_prefixed_token
 from .db import get_db
@@ -244,10 +245,27 @@ async def get_current_user_for_update(
 
 
 # --- request/response models ---
+def _identity_claim_pair(provider: Optional[str], verified: Optional[bool]) -> None:
+    """The two provenance fields travel together: a provider with no verdict, or a verdict with
+    no provider, is a malformed claim rather than a partial one."""
+    if (provider is None) != (verified is None):
+        raise ValueError("identity_provider and email_verified must be supplied together")
+
+
 class UserCreate(BaseModel):
     email: str
     name: Optional[str] = None
     max_concurrent_bots: int = 3
+    #: Sign-in provenance (see `identity_provenance.py`): which door the account came through and
+    #: whether that door vouches for the address. Optional — API/terminal-created accounts carry
+    #: no claim and stay unrecorded.
+    identity_provider: Optional[Literal["google", "microsoft", "email"]] = None
+    email_verified: Optional[StrictBool] = None
+
+    @model_validator(mode="after")
+    def _identity_pair(self):
+        _identity_claim_pair(self.identity_provider, self.email_verified)
+        return self
 
 
 class PlatformBillingDataPatch(BaseModel):
@@ -290,6 +308,10 @@ class UserAdminPatch(BaseModel):
     #: period only (see `billing/entitlements.py`'s module docstring for why it does not carry
     #: over). `None` clears a previously-set bonus; a negative value is a 422 via `ge=0`.
     quota_bonus: Optional[int] = Field(default=None, ge=0)
+    #: Sign-in provenance, same closed set and pairing rule as `UserCreate`. It sets or upgrades
+    #: the stored record; it never downgrades a recorded `email_verified: true`.
+    identity_provider: Optional[Literal["google", "microsoft", "email"]] = None
+    email_verified: Optional[StrictBool] = None
 
     model_config = {"extra": "forbid"}
 
@@ -304,7 +326,9 @@ class UserAdminPatch(BaseModel):
     def require_change(self):
         has_data = self.data is not None and bool(self.data.model_fields_set)
         has_override = bool({"plan_override", "quota_bonus"} & self.model_fields_set)
-        if self.max_concurrent_bots is None and not has_data and not has_override:
+        _identity_claim_pair(self.identity_provider, self.email_verified)
+        has_identity = self.identity_provider is not None
+        if self.max_concurrent_bots is None and not has_data and not has_override and not has_identity:
             raise ValueError("at least one user field must be supplied")
         return self
 
@@ -706,6 +730,9 @@ def create_app() -> FastAPI:
         u = User(email=normalise_email(user_in.email), name=user_in.name,
                  max_concurrent_bots=user_in.max_concurrent_bots)
         u.data = {**(u.data or {}), "onboarding_completed_at": time.time()}
+        if user_in.identity_provider is not None:
+            u.data = identity_mod.merge_identity(
+                u.data, user_in.identity_provider, bool(user_in.email_verified))
         db.add(u)
         try:
             await db.commit()
@@ -814,6 +841,10 @@ def create_app() -> FastAPI:
                 current_period_start = resolve_plan(new_data, datetime.now(timezone.utc)).period_start
                 new_data["quota_bonus"] = patch.quota_bonus
                 new_data["quota_bonus_period_start"] = int(current_period_start.timestamp())
+            data_changed = True
+        if patch.identity_provider is not None:
+            new_data = identity_mod.merge_identity(
+                new_data, patch.identity_provider, bool(patch.email_verified))
             data_changed = True
         if data_changed:
             user.data = new_data
@@ -1404,6 +1435,9 @@ def create_app() -> FastAPI:
             # allowance differs from what Stripe alone would resolve to.
             "plan_override": plan.plan_override,
             "quota_bonus_applied": plan.quota_bonus_applied,
+            # Machine-readable why the plan's allowance is below its catalog figure
+            # (`identity_unverified`), or null. The dashboard renders fixed copy from the code.
+            "reason": plan.reason,
         }
 
     # --- user tier: Stripe checkout. Creates the Stripe customer on first use (stored on
@@ -2120,6 +2154,8 @@ def create_app() -> FastAPI:
                 "resets_at": plan.period_end.isoformat(),
                 "upgrade_url": _billing_upgrade_url(),
             }
+            if plan.reason:
+                resp["quota"]["reason"] = plan.reason
         # Fixture collection (O-TEL-1): whether this spawn tapes its raw captured-signal stream.
         # ALWAYS present in the response — a missing key downstream is indistinguishable from an
         # unreachable identity, and bot_spawn must default ON in BOTH cases, so it is stated here
