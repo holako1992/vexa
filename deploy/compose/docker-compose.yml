@@ -1010,7 +1010,9 @@ services:
         RUNTIME_DEPS: ${DASHBOARD_NEXT_RUNTIME_DEPS:-prod}
     image: vexaai/v012-dashboard:${IMAGE_TAG:-dev}
     ports:
-      - "127.0.0.1:${DASHBOARD_NEXT_PORT:-13002}:3001"
+      # Loopback by default. DASHBOARD_NEXT_BIND=0.0.0.0 publishes the dashboard on every interface
+      # so it can be reached by the host's IP; every other service stays on loopback.
+      - "${DASHBOARD_NEXT_BIND:-127.0.0.1}:${DASHBOARD_NEXT_PORT:-13002}:3001"
     environment:
       - NODE_ENV=production
       # The single backend edge. The dashboard's proxy forwards a closed allowlist of read paths here

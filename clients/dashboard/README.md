@@ -33,12 +33,40 @@ npm run dev
 ```
 
 In the compose stack itself, `dashboard-next` is on by default — no profile flag needed — and
-publishes on the loopback interface only, `127.0.0.1:${DASHBOARD_NEXT_PORT:-13002}`, so it isn't
+publishes on the loopback interface by default, `127.0.0.1:${DASHBOARD_NEXT_PORT:-13002}`, so it isn't
 reachable off-host without a reverse proxy in front of it:
 
 ```bash
 docker compose up -d dashboard-next    # http://localhost:13002
 ```
+
+### Reaching it from other machines
+
+Set both in `deploy/compose/.env`, then recreate the container:
+
+```bash
+DASHBOARD_NEXT_BIND=0.0.0.0                 # publish on every interface, not just loopback
+DASHBOARD_NEXT_URL=http://203.0.113.10:13002   # the origin people will type (your host's IP)
+```
+
+```bash
+docker compose up -d --force-recreate dashboard-next    # http://<host-ip>:13002
+```
+
+Open port 13002 in the host firewall / cloud security group. Only the dashboard is published; the
+gateway, admin-api and the rest stay on loopback, because the dashboard proxies to them server-side.
+
+What plain `http://<ip>` does and does not give you:
+
+- The session cookie is not `Secure` and traffic is unencrypted. Anyone on the path can read it.
+- Google and Microsoft refuse a bare-IP redirect URI (only `localhost` is exempt), so their sign-in
+  buttons cannot work on an IP. That leaves the password-less email door
+  (`DASHBOARD_NEXT_ALLOW_EMAIL_LOGIN`), which proves no ownership of an address — never enable it on a
+  reachable host.
+- For real use, point a domain at the host, terminate TLS in a reverse proxy, keep
+  `DASHBOARD_NEXT_BIND` on loopback, set `DASHBOARD_NEXT_URL=https://your-domain`, and set
+  `DASHBOARD_NEXT_TRUST_PROXY=true`. Register `${DASHBOARD_NEXT_URL}/api/auth/callback/google` (and
+  the Microsoft equivalent) with the provider.
 
 For hot reload against the checked-out source instead of a rebuilt image, layer the hot overlay
 (needs the image built with `DASHBOARD_NEXT_RUNTIME_DEPS=dev` in `.env` — the default image ships
