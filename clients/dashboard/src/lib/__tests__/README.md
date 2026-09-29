@@ -1,6 +1,6 @@
 # `src/lib/__tests__/` — behavioral tests
 
-Seven files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts` and `meetingId.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
+Thirteen files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
 
 - `upstream.test.ts` — the allowlist as a table, weighted towards what it **refuses**: unknown
   edges, traversal segments, a non-numeric row id, an unknown platform or separator-bearing native

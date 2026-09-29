@@ -14,10 +14,10 @@
  *  find-or-create fabricate duplicate users.
  */
 
+import { type SignInRefusal, refusalFromAdmin } from "./signInRefusal";
+
 export const AUTH_COOKIE = process.env.VEXA_AUTH_COOKIE_NAME || "vexa-token";
 export const USER_INFO_COOKIE = process.env.VEXA_USER_INFO_COOKIE_NAME || "vexa-user-info";
-
-import { type SignInRefusal, refusalFromAdmin } from "./signInRefusal";
 
 export interface AdminUser {
   id: string | number;
