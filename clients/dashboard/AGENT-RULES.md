@@ -3,7 +3,7 @@
 Every agent working a task from `TASKS.md` reads this file first. Each rule was learned from a real
 failure in this repository; the task board records which.
 
-Repo: `C:\Users\Mohammed\Documents\ai_note\vexa`, branch `claude/dashboard-service-modern-xoiy2c`.
+Repo: `C:\Users\Mohammed\Documents\ai_note\vexa`, branch `claude/compassionate-mendel-qjpmv8` (it contains `claude/dashboard-service-modern-xoiy2c`).
 Several agents work in THIS SAME CHECKOUT at once, each in its own lane. These rules are how that
 stays safe. They were learned the hard way; each one has already been broken once.
 
@@ -60,6 +60,12 @@ stays safe. They were learned the hard way; each one has already been broken onc
     and the run hangs forever at 0% CPU. It is not memory. Run targeted test files, put a
     `timeout` on every docker run, and if you need Redis try `TESTCONTAINERS_RYUK_DISABLED=true`.
     Never leave a container running when you finish: `docker ps` and remove your own.
+    WORKING RECIPE (2026-09-29): the test image needs the docker CLI, or `requires_docker` SKIPS
+    every endpoint test silently. Build once from a Dockerfile of
+    `FROM docker:cli AS d` / `FROM python:3.11-slim` / `COPY --from=d /usr/local/bin/docker /usr/local/bin/docker` /
+    `RUN pip install -q sqlalchemy greenlet asyncpg "psycopg[binary]" fastapi httpx pydantic redis cryptography "testcontainers[postgres,redis]" pytest pytest-asyncio`,
+    then in Git Bash: `MSYS_NO_PATHCONV=1 timeout 900 docker run --rm -v //var/run/docker.sock:/var/run/docker.sock -v "//c/Users/Mohammed/Documents/ai_note/vexa://repo" -w //repo/core/identity/services/admin-api --add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e PYTHONDONTWRITEBYTECODE=1 <image> python -m pytest -p no:cacheprovider -q tests --ignore=tests/test_stack_admin_api.py --ignore=tests/test_stack_redis.py`.
+    Redis starts fine this way. Baseline: 367 passed. A run reporting SKIPPED is not a pass.
 16. Pre-existing gate failures that are NOT yours and must not be "fixed": `compose` (uv missing),
     `node` (`@vexa/remote-browser` has no node_modules), `readme` x3 for `capture46/`.
 
@@ -96,3 +102,9 @@ stays safe. They were learned the hard way; each one has already been broken onc
     httpx pydantic fastapi uvicorn starlette jsonschema pyyaml`, run with `-p no:cacheprovider`.
     Baseline: 723 passed, 12 skipped. Remove `__pycache__` under core/ and deploy/ after any run.
 27. Source comments: no ticket ids like "DB-60b:" and no "used to". An agent was sent back for this.
+
+## Added 2026-09-29
+28. Baselines: dashboard `npm test` 275, `npm run test:e2e` 90. admin-api 367 (recipe in rule 15).
+29. Bot package tests (`core/meetings/services/bot`) run in `node:22-slim` on a tar copy of the repo
+    with `pnpm install --filter "@vexa/bot..." --filter "./core/meetings/modules/*"` and every
+    `core/meetings/modules/*` built first; never install on the host. Baseline: 644 checks.

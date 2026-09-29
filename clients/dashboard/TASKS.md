@@ -442,6 +442,9 @@ the known environmental traps.
 | DB-50, DB-51, DB-52 | `644105c8` | `/recordings` (download, delete), meeting audio player, click a line to seek, playing line highlighted. e2e 83/83 twice |
 | Wording sweep | `6abbfad7` + follow-up | Ticket ids and history narration removed from source comments added on this branch |
 | e2e fix | see log | Search loading spec holds the stub answer instead of racing a 150ms delay |
+| Docker-gated suites | none needed | admin-api 326/326 incl. every never-run testcontainer file; bot `npm test` 644 checks incl. `max-active-cap`. Recipe in AGENT-RULES rule 15 |
+| DB-76 dashboard follow-ups | `f86e8064`, `b076ea5b` | Readable sign-up refusal on `/login` (fixed copy per code); client IP forwarded to admin-api as `X-Forwarded-For` when `DASHBOARD_TRUST_PROXY` |
+| DB-12, DB-76 (rest) | `7d6095ba`, `60885a00`, `abc0b4f5`, `a8dd0798` | Sign-in provenance in `users.data.identity`; explicit `email_verified: false` on Free = 0 meetings, reason `identity_unverified` (legacy/admin-created accounts unchanged, overrides win); production dashboard refuses to start without `VEXA_INTERNAL_API_SECRET` |
 
 ### Decisions waiting on the user
 
@@ -456,29 +459,15 @@ the known environmental traps.
    Category A but a new compiled dependency. **Do this before DB-31 ships.** Until DB-31 exists,
    nobody can store a Google token.
 
-### Next, in order (updated 2026-09-26, paused until next week)
+### Next, in order (updated 2026-09-29)
 
-Everything in the old list items 1–5 is done (see the "Done" table), plus DB-76 (core part),
-DB-50/51/52 and the wording sweep. Remaining, in order:
+Items 1, 3 and 4 below are done. Next up: 2 (needs the user), then 5 (DB-45, DB-46). Remaining, in order:
 
-1. **Run the docker-gated suites once on a docker host** before anything else ships. Nothing below
-   has been proven against Postgres/Redis: admin-api `test_google_calendar_oauth.py`,
-   `test_microsoft_calendar_oauth.py`, `test_billing_quota_admission.py` (DB-72b, DB-77 cases),
-   `test_dunning_payment_failed_webhook.py`, `test_signup_disposable_domain.py`. Also run `npm test`
-   in `core/meetings/services/bot` (installs its deps) for `max-active-cap.test.ts`, never executed.
+1. ~~Run the docker-gated suites~~ — done 2026-09-29, all green, no defects (see Done table).
 2. **Stripe webhook ingress** (decision 1 above, still open — needs the user). Until it exists,
    DB-73/DB-74b/DB-78 do nothing live: no plan change, no dunning email.
-3. **DB-76 dashboard follow-ups** (small, dashboard lane):
-   - a refused sign-up shows no reason: the OAuth `signIn` callback in `authOptions.ts` returns
-     `false` for any admin-api failure, and the dev email door shows the raw JSON body. Map
-     `disposable_email_domain` to a readable message on `/login`.
-   - forward the client IP (`rateLimit.ts`'s `clientKey`, honouring `DASHBOARD_TRUST_PROXY`) to
-     admin-api as `X-Forwarded-For` in `lib/adminApi.ts`, so the sign-up log records the user's
-     address instead of the dashboard server's.
-4. **DB-12 identity oracle, then the rest of DB-76:** admin-api has no "email verified" field, so
-   "Free allowance only for verified identities" cannot be enforced yet. DB-12 must record OAuth
-   provenance at `POST /admin/users` (or first login); then `resolve_entitlements` gives unverified
-   users 0 meetings with a reason, overrides still winning.
+3. ~~DB-76 dashboard follow-ups~~ — done 2026-09-29.
+4. ~~DB-12 identity oracle, then the rest of DB-76~~ — done 2026-09-29. Open point: Microsoft counts as verified (see open questions).
 5. **DB-45 export** (SRT/VTT/DOCX/PDF, Category-A libs only) and **DB-46 sharing** (`/s/<token>`).
 6. **DB-43 speaker rename** (verify annotate can carry a speaker map; else add a core field) and
    **DB-47 tags**.
@@ -495,6 +484,13 @@ Ticket ids that remain on purpose after the sweep: `architecture.calm.json` (sea
 golden (contract text), and one `TokenCipherError` message string in `token_cipher.py`.
 
 Open questions found while working (answer on the issue before building on them):
+
+- **Microsoft sign-ins count as email-verified** (DB-12). Entra multi-tenant `email` claims can be
+  set by a tenant admin and are not proof of mailbox control (the "nOAuth" class). Since the
+  account key is the email, this is also an account-linking risk that predates DB-12. For DB-94:
+  require the `xms_edov` optional claim, or key Microsoft accounts on `tid`+`oid`.
+- **Dev email door sign-ups get 0 Free meetings** (`email_verified: false`). Existing accounts are
+  never downgraded; only new accounts through that door. Use `plan_override` for a dev account.
 
 - **Upcoming "Don't join"** is wired to `PATCH /meetings/{id} {auto_join}`, not
   `PUT /meetings/{platform}/{native}/intent` as DB-33's text said: `intent` only takes
@@ -531,10 +527,8 @@ To run it locally, rebuild `dashboard-next`, `gateway`, `admin-api`, `meeting-ap
 
 ### Not verified anywhere
 
-- Docker-gated suites (admin-api testcontainers, incl. the Google OAuth route tests exercising the
-  new cipher call sites) were not run on the 2026-09-26 Linux host: no docker daemon there.
-- `core/meetings/services/bot` `max-active-cap.test.ts` is committed but unexecuted (no bot
-  node_modules on that host); its arithmetic was reproduced in a standalone script.
+- Docker-gated suites: run 2026-09-29 on the Windows docker host, all green (admin-api 367 after
+  DB-12; bot 644 checks). Recipe in AGENT-RULES rule 15.
 - e2e ports in `e2e/ports.mjs` are fixed, so two agents running `test:e2e` at once in one container
   collide. Run dashboard e2e from one agent at a time.
 - Never run a workspace-wide `pnpm install`/`turbo` on that host: it moves npm-installed
