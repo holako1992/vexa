@@ -37,19 +37,28 @@ export function resetRateLimits(): void {
   windows.clear();
 }
 
-/** The caller's address for limiting purposes.
+/** The caller's address, or null when it cannot be known.
  *
  *  `X-Forwarded-For` is client-spoofable, so it is trusted ONLY when the deployment declares it
- *  is behind a proxy (DASHBOARD_TRUST_PROXY=true). Otherwise every request shares the "direct"
+ *  is behind a proxy (DASHBOARD_TRUST_PROXY=true). With the flag off there is no address to
+ *  report: the socket peer is not visible to a route handler, and a header the caller can set
+ *  is not evidence. Shared by the limiter below and by the address forwarded to admin-api, so
+ *  both always agree on who the caller is.
+ */
+export function clientAddress(headers: { get(name: string): string | null }): string | null {
+  if (process.env.DASHBOARD_TRUST_PROXY === "true") {
+    const fwd = headers.get("x-forwarded-for");
+    if (fwd) return fwd.split(",")[0]!.trim() || null;
+    const real = headers.get("x-real-ip");
+    if (real) return real.trim() || null;
+  }
+  return null;
+}
+
+/** The limiter's bucket for a caller. Without a known address every request shares the "direct"
  *  bucket, which is strict rather than wrong: a misconfigured deployment throttles too much, it
  *  never throttles too little.
  */
 export function clientKey(headers: { get(name: string): string | null }): string {
-  if (process.env.DASHBOARD_TRUST_PROXY === "true") {
-    const fwd = headers.get("x-forwarded-for");
-    if (fwd) return fwd.split(",")[0]!.trim() || "direct";
-    const real = headers.get("x-real-ip");
-    if (real) return real.trim();
-  }
-  return "direct";
+  return clientAddress(headers) ?? "direct";
 }

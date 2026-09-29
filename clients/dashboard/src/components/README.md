@@ -126,7 +126,7 @@ Client components. They receive identity as props (resolved on the server) and f
   counts}`), and a Reconnect action for a connection whose `reconnect_needed` is set — a failed or
   reconnect-needed feed shows that action rather than going silently stale. Never duplicates the
   connect flow; with nothing connected, it points at `SendBotDialog`'s Calendar tab instead.
-- `LoginForm` — the sign-in card. The `next` parameter passes through `safeNext()` from
+- `LoginForm` — the sign-in card. A `?error=` code (from the OAuth callback) and the email door's `code` both map to fixed copy via `signInRefusal.ts`. The `next` parameter passes through `safeNext()` from
   `lib/security.ts`, which is why it cannot become an open redirect.
 - `MeetingDetail`'s speaker chips mix one hue into transparent rather than using a frozen pastel,
   so they land correctly on either theme's card colour.

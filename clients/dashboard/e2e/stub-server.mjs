@@ -825,6 +825,17 @@ async function handleAdmin(req, res) {
     const body = await readJsonBody(req);
     const email = body.email;
     let user = users.get(email);
+    // The real core refuses a disposable domain on the create path only (a FastAPI 422 with a
+    // typed detail); an address that already exists never reaches it. The stub's disposable
+    // addresses are the ones whose local part starts with "disposable".
+    if (!user && String(email).startsWith("disposable")) {
+      return sendJson(res, 422, {
+        detail: {
+          error: "disposable_email_domain",
+          message: "This email domain is a disposable/throwaway provider and cannot be used to sign up. Use a permanent email address.",
+        },
+      });
+    }
     if (!user) {
       user = { id: nextUserId++, email, name: null };
       users.set(email, user);

@@ -3,7 +3,8 @@
 - **`session.ts`** — the ONE place a request's identity is established and the only writer of the
   session cookies. Two tiers, kept distinct: `sessionToken()` is the credential sent upstream;
   `currentUser()` is the identity, verified against admin-api's oracle where configured.
-- **`adminApi.ts`** — server-only admin-api client: find-or-create by email, mint the login token,
+- **`adminApi.ts`** — server-only admin-api client: find-or-create by email (forwarding the user's
+  address as `X-Forwarded-For` on the create call, and returning a typed refusal on failure), mint the login token,
   cap the login tokens, validate a token. It mirrors the terminal's slice rather than importing it
   — the two clients are separate npm projects, and a client must not depend on another client at
   runtime.
@@ -16,7 +17,11 @@
   have forwarded it to every route, not just the one that asked for it).
 - **`security.ts`** — the CSP, the header set, the cookie-security decision, the same-origin write
   guard, and `safeNext()` (the open-redirect guard on the post-login target).
-- **`rateLimit.ts`** — a fixed-window limiter for the credential endpoints. Per-process and
+- **`signInRefusal.ts`** — the closed set of sign-in refusal codes and their fixed copy, plus the
+  typed `SignInRefusal` read off admin-api's response. `/login` turns a code into words and never
+  reflects free text from the query string. Client-safe.
+- **`rateLimit.ts`** — `clientAddress()` (the caller's address, trusted from `X-Forwarded-For` only
+  under `DASHBOARD_TRUST_PROXY`; also what `adminApi.ts` forwards on sign-up) and a fixed-window limiter for the credential endpoints. Per-process and
   in-memory; it bounds one instance and says so.
 - **`meetings.ts`** — the shapes the UI renders and the mapping onto them. Presentation only: it
   picks a title, buckets a status, formats a time. It never reshapes a transcript. DB-48 adds

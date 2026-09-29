@@ -14,8 +14,10 @@
 import { type AuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import AzureADProvider from "next-auth/providers/azure-ad";
+import { headers } from "next/headers";
 import { findOrCreateUserToken } from "@/lib/adminApi";
 import { setSessionCookies } from "@/lib/session";
+import { clientAddress } from "@/lib/rateLimit";
 import { isSecureDeployment } from "@/lib/security";
 
 export const googleEnabled = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
@@ -53,15 +55,16 @@ export const authOptions: AuthOptions = {
   pages: { signIn: "/login", error: "/login" },
   callbacks: {
     /** The load-bearing step: a verified OAuth identity becomes the dashboard's session cookies.
-     *  Any failure denies the sign-in rather than landing the user in a half-authenticated shell. */
+     *  Any failure denies the sign-in, with its refusal code on `/login`, rather than landing the user in a half-authenticated shell. */
     async signIn({ user, account }) {
       const provider = account?.provider;
       if ((provider !== "google" && provider !== "microsoft") || !user.email) return false;
 
-      const result = await findOrCreateUserToken(user.email.toLowerCase());
+      const result = await findOrCreateUserToken(user.email.toLowerCase(), clientAddress(await headers()));
       if (!result.ok) {
         console.error(`[dashboard-auth] ${provider} sign-in failed for ${user.email}: ${result.error}`);
-        return false;
+        // A URL return sends the browser to /login with the refusal CODE; the page owns the words.
+        return `/login?error=${result.refusal.code}`;
       }
       await setSessionCookies({ email: result.user.email, name: user.name || result.user.name }, result.token);
       return true;

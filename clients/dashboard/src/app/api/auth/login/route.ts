@@ -11,8 +11,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { findOrCreateUserToken } from "@/lib/adminApi";
 import { setSessionCookies } from "@/lib/session";
+import { refusalMessage } from "@/lib/signInRefusal";
 import { isSameOriginWrite } from "@/lib/security";
-import { hit, clientKey } from "@/lib/rateLimit";
+import { hit, clientKey, clientAddress } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -76,9 +77,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = await findOrCreateUserToken(normalized);
+  const result = await findOrCreateUserToken(normalized, clientAddress(request.headers));
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: result.status || 500, headers: NO_STORE });
+    console.error(`[dashboard-auth] email sign-in failed for ${normalized}: ${result.error}`);
+    const { code } = result.refusal;
+    return NextResponse.json(
+      { error: refusalMessage(code), code },
+      { status: result.status >= 400 && result.status < 500 ? result.status : 502, headers: NO_STORE },
+    );
   }
 
   await setSessionCookies({ email: result.user.email, name: result.user.name }, result.token);

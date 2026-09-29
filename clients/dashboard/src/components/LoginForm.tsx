@@ -13,6 +13,7 @@ import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { AudioLines } from "lucide-react";
 import { safeNext } from "@/lib/security";
+import { refusalMessage } from "@/lib/signInRefusal";
 import { Button, Input } from "./ui";
 
 export interface LoginOptions {
@@ -26,7 +27,8 @@ export function LoginForm({ options }: { options: LoginOptions }) {
   const next = safeNext(params.get("next"));
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // `?error=` is a code, never text: it selects one of the fixed strings and is otherwise ignored.
+  const [error, setError] = useState<string | null>(() => refusalMessage(params.get("error")));
 
   async function emailSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,9 +40,9 @@ export function LoginForm({ options }: { options: LoginOptions }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const body = (await r.json().catch(() => ({}))) as { error?: string };
+      const body = (await r.json().catch(() => ({}))) as { error?: string; code?: string };
       if (!r.ok) {
-        setError(body.error || `Sign-in failed (${r.status}).`);
+        setError(refusalMessage(body.code) || body.error || `Sign-in failed (${r.status}).`);
         setBusy(null);
         return;
       }

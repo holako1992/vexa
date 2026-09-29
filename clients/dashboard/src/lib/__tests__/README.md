@@ -21,6 +21,14 @@ Seven files, covering the parts where being wrong is expensive (plus `api.test.t
   `raw`/`download` media-byte pair (`type=audio|video` only, a non-numeric recording or media-file
   id refused, `download` and `raw` proven to resolve to the SAME gateway path since the gateway
   itself treats them as aliases), and `DELETE /recordings/<id>`.
+- `signInRefusal.test.ts` — admin-api's typed disposable-domain refusal becomes a code; an unknown
+  code, unparseable body or non-4xx failure becomes the generic or "unavailable" code; and a
+  `?error=` value that is not a known code (NextAuth names, hostile text, `__proto__`) yields the
+  generic sentence, never itself.
+- `adminApi.test.ts` — `clientAddress()` with trust-proxy off (a client-set `X-Forwarded-For` is not an
+  address) and on; `forwardedForHeader()` sends only a plain IP literal (a list or a header-injection
+  string is dropped); and `findOrCreateUserToken` sends `X-Forwarded-For` on the create call only,
+  omits it when the address is unknown, and returns a typed refusal for the 422.
 - `rawStream.test.ts` — DB-50's ONE non-JSON hop: `rawRequestHeaders` forwards a `Range` header
   verbatim and nothing else, `rawResponseHeaders` copies exactly `content-type`/`content-length`/
   `content-range`/`accept-ranges` plus `Cache-Control: no-store` — weighted towards proving a

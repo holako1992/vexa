@@ -121,6 +121,11 @@ spec's body is only the property, not the plumbing.
   `.../media/<id>/download` URL and actually serves `audio/wav` bytes; and Delete goes through the
   same confirm-dialog-then-toast shape `13-meeting-controls.spec.ts` proves for a meeting, ending
   on the list's own empty state once the one fixture recording is gone.
+- `22-signup-refusal.spec.ts` — a disposable-domain address through the email door shows the fixed
+  refusal sentence (never admin-api's JSON) and sets no session cookie; `/login?error=<code>` shows
+  the copy for a known code and only the generic sentence for anything else, so a hostile value is
+  never reflected; and the stub's admin-api log shows the caller's `X-Forwarded-For` on
+  `POST /admin/users`. The stub refuses addresses whose local part starts with `disposable`.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

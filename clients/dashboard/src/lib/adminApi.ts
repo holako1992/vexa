@@ -17,6 +17,8 @@
 export const AUTH_COOKIE = process.env.VEXA_AUTH_COOKIE_NAME || "vexa-token";
 export const USER_INFO_COOKIE = process.env.VEXA_USER_INFO_COOKIE_NAME || "vexa-user-info";
 
+import { type SignInRefusal, refusalFromAdmin } from "./signInRefusal";
+
 export interface AdminUser {
   id: string | number;
   email: string;
@@ -36,6 +38,14 @@ function adminConfig(): { url: string; key: string } | null {
   const key = process.env.VEXA_ADMIN_API_KEY || "";
   if (!url || !key || key === "your_admin_api_key_here") return null;
   return { url, key };
+}
+
+/** The `X-Forwarded-For` header for a caller address, or nothing when there is nothing safe to
+ *  send. Only a plain IPv4/IPv6 literal goes out: the address came from a header, and a malformed
+ *  one must not become a malformed outgoing request. */
+export function forwardedForHeader(clientIp: string | null | undefined): Record<string, string> {
+  const ip = (clientIp || "").trim();
+  return /^[0-9a-fA-F:.]{2,45}$/.test(ip) ? { "X-Forwarded-For": ip } : {};
 }
 
 async function adminRequest<T>(path: string, init: RequestInit = {}, timeout = 15000): Promise<AdminResult<T>> {
@@ -67,8 +77,12 @@ function findUserByEmail(email: string): Promise<AdminResult<AdminUser>> {
   return adminRequest<AdminUser>(`/admin/users/email/${encodeURIComponent(email)}`, { method: "GET" });
 }
 
-function createUser(email: string): Promise<AdminResult<AdminUser>> {
-  return adminRequest<AdminUser>(`/admin/users`, { method: "POST", body: JSON.stringify({ email }) });
+function createUser(email: string, clientIp?: string | null): Promise<AdminResult<AdminUser>> {
+  return adminRequest<AdminUser>(`/admin/users`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+    headers: forwardedForHeader(clientIp),
+  });
 }
 
 /** A token as admin-api lists it — metadata only, never the secret value. */
@@ -186,33 +200,46 @@ async function pruneLoginTokens(userId: string | number): Promise<void> {
   }
 }
 
+export type SignInResult =
+  | { ok: true; user: AdminUser; token: string }
+  | { ok: false; status: number; error: string; refusal: SignInRefusal };
+
 /** Find the user by email, creating them if absent, then mint the login APIToken.
  *
  *  Scopes are `bot,tx` — join meetings and read transcripts. The dashboard reads meetings and
  *  transcripts and nothing else, so it does not mint the `browser` scope the terminal needs
  *  (least privilege: a leaked dashboard token cannot drive a browser session).
+ *
+ *  `clientIp` is the end user's address as `clientAddress()` resolved it (null when unknown); it
+ *  rides to admin-api on the create call so the sign-up log records the person, not this server.
+ *  A failure carries a typed `refusal` — the code `/login` maps to words.
  */
-export async function findOrCreateUserToken(
-  email: string,
-): Promise<{ ok: true; user: AdminUser; token: string } | { ok: false; status: number; error: string }> {
+export async function findOrCreateUserToken(email: string, clientIp?: string | null): Promise<SignInResult> {
+  const fail = (status: number, error: string, body?: string): SignInResult => ({
+    ok: false,
+    status,
+    error,
+    refusal: refusalFromAdmin(status, body),
+  });
+
   const found = await findUserByEmail(email);
 
   let user: AdminUser;
   if (found.ok && found.data) {
     user = found.data;
   } else if (found.notFound) {
-    const created = await createUser(email);
+    const created = await createUser(email, clientIp);
     if (!created.ok || !created.data) {
-      return { ok: false, status: created.status || 500, error: created.error || "Failed to create user" };
+      return fail(created.status || 500, created.error || "Failed to create user", created.error);
     }
     user = created.data;
   } else {
-    return { ok: false, status: found.status || 503, error: found.error || "Failed to look up user" };
+    return fail(found.status || 503, found.error || "Failed to look up user", found.error);
   }
 
   const minted = await mintUserToken(user.id, { scopes: ["bot", "tx"], name: DASHBOARD_LOGIN_TOKEN_NAME });
   if (!minted.ok || !minted.data?.token) {
-    return { ok: false, status: minted.status || 500, error: minted.error || "Failed to mint API token" };
+    return fail(minted.status || 500, minted.error || "Failed to mint API token", minted.error);
   }
   await pruneLoginTokens(user.id);
   return { ok: true, user, token: minted.data.token };
