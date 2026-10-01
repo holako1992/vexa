@@ -4,10 +4,15 @@
  *
  *  Picked in the high range used elsewhere in this repo for local-only test infrastructure, to
  *  stay clear of the dashboard's own dev port (3001) and the real gateway's default (18056).
+ *
+ *  `E2E_PORT_OFFSET` shifts all three by the same amount, so two checkouts on one host can each run
+ *  the suite at once (e.g. `E2E_PORT_OFFSET=100 npm run test:e2e`). The stub server and the
+ *  Playwright workers inherit the variable from the run, so every process agrees on the shift.
  */
-export const GATEWAY_PORT = 18211;
-export const ADMIN_PORT = 18212;
-export const DASHBOARD_PORT = 3100;
+const OFFSET = Number.parseInt(process.env.E2E_PORT_OFFSET ?? "0", 10) || 0;
+export const GATEWAY_PORT = 18211 + OFFSET;
+export const ADMIN_PORT = 18212 + OFFSET;
+export const DASHBOARD_PORT = 3100 + OFFSET;
 
 export const GATEWAY_URL = `http://127.0.0.1:${GATEWAY_PORT}`;
 export const ADMIN_URL = `http://127.0.0.1:${ADMIN_PORT}`;

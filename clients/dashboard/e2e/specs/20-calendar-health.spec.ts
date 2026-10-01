@@ -4,6 +4,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { E2E_GOOGLE_EMAIL } from "../fixtures.mjs";
+import { DASHBOARD_URL } from "../ports.mjs";
 import {
   gatewayRequests,
   resetStub,
@@ -93,7 +94,7 @@ test("a Google connection needing reconnect shows Reconnect, not Sync now, and c
     const requestUrl = new URL(route.request().url());
     const state = requestUrl.searchParams.get("state") ?? "";
     const query = new URLSearchParams({ code: "e2e-test-code", state }).toString();
-    await route.fulfill({ status: 302, headers: { location: `http://127.0.0.1:3100/calendar/google/callback?${query}` } });
+    await route.fulfill({ status: 302, headers: { location: `${DASHBOARD_URL}/calendar/google/callback?${query}` } });
   });
 
   await signIn(page, testEmail("calendar-health-reconnect"));

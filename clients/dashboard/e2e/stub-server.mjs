@@ -23,6 +23,7 @@ import { createServer } from "node:http";
 import {
   ADMIN_API_KEY,
   ADMIN_PORT,
+  DASHBOARD_URL,
   GATEWAY_PORT,
   INTERNAL_API_SECRET,
 } from "./ports.mjs";
@@ -541,7 +542,7 @@ async function handleGateway(req, res) {
       "https://accounts.google.com/o/oauth2/v2/auth?" +
       new URLSearchParams({
         client_id: "e2e-test-client",
-        redirect_uri: "http://127.0.0.1:3100/calendar/google/callback",
+        redirect_uri: `${DASHBOARD_URL}/calendar/google/callback`,
         response_type: "code",
         scope: "https://www.googleapis.com/auth/calendar.readonly",
         access_type: "offline",
@@ -610,7 +611,7 @@ async function handleGateway(req, res) {
       "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?" +
       new URLSearchParams({
         client_id: "e2e-test-client",
-        redirect_uri: "http://127.0.0.1:3100/calendar/microsoft/callback",
+        redirect_uri: `${DASHBOARD_URL}/calendar/microsoft/callback`,
         response_type: "code",
         response_mode: "query",
         scope: "https://graph.microsoft.com/Calendars.Read offline_access",
