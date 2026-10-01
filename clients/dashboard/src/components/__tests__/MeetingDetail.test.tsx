@@ -94,6 +94,47 @@ describe("MeetingDetail", () => {
     expect(screen.queryByText(/isn't in your list/i)).toBeNull();
   });
 
+  it("merges a live meeting's streamed segments onto the REST transcript, by segment id, under the speaker's name", async () => {
+    const liveRow = {
+      ...ROW, status: "active", end_time: null,
+      data: { title: "Live sync", metadata: { speaker_labels: { Amy: "Amy Adams" } } },
+    };
+    const sse = [
+      `id: 1-0|$|0-0\ndata: ${JSON.stringify({ type: "transcript", speaker: "Amy", text: "Hello everyone.", t: 1, tsMs: 1000, completed: true, id: "s1" })}\n\n`,
+      `id: 2-0|$|0-0\ndata: ${JSON.stringify({ type: "transcript", speaker: "Ben", text: "Hi Amy.", t: 3, tsMs: 3000, completed: false, id: "s2" })}\n\n`,
+    ].join("");
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/vexa/meetings/42")) return jsonResponse(liveRow);
+      if (url.endsWith("/api/vexa/transcripts/by-id/42")) {
+        return jsonResponse({ segments: [{ segment_id: "s1", speaker: "Amy", text: "Hello every", start: 1, end: 2, completed: false }] });
+      }
+      if (url.endsWith("/api/vexa/meetings/42/stream")) {
+        // Never closes: a live feed stays open.
+        const body = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new TextEncoder().encode(sse)) });
+        return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      return jsonResponse({ error: "unexpected_url", url }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    // jsdom has no layout; following the live end calls window.scrollTo.
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    renderDetail("42");
+
+    expect(await screen.findByText("Hi Amy.")).not.toBeNull();
+    expect(scrollTo).toHaveBeenCalled();
+    scrollTo.mockRestore();
+    expect(screen.getByText("Hello everyone.")).not.toBeNull();
+    expect(screen.queryByText("Hello every")).toBeNull();
+    const items = screen.getByRole("list", { name: "Transcript" }).querySelectorAll("li");
+    expect(items).toHaveLength(2);
+    expect(screen.getAllByText("Amy Adams")).toHaveLength(1);
+    expect(screen.getByRole("status").getAttribute("data-live-mode")).toBe("streaming");
+    const transcriptReads = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/transcripts/by-id/42"));
+    expect(transcriptReads.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("renders the error state on a network failure, distinct from not-found", async () => {
     fetchMock = vi.fn(async () => {
       throw new TypeError("network down");

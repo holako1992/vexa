@@ -19,7 +19,26 @@
   have forwarded it to every route, not just the one that asked for it).
   The annotate write route carries a body check (`lib/annotations.ts`'s `isAnnotateBody`): a
   rename, or exactly one of the dashboard's two metadata keys, and nothing else. `GET /meetings`
-  admits `metadata` only as a single-tag filter.
+  admits `metadata` only as a single-tag filter. DB-40 adds the one SSE route,
+  `meetings/<id>/stream` → `/agent/meeting/stream?meeting_id=<id>&session_uid=<id>` (`sse: true`),
+  whose query is composed from the numeric id alone.
+- **`liveTranscript.ts`** — DB-40's live feed, pure: an incremental `text/event-stream` parser,
+  `isLiveCursor` (the producer's `Last-Event-ID` shape — `<transcript>|<output>[|<processed>]`,
+  each part a redis stream id, `-` or `$` — the proxy forwards nothing else), `decodeLiveEvent`
+  (agent-api's `transcript` and `retract` events mapped onto the REST segment's own field names,
+  `meeting-end`; every copilot/transport event ignored), and `applyLiveOps`/`pruneLiveOps` — the one
+  merge rule: replace a known `segment_id` in place, append a new one, drop a retracted one, never
+  re-sort.
+- **`liveStream.ts`** — DB-40's browser connection: `fetch` reading the stream (not `EventSource`,
+  which hides the status and reconnects on its own), `streaming`/`polling` modes, reconnect with
+  `Last-Event-ID` after a drop, a doubling backoff when the stream never delivered an event (the
+  gateway relays agent-api's refusal as a `200 text/event-stream` with a JSON body), a silence
+  watchdog above the producer's 15s ping, and `meeting-end` as the only stop.
+- **`sseProxy.ts`** — DB-40's server hop for `route.sse`: streams the gateway's body through
+  unbuffered (opening with an SSE comment so the browser gets the response head at once), forwards
+  only a well-formed `Last-Event-ID`, answers `no-cache, no-store, no-transform` with
+  `X-Accel-Buffering: no`, aborts the upstream when the browser leaves, and passes a non-2xx
+  through with its own status.
 - **`annotations.ts`** — the two caller-owned metadata keys the dashboard writes, `tags` and
   `speaker_labels`: their bounds, readers that skip a malformed value another writer left behind,
   `nextSpeakerLabels` (blank or unchanged removes a label; empty becomes `null`), and the shape

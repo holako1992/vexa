@@ -16,6 +16,7 @@ import type { NextRequest } from "next/server";
 import { resolveUpstream, resolveWriteUpstream, filterQuery, validateBody, type UpstreamRoute } from "@/lib/upstream";
 import { sessionToken } from "@/lib/session";
 import { rawRequestHeaders, rawResponseHeaders } from "@/lib/rawStream";
+import { forwardSse } from "@/lib/sseProxy";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -81,6 +82,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const url = `${GATEWAY_URL}${route.path}${query}`;
 
   if (route.raw) return forwardRaw(url, token, req);
+  if (route.sse) return forwardSse(url, token, req.headers.get("last-event-id"), req.signal);
 
   let upstream: Response;
   try {

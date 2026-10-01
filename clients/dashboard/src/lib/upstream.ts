@@ -39,6 +39,10 @@ export interface UpstreamRoute {
    *  way an absent `query`/`body` is: this is additive, not a second code path for routes that
    *  don't need it. */
   raw?: boolean;
+  /** True for a server-sent-events route — the live transcript feed. `route.ts` hands these to
+   *  `lib/sseProxy.ts`'s `forwardSse`, which streams the answer through unbuffered and forwards a
+   *  well-formed `Last-Event-ID`. */
+  sse?: boolean;
 }
 
 /** Platform ids meeting-api accepts. A transcript path is only built for one of these — an
@@ -125,6 +129,7 @@ const RECORDING_ID = /^\d{1,20}$/;
  *    meetings                        → /meetings                      (the caller's meeting rows)
  *    meetings/<meetingId>            → /meetings/<meetingId>          (owner-scoped, row-keyed)
  *    transcripts/by-id/<meetingId>   → /transcripts/by-id/<meetingId> (owner-scoped, row-keyed)
+ *    meetings/<meetingId>/stream     → /agent/meeting/stream          (live transcript SSE, owner-checked)
  *    transcripts/<platform>/<native> → /transcripts/<platform>/<native>
  * transcripts/search → /transcripts/search (own `q` param)
  *
@@ -166,6 +171,15 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
     const [, id] = segments as [string, string, string];
     if (!/^\d{1,20}$/.test(id)) return null;
     return { path: `/agent/workspace/file?path=meetings/${id}/summary.md` };
+  }
+
+  // The live transcript feed. Both query values are the validated row id and nothing else: the
+  // producer owner-checks `meeting_id` and accepts the row id as `session_uid`. The path carries
+  // its own query, so `route.ts` forwards none of the caller's.
+  if (segments.length === 3 && segments[0] === "meetings" && segments[2] === "stream") {
+    const [, id] = segments as [string, string, string];
+    if (!/^\d{1,20}$/.test(id)) return null;
+    return { path: `/agent/meeting/stream?meeting_id=${id}&session_uid=${id}`, sse: true };
   }
 
   // meetings/<platform>/<native>/participants — read-only roster (invite + speaker sources).

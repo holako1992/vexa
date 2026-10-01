@@ -42,6 +42,7 @@ import {
   E2E_MICROSOFT_EMAIL,
   makeSilentWav,
 } from "./fixtures.mjs";
+import { handleLiveControl, handleLiveStream, resetLive, withLiveSegments } from "./liveStreamStub.mjs";
 
 // The recordings fixture's own audio bytes — generated ONCE at stub startup (never a
 // committed binary blob, see `fixtures.mjs`'s header comment on `makeSilentWav`). Every media
@@ -130,6 +131,7 @@ function resetAll() {
   entitlements = freeEntitlements();
   stripeCustomerId = null;
   releaseSearchHold();
+  resetLive();
   users = new Map();
   nextUserId = 1;
   tokens.clear();
@@ -289,6 +291,7 @@ async function handleGateway(req, res) {
     force = { ...force, ...body };
     return sendJson(res, 200, { ok: true, force });
   }
+  if (await handleLiveControl(url, req, res, readJsonBody, sendJson)) return;
   if (url.pathname === "/__control/searchHold" && req.method === "POST") {
     if (!searchHold) {
       let release;
@@ -397,7 +400,12 @@ async function handleGateway(req, res) {
 
   // GET /transcripts/by-id/<id>
   if (req.method === "GET" && parts.length === 3 && parts[0] === "transcripts" && parts[1] === "by-id") {
-    return sendJson(res, 200, { segments: transcriptFor(parts[2]) });
+    return sendJson(res, 200, { segments: withLiveSegments(parts[2], transcriptFor(parts[2])) });
+  }
+
+  // GET /agent/meeting/stream — the live transcript feed (`liveStreamStub.mjs`).
+  if (req.method === "GET" && url.pathname === "/agent/meeting/stream") {
+    return handleLiveStream(req, res, url, meetings);
   }
 
   // GET /meeting/jitsi-hosts

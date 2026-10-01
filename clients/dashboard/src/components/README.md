@@ -62,6 +62,21 @@ Client components. They receive identity as props (resolved on the server) and f
   not a controlled prop — an `<audio>` element owns its own playback position) and the segment
   playing right now is highlighted (`lib/meetings.ts`'s `activeSegmentIndex`, driven off the
   player's own `onTimeUpdate`), taking over from the `?t=` link's highlight once playback starts.
+  DB-40 makes a live meeting's transcript stream: `useLiveTranscript` holds the streamed events,
+  folded onto the REST transcript by `lib/liveTranscript.ts`'s `applyLiveOps` before
+  `toTranscript` applies the speaker names. While the stream delivers, the 5s tick re-reads only the
+  row (status, end of meeting); while it does not, the tick re-reads the transcript too, exactly as
+  before. `meeting-end` triggers one full reload.
+- `useLiveTranscript` — DB-40's subscription hook over `lib/liveStream.ts`: opens
+  `/api/vexa/meetings/<id>/stream` while the meeting is live, keeps the streamed events in arrival
+  order with a sequence number, and exposes `mark()`/`rebase(mark)` so a REST read drops exactly
+  the events it already reflects — never an event that arrived while that read was in flight, and
+  never re-applies a stale draft over a line the REST read shows confirmed.
+- `LiveFollow` — DB-40's follow-the-live-end behaviour: `useFollowLive` keeps the newest line in
+  view while the reader is at the bottom (measured on every scroll, before new lines grow the
+  page) and stops when they scroll up; `JumpToLive` is the pill (a real `ui/Button`) that brings
+  them back; `LiveStatus` is the one `role="status"` line saying whether lines are streaming or
+  being polled.
 - `ExportMenu` — DB-45's Export dialog: plain text, Markdown, Word (.docx), SubRip and WebVTT
   downloads built in the browser from the lines on screen (`lib/export.ts`), "Copy as Markdown",
   and PDF through the browser's print dialog. No server renderer and no document library.

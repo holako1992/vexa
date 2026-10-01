@@ -19,3 +19,9 @@ own declared query shape** (`upstream.ts`'s `UpstreamRoute.query`), not a set of
 every route this handler resolves — see `upstream.ts`'s header comment on `filterQuery` for why
 that distinction exists (DB-44's `transcripts/search` needed a free-text `q` param, and a global
 allowlist would have forwarded it to every other GET route too).
+
+**An `sse: true` route streams** (DB-40's `meetings/<id>/stream`, the live transcript):
+`lib/sseProxy.ts`'s `forwardSse` pumps the gateway's `text/event-stream` body through chunk by
+chunk, never buffering it, opens with an SSE comment so the browser receives the response head
+at once, forwards the caller's `Last-Event-ID` only when it is the producer's cursor shape, and
+aborts the upstream request when the browser goes away.

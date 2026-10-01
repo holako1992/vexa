@@ -1,6 +1,6 @@
 # `src/lib/__tests__/` — behavioral tests
 
-Seventeen files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
+Twenty files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
 
 - `upstream.test.ts` — the allowlist as a table, weighted towards what it **refuses**: unknown
   edges, traversal segments, a non-numeric row id, an unknown platform or separator-bearing native
@@ -20,7 +20,26 @@ Seventeen files, covering the parts where being wrong is expensive (plus `api.te
   `GET /recordings` (with `meeting_id`/`limit`/`offset`), `GET /recordings/<id>/master` and the
   `raw`/`download` media-byte pair (`type=audio|video` only, a non-numeric recording or media-file
   id refused, `download` and `raw` proven to resolve to the SAME gateway path since the gateway
-  itself treats them as aliases), and `DELETE /recordings/<id>`.
+  itself treats them as aliases), and `DELETE /recordings/<id>`. DB-40 adds the live stream
+  route: a signed, decimal, hex, encoded, traversal, query-bearing or overlong id refused, the
+  gateway's own path and every near-miss tail refused, no write method resolving it, and its
+  query composed from the id alone.
+- `liveTranscript.test.ts` — DB-40's feed, pure: the SSE parser across arbitrary chunk splits,
+  CRLF, comments and the gateway's wrapped JSON refusal (no message); `isLiveCursor` weighted
+  towards what it refuses (a CR/LF header-injection attempt, wrong part counts, empty parts,
+  overlong values); `decodeLiveEvent` on the producer's own payloads, refusing a transcript event
+  without a segment id and ignoring every copilot event; and the merge — a draft refined then
+  confirmed is one line, new segments append in arrival order, retracts remove, the base is never
+  mutated, and a REST snapshot prunes exactly the events it reflects.
+- `liveStream.test.ts` — DB-40's connection against a scripted `fetch`: streaming on
+  `200 text/event-stream`; reconnect after a drop carrying the last cursor as `Last-Event-ID`; a
+  stream that ends without an event, a non-2xx, a non-SSE 200 and a network failure all fall back
+  to polling with no cursor sent; the silence watchdog; `meeting-end` stops it for good; `stop()`
+  aborts and schedules nothing.
+- `sseProxy.test.ts` — DB-40's proxy hop: only a well-formed `Last-Event-ID` is forwarded (a
+  CR/LF injection, garbage and a four-part value are dropped); chunks reach the browser before
+  the upstream finishes; the browser leaving or cancelling aborts the upstream; an upstream
+  failure ends the browser's stream; a gateway refusal keeps its status; a non-SSE 200 is a 502.
 - `annotations.test.ts` — tags and speaker labels, weighted towards what `isAnnotateBody` refuses
   (any metadata key the dashboard does not own, two keys at once, an empty list or map, an
   untrimmed or over-long name, an un-normalized tag), the single-tag list filter, and a speaker

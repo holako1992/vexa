@@ -17,6 +17,9 @@ outright: these assert what the UI does with an answer, never that a backend giv
   state with retry. Collapsing the second into the first is the bug this file exists to prevent.
   `next/navigation`'s mock now also stubs `useSearchParams()` (DB-44's `?t=` scroll-to-segment
   link reads it) — returning an empty `URLSearchParams`, i.e. "no query at all", the ordinary case
-  none of these tests exercises the highlight for.
+  none of these tests exercises the highlight for. DB-40 adds the live case: a live row's
+  streamed segments (a scripted `text/event-stream` body) land on the REST transcript by segment
+  id — a REST draft replaced by its confirmed text, a new segment appended, two lines not three —
+  under the speaker's saved name, with the status line reading `streaming`.
 
 Run: `npm test`.

@@ -64,13 +64,22 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   `serveRangeableBytes` — a REAL `Range` parser, not a canned `206` — against the one generated
   `RECORDING_AUDIO_BYTES` clip every recording plays), and `DELETE /recordings/<id>`. See the
   file's own header comment for the full route table.
+- `liveStreamStub.mjs` — DB-40's `GET /agent/meeting/stream`, faked to the producer's shape: the
+  collector's write path (a pushed segment is persisted for the REST read AND appended to the
+  row's transcript stream; retract and session-end markers), agent-api's `meeting_stream`
+  (owner and `session_uid` checks, an 80-entry replay on a fresh connect, `Last-Event-ID` resume
+  with no replay, `id: <t>|<o>|<p>` + `data:` per event, a 15s ping, `meeting-end`), and the
+  gateway's `_forward_stream`, which relays even a refusal as `200 text/event-stream` with the
+  JSON body as its only bytes. `/__control/live/{push,retract,end,drop,unavailable,connections}`
+  drives it; `stub-server.mjs` mounts it and merges its persisted segments into
+  `GET /transcripts/by-id/<id>`.
 - `playwright.config.ts` — boots BOTH servers via Playwright's `webServer` (the stub, then
   `next dev` pointed at it with the matching env vars) so `npm run test:e2e` runs everything from
   a cold start with no manual setup. Calls `next dev` directly with a literal `--port` rather than
   `npm run dev` (`next dev --port ${PORT:-3001}`) because npm always runs package scripts through
   `cmd.exe` on Windows regardless of the invoking shell, and that bash-style `${VAR:-default}`
   never expands there.
-- `specs/` — the twenty-one specs. See `specs/README.md`.
+- `specs/` — the twenty-seven spec files. See `specs/README.md`.
 
 ## Running it
 

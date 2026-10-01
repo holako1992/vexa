@@ -680,3 +680,54 @@ describe("filterQuery — per-route allowlist", () => {
     expect(filterQuery(resolveUpstream(["meetings", "42"])!, new URLSearchParams("limit=10"))).toBe("");
   });
 });
+
+describe("resolveUpstream — live transcript stream", () => {
+  it("admits GET meetings/<id>/stream as the one SSE route, both query values the row id", () => {
+    expect(resolveUpstream(["meetings", "101", "stream"])).toEqual({
+      path: "/agent/meeting/stream?meeting_id=101&session_uid=101",
+      sse: true,
+    });
+  });
+
+  it("refuses a non-numeric, signed, traversal, encoded or overlong id", () => {
+    for (const id of [
+      "101abc", "-1", "+1", " 101", "101 ", "1.5", "1e3", "../../admin", "1%2f2", "1/2", "1?x=2",
+      "1&session_uid=2", "abc-defg-hij", "", "0x10", "١٠١", "1".repeat(21),
+    ]) {
+      expect(resolveUpstream(["meetings", id, "stream"])).toBeNull();
+    }
+  });
+
+  it("refuses near-miss paths: the gateway's own path, a wrong tail, extra or missing segments", () => {
+    expect(resolveUpstream(["agent", "meeting", "stream"])).toBeNull();
+    expect(resolveUpstream(["agent", "meeting", "stream", "101"])).toBeNull();
+    expect(resolveUpstream(["meeting", "stream"])).toBeNull();
+    expect(resolveUpstream(["meetings", "stream"])).toBeNull();
+    expect(resolveUpstream(["meetings", "101", "Stream"])).toBeNull();
+    expect(resolveUpstream(["meetings", "101", "streams"])).toBeNull();
+    expect(resolveUpstream(["meetings", "101", "stream", "extra"])).toBeNull();
+    expect(resolveUpstream(["meetings", "google_meet", "101", "stream"])).toBeNull();
+    expect(resolveUpstream(["transcripts", "by-id", "101", "stream"])).toBeNull();
+  });
+
+  it("is read-only: no write method resolves it", () => {
+    for (const method of ["POST", "PATCH", "DELETE", "PUT"]) {
+      expect(resolveWriteUpstream(method, ["meetings", "101", "stream"])).toBeNull();
+    }
+  });
+
+  it("composes its whole query itself, so route.ts forwards none of the caller's", () => {
+    const route = resolveUpstream(["meetings", "101", "stream"])!;
+    expect(route.path).toContain("?");
+    expect(route.query).toBeUndefined();
+    expect(route.raw).toBeUndefined();
+    expect(route.path.match(/meeting_id=/g)?.length).toBe(1);
+    expect(route.path.match(/session_uid=/g)?.length).toBe(1);
+  });
+
+  it("marks no other route as SSE", () => {
+    for (const path of [["meetings"], ["meetings", "101"], ["meetings", "101", "summary"], ["transcripts", "by-id", "101"]]) {
+      expect(resolveUpstream(path)?.sse).toBeUndefined();
+    }
+  });
+});

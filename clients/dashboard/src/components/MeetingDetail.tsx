@@ -42,6 +42,9 @@ import { ExportMenu } from "./ExportMenu";
 import { SpeakerNames } from "./SpeakerNames";
 import { MeetingTags } from "./MeetingTags";
 import type { ExportFact } from "@/lib/export";
+import { applyLiveOps } from "@/lib/liveTranscript";
+import { useLiveTranscript } from "./useLiveTranscript";
+import { JumpToLive, LiveStatus, useFollowLive } from "./LiveFollow";
 
 /** Avatar hues, in the same family as the accent so a busy transcript still reads calm.
  *
@@ -66,9 +69,13 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState(false);
   const isLive = useRef(false);
+  // While the meeting is live, streamed segments land on top of the REST transcript; the poll
+  // below reads REST only while the stream is not delivering.
+  const live = useLiveTranscript(meetingId, meeting?.phase === "live", () => void load());
   const lines = useMemo<TranscriptLine[] | null>(
-    () => (segments === null ? null : toTranscript(segments, meeting?.speakerLabels)),
-    [segments, meeting?.speakerLabels],
+    () => (segments === null ? null : toTranscript(applyLiveOps(segments, live.ops), meeting?.speakerLabels)),
+    // `live.version` stands for `live.ops`, which is appended to in place.
+    [segments, live.version, meeting?.speakerLabels], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const lineRefs = useRef<Array<HTMLLIElement | null>>([]);
   const playerRef = useRef<AudioPlayerHandle>(null);
@@ -123,7 +130,9 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
     playerRef.current?.seekTo(at);
   }
 
-  const load = useCallback(async () => {
+  /** Read the row, then its transcript. `rowOnly` skips the transcript while the row is still
+   *  live — the stream is carrying it. */
+  const load = useCallback(async (rowOnly = false) => {
     let row: MeetingRowDTO;
     try {
       row = await getJson<MeetingRowDTO>(`/api/vexa/meetings/${encodeURIComponent(meetingId)}`);
@@ -147,23 +156,27 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
     setMeeting(mapped);
     setError(null);
     isLive.current = mapped.phase === "live";
+    if (rowOnly && isLive.current) return;
 
+    const mark = live.mark();
     try {
       const body = await getJson<{ segments?: SegmentDTO[] }>(
         `/api/vexa/transcripts/by-id/${encodeURIComponent(meetingId)}`,
       );
       setSegments(Array.isArray(body.segments) ? body.segments : []);
+      live.rebase(mark);
     } catch (e) {
       console.warn("transcript load failed", e);
       setError(presentError(e));
     }
-  }, [meetingId]);
+  }, [meetingId, live.mark, live.rebase]);
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
-      await load();
+      // While the stream is delivering, only the row is re-read (status, end of meeting).
+      await load(isLive.current && live.modeRef.current === "streaming");
       if (cancelled) return;
       // A finished meeting's transcript does not change, so only a live one keeps polling.
       if (isLive.current) timer = setTimeout(tick, POLL_LIVE_MS);
@@ -173,7 +186,15 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [load]);
+  }, [load]); // eslint-disable-line react-hooks/exhaustive-deps -- `live.modeRef` is a ref, read at each tick
+
+  const isLiveView = meeting?.phase === "live";
+  const lastLine = lines && lines.length ? lines[lines.length - 1] : null;
+  const follow = useFollowLive(
+    isLiveView,
+    `${lines?.length ?? 0}:${lastLine?.text.length ?? 0}`,
+    highlightAt == null,
+  );
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -311,6 +332,9 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
           <ExportMenu title={meeting.title} facts={exportFacts} lines={lines ?? []} />
         </div>
       </div>
+
+      {isLiveView && <LiveStatus mode={live.mode} />}
+      {isLiveView && !follow.following && <JumpToLive onClick={follow.jumpToLive} />}
 
       {lines === null && <LoadingState label="Loading transcript…" />}
       {lines !== null && lines.length === 0 && (

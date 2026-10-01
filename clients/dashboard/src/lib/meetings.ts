@@ -62,6 +62,10 @@ export interface SegmentDTO {
   end?: number | null;
   speaker?: string | null;
   text?: string | null;
+  /** The producer's identity for the segment — the key a live draft is updated and retracted by. */
+  segment_id?: string | null;
+  /** `false` while the segment is a pending draft, `true` once confirmed. */
+  completed?: boolean | null;
 }
 
 /** Coarse bucket the list groups and filters by. */

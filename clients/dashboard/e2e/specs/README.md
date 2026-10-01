@@ -145,6 +145,16 @@ spec's body is only the property, not the plumbing.
   stores "q3 planning", removing the last tag sends `null`, and the row's other metadata key
   survives; a failed write leaves the chips as they were; a shared meeting shows tags without an
   editor; sorting by title keeps the live meeting first.
+- `27-live-transcript.spec.ts` — DB-40 on live meeting 101: streamed lines appear inside 2s with no
+  `GET /transcripts/by-id` re-read across a poll interval (the row is still re-read); a draft
+  refined then confirmed is one line, a retract removes it, a saved speaker name applies; a drop
+  that comes back refused shows "polling" and re-reads REST every 5s, then streams again once the
+  feed is back; a feed absent from the start polls from the first load; a drop reconnects with a
+  `<id>|$|0-0` `Last-Event-ID` and the gap's line arrives exactly once; the page follows the live
+  end, scrolling up shows "Jump to live" and stops following, the button brings the reader back;
+  `meeting-end` ends the live view, reloads the transcript and nothing reconnects; the allowlist
+  refuses every non-numeric or near-miss stream path and the POST without a gateway call, drops
+  the caller's query and a malformed `Last-Event-ID`, and forwards a well-formed one.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints
