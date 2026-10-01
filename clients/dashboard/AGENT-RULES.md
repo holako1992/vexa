@@ -104,7 +104,7 @@ stays safe. They were learned the hard way; each one has already been broken onc
 27. Source comments: no ticket ids like "DB-60b:" and no "used to". An agent was sent back for this.
 
 ## Added 2026-09-29
-28. Baselines: dashboard `npm test` 323, `npm run test:e2e` 105. admin-api 367 (recipe in rule 15).
+28. Baselines: dashboard `npm test` 402, `npm run test:e2e` 120. admin-api 367 (recipe in rule 15). flows 780 passed / 12 skipped (local venv). Parallel e2e: `E2E_PORT_OFFSET=<n>`.
 29. Bot package tests (`core/meetings/services/bot`) run in `node:22-slim` on a tar copy of the repo
     with `pnpm install --filter "@vexa/bot..." --filter "./core/meetings/modules/*"` and every
     `core/meetings/modules/*` built first; never install on the host. Baseline: 644 checks.

@@ -446,6 +446,9 @@ the known environmental traps.
 | DB-76 dashboard follow-ups | `f86e8064`, `b076ea5b` | Readable sign-up refusal on `/login` (fixed copy per code); client IP forwarded to admin-api as `X-Forwarded-For` when `DASHBOARD_TRUST_PROXY` |
 | DB-12, DB-76 (rest) | `7d6095ba`, `60885a00`, `abc0b4f5`, `a8dd0798` | Sign-in provenance in `users.data.identity`; explicit `email_verified: false` on Free = 0 meetings, reason `identity_unverified` (legacy/admin-created accounts unchanged, overrides win); production dashboard refuses to start without `VEXA_INTERNAL_API_SECRET` |
 | DB-45, DB-43, DB-47 | `32708f96` | Export dialog (.txt/.md/.docx/.srt/.vtt, copy as Markdown, PDF via print); Speakers dialog naming producer speakers (`metadata.speaker_labels`); tags on meetings with a server-side `?tag=` list filter (`metadata.tags`), list sorting; annotate body now checked. e2e 105/105 twice |
+| DB-62 | `09cfbb1a` | flows' summary turn also yields a title and 1–3 tags; an untitled meeting gets the title (an invite's own title wins), a tagless one gets the tags, via meeting-api annotate after a re-read; a person's title is never overwritten (one-round-trip race documented). flows 780 passed / 12 skipped |
+| DB-40 | `f48b39c0` | Live meeting page streams transcript lines over `/agent/meeting/stream` (resume via `Last-Event-ID`), falls back to the 5s poll when the stream is unavailable, "Jump to live" pill |
+| DB-61 | `c3cc6773` | Chat panel on the meeting page (focus = that row) and "Ask across all my meetings" on /search over `/agent/chat`, streamed, Stop and New conversation; strict body allowlist. **Do not ship before the core authorization fix in decision 4.** Merged e2e 120/120 twice, unit 402 |
 
 ### Decisions waiting on the user
 
@@ -467,9 +470,14 @@ the known environmental traps.
    viewers, or (b) the requirement relaxed to "the recipient signs in, then sees it under Shared
    with me". Either way it also needs core list/revoke routes. Pick (a) or (b) on the issue.
 
+4. **A core authorization finding on the `/agent/chat` meeting focus** (found while building
+   DB-61; reproduced). It is not caused by the dashboard and is reported to the maintainers through
+   `SECURITY.md`'s private channel rather than written up here. DB-61 must not ship to users before
+   the core fix lands.
+
 ### Next, in order (updated 2026-10-01)
 
-Items 1, 3, 4 and 6, and DB-45 from item 5, are done. DB-46 is blocked on core (see "Decisions
+Items 1, 3, 4, 6 and 7, and DB-45 from item 5, are done. DB-46 is blocked on core (see "Decisions
 waiting on the user", decision 3). Next up: 2 (needs the user), then 7. Remaining, in order:
 
 1. ~~Run the docker-gated suites~~ — done 2026-09-29, all green, no defects (see Done table).
@@ -480,7 +488,7 @@ waiting on the user", decision 3). Next up: 2 (needs the user), then 7. Remainin
 5. ~~**DB-45 export**~~ — done 2026-10-01. **DB-46 sharing** (`/s/<token>`) — blocked, decision 3.
 6. ~~**DB-43 speaker rename** and **DB-47 tags**~~ — done 2026-10-01 (annotate carries both; no
    core field needed).
-7. **DB-40 live transcript** (SSE via `/agent/meeting/stream`), **DB-61 chat**, **DB-62 auto-title**.
+7. ~~**DB-40 live transcript**, **DB-61 chat**, **DB-62 auto-title**~~ — done 2026-10-01 (DB-61 gated on decision 4).
 8. **DB-10 magic link**, **DB-11 account page**, **DB-20 first-run wizard**, **DB-21 empty/error
    audit**.
 9. **DB-81/82/83 settings** (webhooks UI, API keys, transcription settings).
@@ -499,6 +507,21 @@ Open questions found while working (answer on the issue before building on them)
   `{"tags": ["acme"]}` misses a row tagged `["acme", "internal"]`; the Postgres adapter's JSONB
   `@>` matches it. Test-only (production uses the adapter), but any core test of the tag filter
   would pass or fail for the wrong reason. Fix in the fake: recursive containment.
+- **The gateway relays every `/agent/*` stream refusal as `200 text/event-stream`**
+  (`_forward_stream`, `gateway/app.py`): a 403/422/501 from agent-api arrives as a JSON body in a
+  200, an unreachable agent-api as an empty 200. DB-40 and DB-61 both handle it, but the status
+  belongs to the producer; fix in the gateway (relay the status like `_forward_stream_verbatim`).
+- **Stream `transcript` events omit `end`/`absolute_start_time`** that the stream entry carries;
+  a live meeting's SRT/VTT export lacks end times until the next REST read.
+- **DB-62: an invite's own title is used before a generated one** (the agent's call beyond the
+  spec). Confirm. The generated block's real hit rate on a live model is unmeasured.
+- **DB-61 does not reload chat history** after a page reload (`/agent/sessions/{s}/history` is not
+  allowlisted) and does not resume a dropped answer.
+- **`config-contract` gate is red on the base**: `core/flows/src/config_preflight.py` has drifted
+  from `deploy/contracts/config.v1/preflight.py` (both last touched in b92d8de1).
+- **Two stream proxies** (`lib/sseProxy.ts` for GET SSE, `lib/eventStreamProxy.ts` for the chat
+  POST) were built in parallel; they overlap and could become one.
+- **`docs/docs/api/agent.mdx`** lacks the `turn-complete` frame, `context` and `turn_id`.
 - **DB-45 PDF is the browser's print dialog**, not a server-rendered file: a Unicode PDF needs an
   embedded font, and no Category-A font licence was available to vendor. The .docx is written by
   `lib/export.ts` itself (stored ZIP, three parts) instead of a `docx` dependency. It opens in
