@@ -445,6 +445,7 @@ the known environmental traps.
 | Docker-gated suites | none needed | admin-api 326/326 incl. every never-run testcontainer file; bot `npm test` 644 checks incl. `max-active-cap`. Recipe in AGENT-RULES rule 15 |
 | DB-76 dashboard follow-ups | `f86e8064`, `b076ea5b` | Readable sign-up refusal on `/login` (fixed copy per code); client IP forwarded to admin-api as `X-Forwarded-For` when `DASHBOARD_TRUST_PROXY` |
 | DB-12, DB-76 (rest) | `7d6095ba`, `60885a00`, `abc0b4f5`, `a8dd0798` | Sign-in provenance in `users.data.identity`; explicit `email_verified: false` on Free = 0 meetings, reason `identity_unverified` (legacy/admin-created accounts unchanged, overrides win); production dashboard refuses to start without `VEXA_INTERNAL_API_SECRET` |
+| DB-45, DB-43, DB-47 | `32708f96` | Export dialog (.txt/.md/.docx/.srt/.vtt, copy as Markdown, PDF via print); Speakers dialog naming producer speakers (`metadata.speaker_labels`); tags on meetings with a server-side `?tag=` list filter (`metadata.tags`), list sorting; annotate body now checked. e2e 105/105 twice |
 
 ### Decisions waiting on the user
 
@@ -458,19 +459,27 @@ the known environmental traps.
    and calendar id as associated data) or replace it with AES-GCM from `cryptography`, which is
    Category A but a new compiled dependency. **Do this before DB-31 ships.** Until DB-31 exists,
    nobody can store a Google token.
+3. **DB-46 sharing needs core work first.** The core can mint a share
+   (`POST /meetings/{id}/share`) and redeem one (`POST /transcripts/share/accept`), but it has no
+   route to list or revoke a meeting's shares, and redeeming requires a signed-in user (it adds
+   them to `transcript_viewers`). DB-46's "an incognito browser reads a shared transcript without a
+   dashboard account" therefore needs either (a) a new core read-by-token route for anonymous
+   viewers, or (b) the requirement relaxed to "the recipient signs in, then sees it under Shared
+   with me". Either way it also needs core list/revoke routes. Pick (a) or (b) on the issue.
 
-### Next, in order (updated 2026-09-29)
+### Next, in order (updated 2026-10-01)
 
-Items 1, 3 and 4 below are done. Next up: 2 (needs the user), then 5 (DB-45, DB-46). Remaining, in order:
+Items 1, 3, 4 and 6, and DB-45 from item 5, are done. DB-46 is blocked on core (see "Decisions
+waiting on the user", decision 3). Next up: 2 (needs the user), then 7. Remaining, in order:
 
 1. ~~Run the docker-gated suites~~ — done 2026-09-29, all green, no defects (see Done table).
 2. **Stripe webhook ingress** (decision 1 above, still open — needs the user). Until it exists,
    DB-73/DB-74b/DB-78 do nothing live: no plan change, no dunning email.
 3. ~~DB-76 dashboard follow-ups~~ — done 2026-09-29.
 4. ~~DB-12 identity oracle, then the rest of DB-76~~ — done 2026-09-29. Open point: Microsoft counts as verified (see open questions).
-5. **DB-45 export** (SRT/VTT/DOCX/PDF, Category-A libs only) and **DB-46 sharing** (`/s/<token>`).
-6. **DB-43 speaker rename** (verify annotate can carry a speaker map; else add a core field) and
-   **DB-47 tags**.
+5. ~~**DB-45 export**~~ — done 2026-10-01. **DB-46 sharing** (`/s/<token>`) — blocked, decision 3.
+6. ~~**DB-43 speaker rename** and **DB-47 tags**~~ — done 2026-10-01 (annotate carries both; no
+   core field needed).
 7. **DB-40 live transcript** (SSE via `/agent/meeting/stream`), **DB-61 chat**, **DB-62 auto-title**.
 8. **DB-10 magic link**, **DB-11 account page**, **DB-20 first-run wizard**, **DB-21 empty/error
    audit**.
@@ -485,6 +494,16 @@ golden (contract text), and one `TokenCipherError` message string in `token_ciph
 
 Open questions found while working (answer on the issue before building on them):
 
+- **meeting-api's in-memory store does not mirror `@>` for arrays.** `InMemoryTranscriptStore`'s
+  `metadata_matches` (`collector/fakes.py`) compares each filter value with `==`, so
+  `{"tags": ["acme"]}` misses a row tagged `["acme", "internal"]`; the Postgres adapter's JSONB
+  `@>` matches it. Test-only (production uses the adapter), but any core test of the tag filter
+  would pass or fail for the wrong reason. Fix in the fake: recursive containment.
+- **DB-45 PDF is the browser's print dialog**, not a server-rendered file: a Unicode PDF needs an
+  embedded font, and no Category-A font licence was available to vendor. The .docx is written by
+  `lib/export.ts` itself (stored ZIP, three parts) instead of a `docx` dependency. It opens in
+  python-docx with every line, Unicode included; it has NOT been opened in Word, Pages or Google
+  Docs (LibreOffice in the Linux container refused every .docx, including python-docx's own).
 - **Microsoft sign-ins count as email-verified** (DB-12). Entra multi-tenant `email` claims can be
   set by a tenant admin and are not proof of mailbox control (the "nOAuth" class). Since the
   account key is the email, this is also an account-linking risk that predates DB-12. For DB-94:
