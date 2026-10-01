@@ -17,6 +17,7 @@ import { resolveUpstream, resolveWriteUpstream, filterQuery, validateBody, type 
 import { sessionToken } from "@/lib/session";
 import { rawRequestHeaders, rawResponseHeaders } from "@/lib/rawStream";
 import { forwardSse } from "@/lib/sseProxy";
+import { forwardEventStream } from "@/lib/eventStreamProxy";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -114,6 +115,7 @@ async function forwardWrite(req: NextRequest, ctx: { params: Promise<{ path: str
   // upstream.ts) gets it checked before anything is forwarded; a route with no shape declared
   // admits any body unchanged, exactly as before.
   if (!validateBody(route, body ?? "")) return json({ error: "invalid_body" }, 400);
+  if (route.eventStream) return forwardEventStream(url, token, body ?? "", req.signal);
 
   let upstream: Response;
   try {

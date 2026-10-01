@@ -16,6 +16,7 @@ import { formatClock, platformLabel } from "@/lib/meetings";
 import { groupHitsByMeeting, highlightSnippet, type SearchResponseDTO } from "@/lib/search";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
 import { Input } from "./ui";
+import { AskAllMeetings } from "./AskAllMeetings";
 
 const SEARCH_LIMIT = 40;
 
@@ -94,7 +95,9 @@ export function SearchView() {
         />
       </form>
 
-      {!q && <EmptyState title="Search across every meeting you've sent a bot to." hint="Try a word or phrase someone said." />}
+      <AskAllMeetings />
+
+      {!q &&<EmptyState title="Search across every meeting you've sent a bot to." hint="Try a word or phrase someone said." />}
 
       {q && loading && <LoadingState label={`Searching for "${q}"…`} />}
 

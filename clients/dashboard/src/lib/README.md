@@ -22,6 +22,9 @@
   admits `metadata` only as a single-tag filter. DB-40 adds the one SSE route,
   `meetings/<id>/stream` → `/agent/meeting/stream?meeting_id=<id>&session_uid=<id>` (`sse: true`),
   whose query is composed from the numeric id alone.
+  `POST /agent/chat` (streamed, `eventStream`) and
+  `POST /agent/chat/reset` admit only the bodies `lib/chat.ts` builds; every other `/agent/*` path
+  stays refused.
 - **`liveTranscript.ts`** — DB-40's live feed, pure: an incremental `text/event-stream` parser,
   `isLiveCursor` (the producer's `Last-Event-ID` shape — `<transcript>|<output>[|<processed>]`,
   each part a redis stream id, `-` or `$` — the proxy forwards nothing else), `decodeLiveEvent`
@@ -88,6 +91,18 @@
   parses the note's inline `**strong**` / `_emphasis_` markdown into safe segments
   (`parseInlineEmphasis`) — an underscore is a delimiter only at a word boundary, so
   `snake_case_name` stays literal.
+- **`chat.ts`** — DB-61's assistant chat wire. Builds the two bodies the panels send to
+  `POST /agent/chat` (one meeting row in its own `dashboard-meeting-<id>` thread, or the search
+  page's `dashboard-all-meetings` thread with the schedule digest and no focus) and the
+  `/agent/chat/reset` body; `isChatTurnBody`/`isChatResetBody`, the exact-shape checks
+  `upstream.ts` runs on them; `SseDecoder`, which reads the producer's `data:` frames and keeps any
+  non-SSE text (an agent-api refusal the gateway relays inside a 200) as `stray`;
+  `streamChatTurn`/`resetChat`; and the plain-words messages for each way a turn ends without an
+  answer.
+- **`eventStreamProxy.ts`** — DB-61's streamed write hop for `route.ts` (`eventStream: true` in
+  `upstream.ts`): relays the gateway's `text/event-stream` chunk by chunk with no response
+  timeout, aborts the upstream fetch when the browser disconnects, passes a non-stream refusal
+  back as JSON with its own status, and sends only its own fixed response headers.
 - **`entitlements.ts`** — shapes and pure formatters for `GET /user/entitlements` (DB-74's billing
   page, DB-75's paywall): usage meters that never render unknown (`null`) as `0`, an unlimited
   plan's limit (`null`) that never renders as a number, the reset date in words, and

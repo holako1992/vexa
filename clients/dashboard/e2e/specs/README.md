@@ -155,6 +155,17 @@ spec's body is only the property, not the plumbing.
   `meeting-end` ends the live view, reloads the transcript and nothing reconnects; the allowlist
   refuses every non-numeric or near-miss stream path and the POST without a gateway call, drops
   the caller's query and a malformed `Last-Event-ID`, and forwards a well-formed one.
+- `28-meeting-chat.spec.ts` — DB-61's chat against the stub's `/agent/chat`, which answers the way
+  the gateway relays agent-api (always `200 text/event-stream`). The first words of an answer are
+  on screen while the stub still holds the stream open, the rest after release, `**Friday**` as a
+  real `<strong>`; the body the gateway receives is exactly the meeting-scoped shape for row 102;
+  Stop closes the stream (the stub counts a connection dropped before the turn finished); no
+  model credential, a model failure, agent-api not wired, agent-api down (an empty 200) and no
+  agent domain (a 404) each end as a sentence, never a spinner; New conversation resets
+  `dashboard-meeting-102`; `/search` sends the across-meetings shape with no focus; shared meeting
+  104 has no chat; hand-made bodies outside the panels' shapes are 400s that never reach the
+  gateway; and the panel opens, asks and closes (focus back on its button) from the keyboard.
+  Proved against a buffering proxy as a negative control: the streaming and Stop tests fail.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

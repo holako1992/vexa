@@ -1,7 +1,7 @@
 /** Property 7 — the allowlist refuses what it does not recognise, and refuses it BEFORE any
  *  upstream request is made.
  *
- *  Expected: `/api/vexa/agent/chat` (a real gateway surface the dashboard does not proxy) and
+ *  Expected: a GET to `/api/vexa/agent/chat` (the dashboard proxies only the POST chat turn there) and
  * `/api/vexa/recordings/700001` (admits the LIST and the master/media-byte routes, never
  *  single-recording detail — see `lib/upstream.ts`'s `resolveRecordingsUpstream` comment) both
  *  return 404 from the DASHBOARD, and the stub gateway's request log gains no entry for either

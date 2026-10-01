@@ -40,6 +40,25 @@ Twenty files, covering the parts where being wrong is expensive (plus `api.test.
   CR/LF injection, garbage and a four-part value are dropped); chunks reach the browser before
   the upstream finishes; the browser leaving or cancelling aborts the upstream; an upstream
   failure ends the browser's stream; a gateway refusal keeps its status; a non-SSE 200 is a 502.
+- `upstream.test.ts` (DB-61 rows) — `POST agent/chat` resolves as the one streamed write and
+  `agent/chat/reset` as JSON; every other `/agent/*` path and method stays refused. The body rows
+  are weighted towards refusal: unknown or legacy keys (`active`, `subject`, `turn_id`), a blank,
+  oversized, NUL-carrying or non-string prompt, a session that is not the focused row's own
+  dashboard thread (`main`, another row's thread), a focus naming a workspace, file, `today`, a
+  non-numeric or over-long row id, an unknown platform or status, or an extra `title`, and an
+  across-meetings turn that carries a focus or a surface; resets of any thread but the
+  dashboard's own.
+- `chat.test.ts` — the bodies the panels build pass the proxy's own check (a link-less planned
+  meeting puts its row id in `native_id`; a non-IANA time zone is dropped, not sent);
+  `SseDecoder` against the producer's frame set, keepalive comments, `id:` lines, a frame split
+  across chunks and CRLF, a final frame with no blank line, and a relayed refusal kept as `stray`;
+  `streamChatTurn` posting the exact body and ending `complete`, `cut` (an empty 200, a relayed
+  refusal), `aborted`, or throwing the refusal's status; and the sentence for each refusal and
+  each cut stream.
+- `eventStreamProxy.test.ts` — chunks reach the browser before the upstream finishes; cancelling
+  downstream aborts the upstream fetch and cancels its body; the browser request's abort reaches
+  the upstream request; a gateway refusal keeps its status as JSON; a 200 that is not an event
+  stream becomes a 502; only the proxy's own headers are sent (an upstream `Set-Cookie` is not).
 - `annotations.test.ts` — tags and speaker labels, weighted towards what `isAnnotateBody` refuses
   (any metadata key the dashboard does not own, two keys at once, an empty list or map, an
   untrimmed or over-long name, an un-normalized tag), the single-tag list filter, and a speaker

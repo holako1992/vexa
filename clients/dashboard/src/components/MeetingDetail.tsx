@@ -41,6 +41,7 @@ import { AudioPlayer, type AudioPlayerHandle } from "./AudioPlayer";
 import { ExportMenu } from "./ExportMenu";
 import { SpeakerNames } from "./SpeakerNames";
 import { MeetingTags } from "./MeetingTags";
+import { MeetingChat } from "./MeetingChat";
 import type { ExportFact } from "@/lib/export";
 import { applyLiveOps } from "@/lib/liveTranscript";
 import { useLiveTranscript } from "./useLiveTranscript";
@@ -300,6 +301,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
       )}
 
       <SummaryPanel meetingId={meetingId} meeting={meeting} />
+      <MeetingChat meeting={meeting} />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center print:hidden">
         <Input

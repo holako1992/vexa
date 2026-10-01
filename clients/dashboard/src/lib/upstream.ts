@@ -9,6 +9,7 @@
  *  Pure and dependency-free so the table can be tested directly (src/lib/__tests__).
  */
 import { isAnnotateBody, isTagFilterValue } from "./annotations";
+import { isChatResetBody, isChatTurnBody } from "./chat";
 
 /** A per-parameter shape check: `true` admits the raw string value, `false` drops it. Never a
  *  transform — filterQuery forwards the caller's own bytes for whatever it admits, it does not
@@ -43,6 +44,10 @@ export interface UpstreamRoute {
    *  `lib/sseProxy.ts`'s `forwardSse`, which streams the answer through unbuffered and forwards a
    *  well-formed `Last-Event-ID`. */
   sse?: boolean;
+  /** True for a write whose answer is a `text/event-stream` (the assistant's chat turn).
+   *  `route.ts` relays it chunk by chunk with no response timeout, and closes the upstream when
+   *  the browser disconnects (`lib/eventStreamProxy.ts`). */
+  eventStream?: boolean;
 }
 
 /** Platform ids meeting-api accepts. A transcript path is only built for one of these — an
@@ -437,6 +442,17 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     // decision to make, not this allowlist's — the check here is only the wire shape.
     if (segments.length === 2 && segments[0] === "billing" && segments[1] === "checkout") {
       return { path: "/billing/checkout", body: isCheckoutBody };
+    }
+    // POST /agent/chat — one assistant turn, streamed back as SSE. `isChatTurnBody`
+    // (lib/chat.ts) admits exactly the two shapes the chat panels send: a turn focused on one
+    // meeting row in that meeting's own dashboard thread, or the search page's across-meetings
+    // turn. agent-api derives the user from the key, never from the body.
+    if (segments.length === 2 && segments[0] === "agent" && segments[1] === "chat") {
+      return { path: "/agent/chat", body: isChatTurnBody, eventStream: true };
+    }
+    // POST /agent/chat/reset {session} — "New conversation". Only the dashboard's own threads.
+    if (segments.length === 3 && segments[0] === "agent" && segments[1] === "chat" && segments[2] === "reset") {
+      return { path: "/agent/chat/reset", body: isChatResetBody };
     }
     // POST /billing/portal — the Manage-subscription button. 409 with no body when the
     // caller has never checked out (`create_billing_portal`, `main.py`) — the dashboard shows that

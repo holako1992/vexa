@@ -5,7 +5,7 @@
  *  TWO listeners in one process:
  *
  *    - the GATEWAY (`GATEWAY_PORT`) — every path `src/lib/upstream.ts` will ever forward to, plus
- *      the write paths (`resolveWriteUpstream`). Anything else (e.g. `/recordings`, `/agent/chat`)
+ *      the write paths (`resolveWriteUpstream`). Anything else (e.g. `GET /recordings/<id>`, `/agent/sessions`)
  *      still gets a response here (404), but the point of spec 07 is that the dashboard's OWN
  *      allowlist never lets such a request reach this process at all — if this stub's request
  *      log ever shows one of those paths, the dashboard's allowlist has a hole.
@@ -107,6 +107,21 @@ function releaseSearchHold() {
   searchHold = null;
 }
 
+/** The assistant chat (`POST /agent/chat`, `POST /agent/chat/reset`). `mode` picks how the next
+ *  turns answer (`/__control/chatMode`); `hold` parks a turn after its first words until
+ *  `/__control/chatRelease`; `closedEarly` counts turns whose connection the dashboard closed
+ *  before the turn finished (the Stop proof). See `answerChat` below for each mode. */
+let chat = freshChatState();
+
+function freshChatState() {
+  return { mode: "answer", hold: null, closedEarly: 0, finished: 0 };
+}
+
+function releaseChatHold() {
+  if (chat.hold) chat.hold.release();
+  chat.hold = null;
+}
+
 let users = new Map(); // email -> { id, email, name }
 let nextUserId = 1;
 const tokens = new Map(); // token string -> { id, userId }
@@ -132,6 +147,8 @@ function resetAll() {
   stripeCustomerId = null;
   releaseSearchHold();
   resetLive();
+  releaseChatHold();
+  chat = freshChatState();
   users = new Map();
   nextUserId = 1;
   tokens.clear();
@@ -276,6 +293,92 @@ function serveRangeableBytes(req, res, buffer, contentType) {
   res.end(slice);
 }
 
+// ── the assistant chat ───────────────────────────────────────────────────────────────────────
+
+/** agent-api's `_model_creds_error_message()` (control_plane/api.py) for a deployment with no
+ *  model credential, verbatim apart from the key list it reads from config. */
+const NO_MODEL_CREDENTIALS =
+  "No model credentials are configured, so the agent cannot run. Set one of ANTHROPIC_API_KEY, " +
+  "CLAUDE_CODE_OAUTH_TOKEN in the deployment environment (deploy/compose/.env for the compose stack, " +
+  "then `make all`), or add a custom endpoint under Settings → Models.";
+
+/** `ChatBody`'s own keys (`extra = "forbid"`): anything else is agent-api's 422. */
+const CHAT_BODY_KEYS = new Set(["prompt", "subject", "session", "active", "context", "turn_id"]);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Answer one `POST /agent/chat` the way the gateway relays agent-api: ALWAYS `200
+ *  text/event-stream` (the gateway's `_forward_stream` mints its own envelope and copies the
+ *  upstream bytes verbatim), each frame `id: <stream id>\ndata: <json>\n\n`, keepalive comments
+ *  while idle, and `turn-complete` last. Modes:
+ *    answer         — deltas, `done {ok: true}`, `commit`, `turn-complete`.
+ *    hold           — the first delta, then waits for `/__control/chatRelease` before the rest.
+ *    noCredentials  — agent-api's preflight refusal: one `error` frame and `turn-complete`.
+ *    modelFailure   — the worker's model failure: `done {ok: false, reply}` and `turn-complete`.
+ *    relayNotWired  — agent-api's `501 {"detail": "stream relay not wired"}`, relayed inside the 200.
+ *    unreachable    — agent-api down: the gateway's 200 closes with zero bytes.
+ *    absent         — a deployment without the agent domain: the gateway's own 404. */
+async function answerChat(req, res, body) {
+  if (chat.mode === "absent") return sendJson(res, 404, { detail: "Not Found" });
+  res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+  let open = true;
+  res.on("close", () => { if (open && !res.writableFinished) chat.closedEarly += 1; open = false; });
+  const finish = () => { open = false; chat.finished += 1; res.end(); };
+
+  const extra = Object.keys(body).filter((k) => !CHAT_BODY_KEYS.has(k));
+  if (typeof body.prompt !== "string" || extra.length) {
+    res.write(JSON.stringify({ detail: [{ type: extra.length ? "extra_forbidden" : "missing", loc: ["body", extra[0] ?? "prompt"] }] }));
+    return finish();
+  }
+  if (chat.mode === "unreachable") return finish();
+  if (chat.mode === "relayNotWired") {
+    res.write(JSON.stringify({ detail: "stream relay not wired" }));
+    return finish();
+  }
+
+  let seq = 0;
+  const frame = (ev) => { if (open) res.write(`id: 1700000000000-${seq++}\ndata: ${JSON.stringify(ev)}\n\n`); };
+  const focus = body.context && body.context.focus;
+  const opening = focus && focus.kind === "meeting" ? `Meeting ${focus.meeting_id} (${focus.status}): ` : "Across your meetings: ";
+  const rest = focus && focus.kind === "meeting" ? "the team agreed to ship on **Friday**." : "Acme came up in _Design Review_.";
+
+  res.write(": keepalive\n\n");
+  if (chat.mode === "noCredentials") {
+    frame({ type: "error", message: NO_MODEL_CREDENTIALS });
+    frame({ type: "turn-complete" });
+    return finish();
+  }
+  if (chat.mode === "modelFailure") {
+    frame({ type: "done", reply: "Model credentials are missing or expired for this deployment.", sessionId: null, ok: false });
+    frame({ type: "turn-complete", turn_id: null });
+    return finish();
+  }
+  frame({ type: "message-delta", text: opening });
+  if (chat.mode === "hold") {
+    if (!chat.hold) {
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      chat.hold = { gate, release };
+    }
+    const gate = chat.hold.gate;
+    while (open) {
+      const released = await Promise.race([gate.then(() => true), sleep(1000).then(() => false)]);
+      if (released) break;
+      if (open) res.write(": keepalive\n\n");
+    }
+    if (!open) return;
+  } else {
+    await sleep(150);
+  }
+  frame({ type: "tool-call", tool: "Read", args: { file_path: "meetings/summary.md" }, callId: "call-1" });
+  frame({ type: "tool-result", callId: "call-1", ok: true, summary: "read" });
+  frame({ type: "message-delta", text: rest });
+  frame({ type: "done", reply: opening + rest, sessionId: "e2e-session", ok: true });
+  frame({ type: "commit", sha: "e2e0000" });
+  frame({ type: "turn-complete", turn_id: null });
+  if (open) finish();
+}
+
 // ── the gateway ──────────────────────────────────────────────────────────────────────────────
 
 async function handleGateway(req, res) {
@@ -314,6 +417,18 @@ async function handleGateway(req, res) {
     const body = await readJsonBody(req);
     stripeCustomerId = body.present ? "cus_e2e_test" : null;
     return sendJson(res, 200, { ok: true, stripeCustomerId });
+  }
+  // The assistant chat's remote control — see `answerChat` for the modes.
+  if (url.pathname === "/__control/chatMode" && req.method === "POST") {
+    chat.mode = (await readJsonBody(req)).mode || "answer";
+    return sendJson(res, 200, { ok: true, mode: chat.mode });
+  }
+  if (url.pathname === "/__control/chatRelease" && req.method === "POST") {
+    releaseChatHold();
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === "/__control/chat") {
+    return sendJson(res, 200, { mode: chat.mode, closedEarly: chat.closedEarly, finished: chat.finished });
   }
   // The "a live row on a later page stays visible" spec: flip one fixture meeting's status
   // without going through a real bot lifecycle, so the spec can prove the POLL's re-fetch window
@@ -411,6 +526,15 @@ async function handleGateway(req, res) {
   // GET /meeting/jitsi-hosts
   if (req.method === "GET" && parts.length === 2 && parts[0] === "meeting" && parts[1] === "jitsi-hosts") {
     return sendJson(res, 200, { hosts: JITSI_HOSTS });
+  }
+
+  // POST /agent/chat — one streamed assistant turn (`answerChat`); POST /agent/chat/reset {session}.
+  if (req.method === "POST" && parts.length === 2 && parts[0] === "agent" && parts[1] === "chat") {
+    return answerChat(req, res, await readAndLogBody(req, logEntry));
+  }
+  if (req.method === "POST" && parts.length === 3 && parts[0] === "agent" && parts[1] === "chat" && parts[2] === "reset") {
+    await readAndLogBody(req, logEntry);
+    return sendJson(res, 200, { ok: true });
   }
 
   // GET /agent/workspace/file?path=meetings/<id>/summary.md — the summary door. The dashboard
@@ -835,7 +959,7 @@ async function handleGateway(req, res) {
   }
 
   // Anything else — including the paths the dashboard's own allowlist must never forward
-  // (e.g. /agent/chat, GET /recordings/<id> single-detail). If a spec sees THIS response in its
+  // (e.g. GET /agent/chat, GET /recordings/<id> single-detail). If a spec sees THIS response in its
   // own network log, the dashboard proxy forwarded a request its allowlist should have refused
   // with a 404 of its own.
   return sendJson(res, 404, { error: "not_found", note: "stub: no such gateway route" });

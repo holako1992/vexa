@@ -109,6 +109,20 @@ Client components. They receive identity as props (resolved on the server) and f
   `_none recorded in this meeting._` placeholder) renders as `<strong>`/`<em>` through its local
   `Inline` component, wired to `lib/summary.ts`'s `parseInlineEmphasis` — never as literal
   underscores, and never through raw HTML.
+- `ChatPanel` — DB-61's conversation with the assistant over `POST /agent/chat` for one scope
+  (`lib/chat.ts`): a real form, the answer rendered as it streams, a "Working…" line while the
+  agent runs a tool, Stop (closes the stream and keeps what arrived), New conversation (resets
+  the thread through `/agent/chat/reset`, toast on either outcome), and every no-answer case as a
+  sentence in place of the answer: no model credential, a model failure, agent-api not wired or
+  down, no agent domain on this deployment. Answer text is paragraphs plus `parseInlineEmphasis`,
+  never `dangerouslySetInnerHTML`.
+- `MeetingChat` — DB-61's "Ask about this meeting" button and the side panel it opens, holding a
+  `ChatPanel` scoped to that meeting row. Owner only: it renders nothing for `meeting.shared`.
+  Not modal (the transcript stays usable beside it); Escape or the close button hides it and
+  returns focus to the button, and hiding keeps the conversation mounted.
+- `AskAllMeetings` — DB-61's "Ask across all my meetings" section on `/search`: a collapsed
+  `ChatPanel` with no meeting focus and the schedule digest on. It answers from the person's
+  workspace (each meeting's summary note) and schedule, not from full transcripts.
 - `BillingView` — DB-74's read-only billing page (`/billing`): plan, usage meters, reset date,
   and any past-due / cancel-at-period-end note, from `GET /api/vexa/user/entitlements`
   (`lib/entitlements.ts`'s formatters). No checkout or portal buttons — see the file's own header
