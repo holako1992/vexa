@@ -286,6 +286,133 @@ def prompt_for(ctx, fname: str, default: str | None = None) -> str:
             return live
     return default if default is not None else _prompt(fname)
 
+# ── THE REPORT'S OWN LABELS: a title and tags for a meeting nobody named ─────────────────────
+# The post-meeting turn is the one model call this flow makes per meeting, and it already reads
+# the whole transcript to write the report. So the same reply also carries a short TITLE and up to
+# three TAGS, as a front-matter block at the very top — the one place every reader of the report
+# already drops: `_readable` strips a leading front-matter block before a mail, a desk drop or the
+# summary note ever shows the text. No second turn, no second bill, and nothing new for any
+# reader to learn to ignore. Module-level for the same reason as the note-path recipe below:
+# these are pure, and a contract nothing can call directly is a contract nothing can test.
+_LABELS_RULE = (
+    "\n\nOPEN YOUR REPLY WITH A FRONT-MATTER BLOCK, and nothing before it:\n"
+    "---\ntitle: <what this meeting was about, in at most 8 words>\n"
+    "tags: [<one to three short topic tags>]\n---\n"
+    "The title names the subject (\"Acme renewal pricing\", not \"Meeting notes\" or a date). "
+    "Tags are lower-case topics a person would file this meeting under — never people's names, "
+    "never the word meeting. The block is read by Vexa and removed before anyone sees the report.")
+
+#: The longest generated title written onto a meeting row. A person's own title is never cut.
+GENERATED_TITLE_MAX = 80
+#: How many generated tags a meeting gets.
+GENERATED_TAGS_MAX = 3
+#: The dashboard's own bound on one stored tag (`clients/dashboard/src/lib/annotations.ts`
+#: `MAX_TAG_CHARS`), counted the way that file counts it: UTF-16 code units.
+TAG_MAX_CHARS = 32
+#: JavaScript's `\s` (and therefore `String.prototype.trim`), spelled out: the dashboard's
+#: `normalizeTag` collapses exactly this set, so a tag normalized here must collapse the same one.
+_JS_SPACE = "[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+_PLACEHOLDER_TITLES = frozenset({"untitled", "untitled meeting", "meeting", "meeting notes",
+                                 "meeting summary", "notes", "summary", "title"})
+
+
+def _split_frontmatter(note: str) -> tuple:
+    """`(front-matter text or None, body)` for a note that may open with a `---` block. The one
+    delimiting rule both `_readable` (which drops the block) and `_report_labels` (which reads
+    it) use, so the two can never disagree about where the report starts."""
+    body = note or ""
+    if body.lstrip().startswith("---"):
+        rest = body.lstrip()[3:]
+        end = rest.find("\n---")
+        if end != -1:
+            return rest[:end], rest[end + 4:]
+    return None, body
+
+
+def _unquote(value: str) -> str:
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        inner = v[1:-1]
+        return inner.replace('\\"', '"').replace("\\\\", "\\") if v[0] == '"' else inner
+    return v
+
+
+def stored_tag(raw) -> str | None:
+    """A tag in the dashboard's STORED form, or None — the Python twin of `normalizeTag` in
+    `clients/dashboard/src/lib/annotations.ts`: trimmed, inner whitespace collapsed to one space,
+    lower-case, at most 32 UTF-16 code units, no control characters. The dashboard ignores any
+    entry that is not already in this form, so a tag that would not survive it is dropped here."""
+    import re
+    if not isinstance(raw, str):
+        return None
+    t = re.sub(f"{_JS_SPACE}+", " ", raw)
+    t = re.sub(f"^{_JS_SPACE}+|{_JS_SPACE}+$", "", t).lower()
+    if not t or len(t.encode("utf-16-le")) // 2 > TAG_MAX_CHARS:
+        return None
+    if re.search("[\x00-\x1f\x7f]", t):
+        return None
+    return t
+
+
+def _plain_title(raw, cap: int = GENERATED_TITLE_MAX) -> str | None:
+    """A title as plain text: control characters and markdown emphasis gone, whitespace collapsed,
+    cut at a word boundary within `cap`. None when nothing meaningful is left — including the
+    placeholder names that would tell a person less than the dashboard's own fallback does."""
+    import re
+    if not isinstance(raw, str):
+        return None
+    t = re.sub("[\x00-\x1f\x7f]", " ", raw)
+    t = re.sub(r"[*_`]+", "", t)
+    t = re.sub(r"^\s*#+\s*", "", t)
+    t = _unquote(re.sub(r"\s+", " ", t).strip())
+    if len(t) > cap:
+        cut = t[:cap + 1].rsplit(" ", 1)[0]
+        t = cut if cut and len(cut) <= cap else t[:cap]
+    t = t.strip(" ,;:-–—")
+    if not t or t.lower().rstrip(".") in _PLACEHOLDER_TITLES:
+        return None
+    return t
+
+
+def _report_labels(report: str) -> tuple:
+    """`(title or None, [tags])` off the report's leading front-matter block (`_LABELS_RULE`).
+
+    A deliberately small reader — `key: value` lines, `tags` as `[a, b]`, `a, b` or a `- a` list —
+    because the block is a two-key contract this file states itself, and the flows engine stays
+    stdlib-only. Anything it cannot read is simply absent: a report with no block, or a block with
+    no usable title, yields no title, never a guessed one."""
+    fm, _body = _split_frontmatter(report)
+    if fm is None:
+        return None, []
+    title, raw_tags, in_tags = None, [], False
+    for line in fm.splitlines():
+        stripped = line.strip()
+        if in_tags and stripped.startswith("- "):
+            raw_tags.append(_unquote(stripped[2:]))
+            continue
+        in_tags = False
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key, value = key.strip().lower(), value.strip()
+        if key == "title" and title is None:
+            title = _plain_title(_unquote(value))
+        elif key == "tags":
+            if not value:
+                in_tags = True
+            else:
+                inner = value[1:-1] if value.startswith("[") and value.endswith("]") else value
+                raw_tags.extend(_unquote(p) for p in inner.split(","))
+    tags: list = []
+    for raw in raw_tags:
+        t = stored_tag(raw)
+        if t and t not in tags:
+            tags.append(t)
+        if len(tags) == GENERATED_TAGS_MAX:
+            break
+    return title, tags
+
+
 # ── THE NOTE-PATH RECIPE ──────────────────────────────────────────────────────
 # These three are MODULE-LEVEL and not `build()` closures, for one reason: this is the only
 # description anywhere of where a meeting's record lives, and a recipe nothing can call directly
@@ -924,7 +1051,8 @@ def build(reg: Registry, db) -> None:
                         f"meeting. You did not read it. Call mcp__vexa__meeting_transcript with "
                         f"meeting_id={ctx.refs['meeting_id']} and tail=0 NOW, read every segment, "
                         "then write it again from what it returns — quoting one verbatim "
-                        "sentence with its speaker. If you cannot call that tool, say so.")
+                        "sentence with its speaker. Open it with the same title/tags "
+                        "front-matter block as before. If you cannot call that tool, say so.")
                     return Wait(seconds=12)
                 raise StepError(
                     "the report is not grounded in the transcript — the agent did not read the "
@@ -1006,6 +1134,7 @@ def build(reg: Registry, db) -> None:
                 "person's own notes can appear. ")
         block += ("Everything in the report was said, decided, committed or asked IN THIS ROOM.\n\n"
                   "Anything person-centric happens when they click the link in the mail, not here.")
+        block += _LABELS_RULE
         if group:
             block += (
                 f"\n\nTHIS MEETING BELONGS TO THE GROUP #{group}, AND ITS DESK IS YOURS TO "
@@ -1096,12 +1225,7 @@ def build(reg: Registry, db) -> None:
         through the product surface, and the attendee mail is where it costs the most.
         """
         import re
-        body = note or ""
-        if body.lstrip().startswith("---"):
-            rest = body.lstrip()[3:]
-            end = rest.find("\n---")
-            if end != -1:
-                body = rest[end + 4:]
+        _fm, body = _split_frontmatter(note)
         body = re.sub(r"\[([^\]]+)\]\((/[^)]*)\)",
                       lambda m: m.group(1) + ": " + _common.UI_URL + m.group(2), body)
         body = re.sub(r"\[\[([^\]]+)\]\]", r"\1", body)
@@ -1833,9 +1957,13 @@ def build(reg: Registry, db) -> None:
         have passed a check it cannot see. `mt.grounded_in` is the same function, called again,
         against a transcript read fresh.
 
-        Reads: refs.{uid,meeting_id,native} · Prior: process_meeting{report}
-        Effect: one workspace write (or none, on a genuine skip) · Result:
-        {path, status, meeting_id[, reason]}."""
+        AN UNNAMED MEETING IS NAMED HERE TOO, on `status: complete` only: `_label_untitled` writes
+        the report's own title and tags onto a row that has none (a skip writes neither — a
+        meeting too thin to summarize is too thin to name).
+
+        Reads: refs.{uid,meeting_id,native,title?} · Prior: process_meeting{report}
+        Effect: one workspace write (or none, on a genuine skip), and on a complete summary at
+        most one meeting annotate · Result: {path, status, meeting_id[, reason][, annotation]}."""
         import datetime
         uid = ctx.refs["uid"]
         pm = ctx.prior.get("process_meeting") or {}
@@ -1881,7 +2009,71 @@ def build(reg: Registry, db) -> None:
             return _skip("the report did not ground in the transcript")
         _write_if_changed(uid, path, _summary_v1(
             row_id=row_id, status="complete", generated_at=now, report=report))
-        return Done({"path": path, "status": "complete", "meeting_id": row_id})
+        return Done({"path": path, "status": "complete", "meeting_id": row_id,
+                     "annotation": _label_untitled(ctx, uid, row_id, pm.get("report") or "")})
+
+    def _label_untitled(ctx, uid, row_id, raw_report: str) -> dict:
+        """Name and tag a meeting NOBODY named, from the labels the report's own front-matter
+        carries (`_report_labels`) — after the summary is written, and never at its expense.
+
+        WHAT IS WRITTEN, through meeting-api's owner-scoped `POST /meetings/{id}/annotate`:
+          * `title`, only when the row has none. The invite's own subject (`refs.title`, a
+            person's words) when this meeting came from one, else the generated title.
+          * `metadata.tags`, only when the row's metadata has no `tags` key at all. The store
+            merges metadata key by key, so the body names `tags` and nothing else — every other
+            key on the row is untouched by construction.
+
+        A PERSON'S TITLE ALWAYS WINS. The row is re-read (`mt.meeting_detail`) immediately before
+        the write, and a title or tags key found there is kept. The race this accepts: a person
+        renaming the meeting in the milliseconds between that read and this write has their
+        title replaced once; annotate has no compare-and-set, and the window is one round trip
+        on a step that runs once per completed meeting. Renaming again sticks — nothing here
+        runs a second time for the same meeting.
+
+        BEST EFFORT, NEVER A FAILURE. A label is a convenience on top of the summary, so every
+        outcome — nothing generated, an unreadable row, a refused write, a transport error — is
+        recorded on this receipt and none is raised: the summary is already committed, and the
+        steps after this one must not wait on a title."""
+        out: dict = {}
+        try:
+            gen_title, gen_tags = _report_labels(raw_report)
+            invite_title = _plain_title(ctx.refs.get("title"), cap=512)
+            title = invite_title or gen_title
+            if not title and not gen_tags:
+                return {"title": "none generated", "tags": "none generated"}
+            row = mt.meeting_detail(uid, row_id)
+            if row is None:
+                return {"error": f"meeting {row_id} could not be re-read before labelling it"}
+            data = row.get("data") if isinstance(row.get("data"), dict) else {}
+            md = data.get("metadata")
+            body: dict = {}
+            if str(data.get("title") or "").strip():
+                out["title"] = "kept: the meeting already has a title"
+            elif title:
+                body["title"] = title
+            else:
+                out["title"] = "none generated"
+            if md is not None and (not isinstance(md, dict) or "tags" in md):
+                out["tags"] = "kept: the meeting already has tags"
+            elif gen_tags:
+                body["metadata"] = {"tags": gen_tags}
+            else:
+                out["tags"] = "none generated"
+            if not body:
+                return out
+            st, resp = mt.annotate_meeting(uid, row_id, body)
+            if not (isinstance(st, int) and 200 <= st < 300):
+                detail = resp.get("detail") if isinstance(resp, dict) else resp
+                return {**out, "error": f"annotate answered HTTP {st}: {str(detail)[:200]}"}
+            if "title" in body:
+                out["title"] = {"written": body["title"],
+                                "source": "invite" if invite_title else "generated"}
+            if "metadata" in body:
+                out["tags"] = {"written": gen_tags}
+            return out
+        except Exception as e:  # noqa: BLE001 — a label never fails the summary
+            logger.warning("commit_meeting_summary: labelling meeting %s failed: %s", row_id, e)
+            return {**out, "error": f"{type(e).__name__}: {e}"[:300]}
 
     # ── the owner's own "it's ready" mail, for a meeting with no invite ───────────────────────
     # `email_minutes` above tells the ORGANISER — a name a calendar invite supplied. An ad hoc

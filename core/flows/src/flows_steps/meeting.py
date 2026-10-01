@@ -39,6 +39,26 @@ def meeting_row(uid: str, meeting_id, native: str | None = None):
     return found
 
 
+def meeting_detail(uid: str, row_id):
+    """ONE meeting row, read fresh by its ROW id (`GET /meetings/{id}`), or None when it could not
+    be read. Unlike `meeting_row` this is not a scan of the list: it is the read a caller makes
+    immediately before a write that depends on what the row says right now."""
+    try:
+        st, body = http("GET", f"{meetings_door()}/meetings/{row_id}",
+                        {"X-API-Key": user_api_key(str(uid))})
+    except StepError:
+        return None
+    return body if st == 200 and isinstance(body, dict) else None
+
+
+def annotate_meeting(uid: str, row_id, body: dict) -> tuple:
+    """`POST /meetings/{id}/annotate` as the meeting's owner — `{title?, metadata?}`, written in
+    any status, `metadata` merged key by key by the store. Returns `(status, response body)`; a
+    transport failure is a `StepError`, exactly as `http` raises it."""
+    return http("POST", f"{meetings_door()}/meetings/{row_id}/annotate",
+                {"X-API-Key": user_api_key(str(uid))}, body)
+
+
 class ShareMintError(StepError):
     """A share mint that produced no token, with the HTTP facts INTACT.
 

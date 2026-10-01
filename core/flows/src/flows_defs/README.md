@@ -36,6 +36,16 @@ recorded reason, never a silent empty file — a meeting whose transcript is too
 report does not ground. See `docs/docs/how-to/post-meeting-report.mdx` for the wire contract the
 dashboard reads, and `core/flows/tests/test_meeting_summary.py` for the property list.
 
+## DB-62 — a title and tags for an unnamed meeting (`_label_untitled`)
+
+Part of `commit_meeting_summary`, on `status: complete` only — no new step, no flow version. The
+post-meeting turn's reply opens with a `title:`/`tags:` front-matter block (`_LABELS_RULE`, the
+same model call as the report; `_readable` strips the block for every reader). After the note is
+written, the row is re-read (`mt.meeting_detail`) and, only where the row has no title / no
+`metadata.tags` key, one `POST /meetings/{id}/annotate` (`mt.annotate_meeting`) writes them — tags
+in the dashboard's stored form (`stored_tag`). Best effort: every failure is recorded on the
+receipt's `annotation`, none is raised. Properties: `core/flows/tests/test_meeting_labels.py`.
+
 ## DB-80 — the "it's ready" mail for an ad hoc owner (`email_owner_ready`)
 
 `post_meeting`'s LAST step, added at version 6, right after DB-60's. `email_minutes` mails a

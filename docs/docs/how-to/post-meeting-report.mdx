@@ -168,6 +168,34 @@ crash and never a slower bot. **Recreate the `meeting-api` service** (`docker co
 meeting-api`, or the full stack) for a changed `VEXA_FLOWS_API_URL` to take effect — the value is
 read once, at process start.
 
+### Untitled meetings get a title and tags (DB-62)
+
+A meeting nobody named — an ad hoc bot, a pasted link — shows in the dashboard as
+"Google Meet · abc-defg-hij" or "Untitled meeting". When its summary is written with
+`status: complete`, `commit_meeting_summary` also names it, through meeting-api's owner-scoped
+`POST /meetings/{meeting_id}/annotate`:
+
+- **`title`** — written only when the row has no title (`data.title` absent or blank). The
+  calendar invite's own subject wins when the meeting came from one; otherwise a short generated
+  title (plain text, at most 80 characters).
+- **`metadata.tags`** — up to three tags, written only when the row's metadata has no `tags` key
+  at all (an existing list, even an empty one, is left alone). They are stored exactly as the
+  dashboard stores a typed tag: trimmed, inner whitespace collapsed, lower-case, at most 32
+  characters, unique, no control characters. Annotate merges metadata key by key and the body
+  names only `tags`, so every other metadata key on the meeting is untouched.
+
+**A person's title always wins.** The row is re-read immediately before the write, and a title or
+`tags` key found there is kept. The one window this leaves — a rename landing in the single round
+trip between that read and the write — is accepted: the step runs once per completed meeting, so
+renaming again sticks.
+
+**No second model call.** The title and tags come from the same post-meeting turn that writes the
+report: its reply opens with a small front-matter block (`title:`, `tags:`), which is stripped
+before the report reaches any mail, desk or the `summary.v1` note. A `status: skipped` summary
+names nothing. A labelling failure — no block in the reply, an unreadable row, a refused or failed
+write — never fails or changes the summary; it is recorded on the step's receipt under
+`annotation` and the flow carries on.
+
 ## Email when it's ready (DB-80)
 
 `email_minutes` mails the meeting's **organiser** — a name a calendar invite supplied. An ad hoc
