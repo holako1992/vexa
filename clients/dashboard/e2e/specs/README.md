@@ -131,6 +131,20 @@ spec's body is only the property, not the plumbing.
   account whose entitlements state `identity_unverified` sees the fixed explanation on `/billing` and
   in the Send Bot dialog (allowance line and the 402 refusal, which carries no plan link) and never
   the raw code.
+- `24-export.spec.ts` — each Export format downloaded from meeting 102 and read back: SubRip and
+  WebVTT cues per line, Markdown and text in order, a .docx package holding every line; "Copy as
+  Markdown" on the clipboard; PDF calls the print dialog, and under print media the transcript
+  stays while the rail, Export button, search box and back link are hidden.
+- `25-speaker-names.spec.ts` — naming "Dev" sends exactly `{metadata: {speaker_labels: {Dev:
+  "Devon Lee"}}}`, renames both of Dev's lines and only those, survives a reload, rides into the
+  text export, and clearing it sends `null`; a forced 500 keeps the dialog open with nothing
+  renamed; a hand-made annotate body naming another metadata key is a 400 that never reaches the
+  gateway.
+- `26-tags.spec.ts` — the tag chip asks the gateway for `metadata={"tags":["acme"]}` on every list
+  request and shows exactly the two tagged meetings; an unknown tag says so; adding "  Q3   Planning "
+  stores "q3 planning", removing the last tag sends `null`, and the row's other metadata key
+  survives; a failed write leaves the chips as they were; a shared meeting shows tags without an
+  editor; sorting by title keeps the live meeting first.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

@@ -411,6 +411,24 @@ The same segments arrive **live** (`completed: false`, a pending draft) and then
 (`completed: true`) — the gateway forwards the confirmed-plus-pending bundle to subscribers as the meeting
 runs.
 
+### Speaker names and tags (caller annotations)
+
+`POST /meetings/{meeting_id}/annotate` stores the caller's own `metadata` on a meeting row in any
+status; it merges key by key, and an explicit `null` deletes one key. The dashboard owns two keys
+there, and other clients that read `data.metadata` from `GET /meetings` will see them:
+
+- `speaker_labels` — `{"<speaker as transcribed>": "<person's name>"}`. A display name for a
+  diarized speaker, applied when the transcript is shown or exported. The transcript's own
+  `speaker` values are never rewritten.
+- `tags` — `["<tag>", …]`, lower-case and unique. `GET /meetings?metadata={"tags":["<tag>"]}`
+  returns only the meetings carrying that tag, filtered in the database before paging.
+
+```bash Name a speaker
+curl -X POST "$API_BASE/meetings/$MEETING_ID/annotate" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"metadata":{"speaker_labels":{"Speaker 1":"Ada Lovelace"}}}'
+```
+
 ## Meeting participants
 
 ```bash GET /meetings/{platform}/{native_meeting_id}/participants

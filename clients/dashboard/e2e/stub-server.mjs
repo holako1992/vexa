@@ -65,7 +65,7 @@ const adminLog = [];
  *  instead of dispatching — spec 14's paywall proof. */
 let force = {
   meetings: null, meetingDetail: null, botsQuota: false, search: null,
-  googleExchange: null, microsoftExchange: null,
+  googleExchange: null, microsoftExchange: null, annotate: null,
 };
 /** The state tokens `GET /user/calendars/google/authorize` has issued, and which of
  *  those have already been consumed by an exchange. Mirrors just enough of the core's real
@@ -119,7 +119,7 @@ function resetAll() {
   adminLog.length = 0;
   force = {
     meetings: null, meetingDetail: null, botsQuota: false, search: null,
-    googleExchange: null, microsoftExchange: null,
+    googleExchange: null, microsoftExchange: null, annotate: null,
   };
   issuedGoogleStates = new Set();
   usedGoogleStates = new Set();
@@ -136,6 +136,20 @@ function resetAll() {
 }
 
 // ── tiny helpers ─────────────────────────────────────────────────────────────────────────────
+
+/** Postgres JSONB `@>` for the values a metadata filter can hold: an object contains another when
+ *  every key's value is contained, an array when every element of the other is contained in some
+ *  element of it, a scalar only when equal. */
+function jsonContains(haystack, needle) {
+  if (Array.isArray(needle)) {
+    return Array.isArray(haystack) && needle.every((n) => haystack.some((h) => jsonContains(h, n)));
+  }
+  if (needle && typeof needle === "object") {
+    if (!haystack || typeof haystack !== "object" || Array.isArray(haystack)) return false;
+    return Object.entries(needle).every(([k, v]) => Object.hasOwn(haystack, k) && jsonContains(haystack[k], v));
+  }
+  return haystack === needle;
+}
 
 function sendJson(res, status, body) {
   if (body === null || status === 204) {
@@ -335,11 +349,26 @@ async function handleGateway(req, res) {
   // the store's own `has_more` return value rather than discarding it).
   if (req.method === "GET" && parts.length === 1 && parts[0] === "meetings") {
     if (force.meetings) return sendJson(res, force.meetings, { error: "forced_failure" });
-    const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : meetings.length;
+    // `metadata=<json object>` — the store's `data @> {"metadata": <filter>}` containment, applied
+    // BEFORE paging exactly like the real SQL, so `has_more` describes the filtered set.
+    let pool = meetings;
+    if (url.searchParams.has("metadata")) {
+      let filter;
+      try {
+        filter = JSON.parse(url.searchParams.get("metadata"));
+      } catch {
+        return sendJson(res, 422, { detail: "'metadata' must be a JSON object" });
+      }
+      if (typeof filter !== "object" || filter === null || Array.isArray(filter)) {
+        return sendJson(res, 422, { detail: "'metadata' must be a JSON object" });
+      }
+      pool = meetings.filter((m) => jsonContains(m.data?.metadata ?? {}, filter));
+    }
+    const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : pool.length;
     const offset = url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0;
-    const effectiveLimit = Number.isFinite(limit) ? limit : meetings.length;
-    const page = meetings.slice(offset, offset + effectiveLimit);
-    const hasMore = offset + page.length < meetings.length;
+    const effectiveLimit = Number.isFinite(limit) ? limit : pool.length;
+    const page = pool.slice(offset, offset + effectiveLimit);
+    const hasMore = offset + page.length < pool.length;
     return sendJson(res, 200, { meetings: page, has_more: hasMore });
   }
 
@@ -436,12 +465,22 @@ async function handleGateway(req, res) {
     });
   }
 
-  // POST /meetings/<id>/annotate — inline rename: {title} merges onto the row's own data.
+  // POST /meetings/<id>/annotate — `title` and `metadata`, as meeting-api's `annotate_meeting`
+  // (`collector/adapters.py`): `metadata` merges key by key and an explicit null deletes a key.
   if (req.method === "POST" && parts.length === 3 && parts[0] === "meetings" && parts[2] === "annotate") {
     const row = meetings.find((m) => String(m.id) === parts[1]);
     if (!row) return sendJson(res, 404, { detail: "Meeting not found" });
     const body = await readAndLogBody(req, logEntry);
+    if (force.annotate) return sendJson(res, force.annotate, { detail: "forced_failure" });
     if (typeof body.title === "string") row.data = { ...(row.data || {}), title: body.title };
+    if (body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)) {
+      const merged = { ...(row.data?.metadata || {}) };
+      for (const [k, v] of Object.entries(body.metadata)) {
+        if (v === null) delete merged[k];
+        else merged[k] = v;
+      }
+      row.data = { ...(row.data || {}), metadata: merged };
+    }
     return sendJson(res, 200, row);
   }
 

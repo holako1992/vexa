@@ -423,7 +423,21 @@ describe("resolveWriteUpstream — rename via annotate, and delete", () => {
   it("admits POST meetings/<id>/annotate for a numeric id", () => {
     expect(resolveWriteUpstream("POST", ["meetings", "104", "annotate"])).toEqual({
       path: "/meetings/104/annotate",
+      body: expect.any(Function),
     });
+  });
+
+  it("admits only the rename, tag and speaker-label bodies on annotate", () => {
+    const annotate = resolveWriteUpstream("POST", ["meetings", "104", "annotate"])!;
+    expect(validateBody(annotate, JSON.stringify({ title: "Design review" }))).toBe(true);
+    expect(validateBody(annotate, JSON.stringify({ metadata: { tags: ["sales"] } }))).toBe(true);
+    expect(validateBody(annotate, JSON.stringify({ metadata: { speaker_labels: { "Speaker 1": "Ada" } } }))).toBe(true);
+    expect(validateBody(annotate, JSON.stringify({ metadata: { speaker_labels: null } }))).toBe(true);
+    // Any other metadata key belongs to another writer and never goes out through the dashboard.
+    expect(validateBody(annotate, JSON.stringify({ metadata: { crm_id: "acme-42" } }))).toBe(false);
+    expect(validateBody(annotate, JSON.stringify({ title: "x", metadata: { tags: ["a"] } }))).toBe(false);
+    expect(validateBody(annotate, "")).toBe(false);
+    expect(validateBody(annotate, "{not json")).toBe(false);
   });
 
   it("refuses a non-numeric id or the wrong tail on annotate", () => {
@@ -592,6 +606,20 @@ describe("resolveUpstream — transcripts/search", () => {
 });
 
 describe("filterQuery — per-route allowlist", () => {
+  it("meetings keeps exactly one tag as its metadata filter, and no other containment filter", () => {
+    const route = resolveUpstream(["meetings"])!;
+    const tag = new URLSearchParams({ limit: "20", offset: "0", metadata: '{"tags":["acme"]}' });
+    expect(filterQuery(route, tag)).toBe("?limit=20&offset=0&metadata=%7B%22tags%22%3A%5B%22acme%22%5D%7D");
+    for (const bad of ['{"crm_id":"x"}', '{"tags":["a","b"]}', '{"tags":["A"]}', "nope"]) {
+      expect(filterQuery(route, new URLSearchParams({ metadata: bad }))).toBe("");
+    }
+  });
+
+  it("metadata is dropped on a route that does not declare it", () => {
+    const route = resolveUpstream(["recordings"])!;
+    expect(filterQuery(route, new URLSearchParams({ metadata: '{"tags":["acme"]}' }))).toBe("");
+  });
+
   it("meetings keeps limit/offset and drops everything else, including q", () => {
     const route = resolveUpstream(["meetings"])!;
     const q = new URLSearchParams("limit=10&offset=5&user_id=7&x=1&q=pricing");

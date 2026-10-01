@@ -8,6 +8,7 @@
  *
  *  Pure and dependency-free so the table can be tested directly (src/lib/__tests__).
  */
+import { isAnnotateBody, isTagFilterValue } from "./annotations";
 
 /** A per-parameter shape check: `true` admits the raw string value, `false` drops it. Never a
  *  transform — filterQuery forwards the caller's own bytes for whatever it admits, it does not
@@ -27,10 +28,8 @@ export interface UpstreamRoute {
    *  per route rather than once globally. */
   query?: Record<string, QueryValidator>;
   /** For a write route: when present, the request body MUST satisfy this to be forwarded. Absent
-   * means this route takes no body check at all — every write route that predates (bots,
-   *  user/calendars, annotate, …) forwards its body unchecked, exactly as before; only the two
-   *  billing routes below declare one, so `validateBody`/`route.ts` never change behavior for the
-   *  routes that don't opt in. */
+   *  means this route takes no body check at all (bots, user/calendars, …) and forwards its body
+   *  unchecked; `validateBody`/`route.ts` never change behavior for the routes that don't opt in. */
   body?: BodyValidator;
   /** True for the ONE shape of route this allowlist admits that is not JSON: the recording media
    * byte stream (`.../media/<id>/raw` and its `.../download` alias). `route.ts` branches
@@ -80,6 +79,11 @@ const OFFSET = boundedInt(0, 1_000_000_000);
  *  `ALLOWED_QUERY` meant a new parameter added for one route silently rode along to every other
  *  one too — see `filterQuery`'s header comment). */
 const PAGING_QUERY: Record<string, QueryValidator> = { limit: LIMIT, offset: OFFSET };
+
+/** `GET /meetings`' own query shape: paging, plus meeting-api's `metadata` containment filter
+ *  narrowed to the one value the tag filter sends — exactly `{"tags": ["<one tag>"]}`. Any other
+ *  containment filter is dropped, so the browser cannot probe arbitrary metadata through it. */
+const MEETINGS_LIST_QUERY: Record<string, QueryValidator> = { ...PAGING_QUERY, metadata: isTagFilterValue };
 
 /** `q`'s shape: non-blank, and capped at the same 512 chars meeting-api's own
  *  `SEARCH_QUERY_MAX_CHARS` (`meeting_api/collector/app.py`) enforces server-side. An overlong `q`
@@ -134,7 +138,7 @@ export function resolveUpstream(segments: readonly string[]): UpstreamRoute | nu
     // paging-shaped (no `cursor` param exists there); it returns no total and no `has_more`, which
     // is why `lib/meetings.ts`'s pagination infers "more may exist" from a full page rather than
     // trusting a signal the producer doesn't send.
-    return { path: "/meetings", query: PAGING_QUERY };
+    return { path: "/meetings", query: MEETINGS_LIST_QUERY };
   }
 
   // GET /transcripts/search?q=.... Checked before the generic 3-segment transcripts
@@ -381,8 +385,10 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     ) {
       return { path: `/user/calendars/${encodeURIComponent(segments[2])}/sync` };
     }
-    // POST /meetings/<id>/annotate — the caller's own title/metadata, {title}. Used for the
-    // inline rename: unlike PATCH /meetings/<id> below, meeting-api's annotate route
+    // POST /meetings/<id>/annotate — the caller's own title and metadata. Used for the inline
+    // rename ({title}), tags ({metadata: {tags}}) and speaker names
+    // ({metadata: {speaker_labels}}); `isAnnotateBody` (lib/annotations.ts) admits exactly those
+    // shapes and no other metadata key. Unlike PATCH /meetings/<id> below, meeting-api's annotate route
     // works in ANY meeting status, because it writes the caller's DESCRIPTION rather than the
     // dispatch instructions the FSM owns once a bot has been sent. A rename is exactly the case
     // annotate exists for — most meetings a person renames have already completed, and PATCH
@@ -391,7 +397,7 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
       segments.length === 3 && segments[0] === "meetings" && segments[2] === "annotate" &&
       /^\d{1,20}$/.test(segments[1])
     ) {
-      return { path: `/meetings/${encodeURIComponent(segments[1])}/annotate` };
+      return { path: `/meetings/${encodeURIComponent(segments[1])}/annotate`, body: isAnnotateBody };
     }
     // POST /user/calendars/google/exchange {code, state} — the callback page. Body checked
     // by `isGoogleExchangeBody` above; `google` here is a fixed literal segment, never a calendar

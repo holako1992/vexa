@@ -17,6 +17,16 @@
   global set applied to every proxied GET; see `filterQuery`'s header comment for the incident
   that shape exists to prevent (DB-44 needed a free-text `q` param and a global allowlist would
   have forwarded it to every route, not just the one that asked for it).
+  The annotate write route carries a body check (`lib/annotations.ts`'s `isAnnotateBody`): a
+  rename, or exactly one of the dashboard's two metadata keys, and nothing else. `GET /meetings`
+  admits `metadata` only as a single-tag filter.
+- **`annotations.ts`** — the two caller-owned metadata keys the dashboard writes, `tags` and
+  `speaker_labels`: their bounds, readers that skip a malformed value another writer left behind,
+  `nextSpeakerLabels` (blank or unchanged removes a label; empty becomes `null`), and the shape
+  checks `upstream.ts` uses. Pure, and safe against a speaker literally named `__proto__`.
+- **`export.ts`** — DB-45's transcript exports from the lines the page shows: SubRip, WebVTT,
+  Markdown, and a minimal .docx written as a stored ZIP by its own small writer, so no document
+  library ships. Every format keeps every line, in order, under the shown speaker name.
 - **`security.ts`** — the CSP, the header set, the cookie-security decision, the same-origin write
   guard, and `safeNext()` (the open-redirect guard on the post-login target).
 - **`signInRefusal.ts`** — the closed set of sign-in refusal codes and their fixed copy, plus the
@@ -35,7 +45,9 @@
   `calendarName` onto `Meeting` (all verbatim off the producer's `data.*`) and
   `groupUpcomingByDay` — the Upcoming page's one grouping rule, soonest day and soonest meeting
   within a day first, a row with no resolvable time sorting last under its own group rather than
-  crashing the page.
+  crashing the page. DB-43/47 add `tags` and `speakerLabels` onto `Meeting` (from
+  `data.metadata`), `end` and `sourceSpeaker` onto `TranscriptLine`, `distinctSpeakers`,
+  `sortMeetingsBy` (live always on top) and `loadedTags`.
 - **`calendarOAuth.ts`** — the one place both calendar OAuth providers' shared shape lives:
   `CalendarOAuthProvider`, `CALENDAR_OAUTH_LABEL`, and `fetchTrustedAuthorizeUrl` (the
   `GET /user/calendars/<provider>/authorize` call PLUS the authorize-URL host check, so

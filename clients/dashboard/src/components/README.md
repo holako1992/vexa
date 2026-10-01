@@ -34,13 +34,22 @@ Client components. They receive identity as props (resolved on the server) and f
   server across
   every meeting and every transcript instead of just what happens to be loaded; see the file's own
   header comment for why that reconciliation, not two competing boxes, is the right shape.
+  DB-47 adds tags and sorting: `?tag=<tag>` adds meeting-api's `metadata={"tags":["<tag>"]}`
+  containment filter to every list request (page, Load more and poll alike), so the filtered list
+  is the server's answer, not a filtered view of a loaded page; the tag chips above the list are
+  the loaded rows' tags, each a link to that filter; a "Sort meetings" select reorders the loaded
+  rows (`lib/meetings.ts`'s `sortMeetingsBy`) with live meetings kept on top.
 - `SearchView` — DB-44's `/search` results: `GET /transcripts/search`, grouped by meeting
   (`lib/search.ts`'s `groupHitsByMeeting`) with the matched term highlighted as a real `<mark>`
   (`highlightSnippet` — a pure text-segment split, never `dangerouslySetInnerHTML`). Loading,
   error and empty-results are three distinct states, same rule as `EmptyState`/`ErrorState`/
   `LoadingState` everywhere else. Each hit links to `/meetings/<id>?t=<start>`, which
   `MeetingDetail` reads to scroll to and highlight the matching segment.
-- `MeetingDetail` — one meeting: header facts, transcript, in-transcript search, copy, download.
+- `MeetingDetail` — one meeting: header facts, tags, transcript, in-transcript search, copy,
+  export, speaker names. The transcript is mapped from the raw segments on every render with the
+  meeting's speaker labels (`toTranscript(segments, meeting.speakerLabels)`), so a saved name
+  shows at once and the producer's attribution is never overwritten. Its print stylesheet
+  (`print:hidden` on the controls, the rail and the top bar) is what the Export dialog's PDF prints.
   It reads its own row by id; the collection is not a source for a single meeting. DB-44 adds
   `?t=<seconds>` support: when present, the transcript line whose offset is closest is scrolled
   into view and highlighted (a ring, not a colour swap that would fight the speaker-chip hues) —
@@ -53,6 +62,15 @@ Client components. They receive identity as props (resolved on the server) and f
   not a controlled prop — an `<audio>` element owns its own playback position) and the segment
   playing right now is highlighted (`lib/meetings.ts`'s `activeSegmentIndex`, driven off the
   player's own `onTimeUpdate`), taking over from the `?t=` link's highlight once playback starts.
+- `ExportMenu` — DB-45's Export dialog: plain text, Markdown, Word (.docx), SubRip and WebVTT
+  downloads built in the browser from the lines on screen (`lib/export.ts`), "Copy as Markdown",
+  and PDF through the browser's print dialog. No server renderer and no document library.
+- `SpeakerNames` — DB-43's "Speakers" dialog: one field per producer speaker; saving writes the
+  whole `speaker_labels` map through `POST /meetings/<id>/annotate` (`null` when empty). Owner
+  only.
+- `MeetingTags` — DB-47's tag chips on a meeting (each links to the list filtered by it) and, for
+  the owner, add/remove writing the whole `tags` list through annotate (`null` when empty).
+  Exports `TagChip` and `tagHref` for the list.
 - `AudioPlayer` — DB-50's player: `GET /api/vexa/recordings/<id>/master?type=audio` for the
   `media_file_id`, then an `<audio src="/api/vexa/recordings/<id>/media/<media_file_id>/raw">` —
   Range-streamed end to end through `route.ts`'s `raw: true` branch, never buffered. Exposes

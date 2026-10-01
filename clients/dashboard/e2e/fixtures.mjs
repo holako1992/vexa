@@ -43,6 +43,9 @@ const MEETING_ROWS = [
     data: {
       title: "Design Review",
       attendees: [{ email: "carla@e2e.test", name: "Carla" }, { email: "dev@e2e.test", name: "Dev" }],
+      // Caller-owned annotations (`POST /meetings/<id>/annotate`): one tag shared with 105, so the
+      // tag filter has more than one row to return and rows to leave out.
+      metadata: { tags: ["acme"], crm_id: "e2e-not-the-dashboards" },
       // One finished audio recording, the same shape
       // `recordings/adapters.py`'s `list_meeting_recordings` reads off `meeting.data['recordings']`
       // — a numeric id (real recording ids are always numeric, `jsonb.py`'s
@@ -95,7 +98,7 @@ const MEETING_ROWS = [
     start_time: "2026-09-19T10:00:00Z",
     end_time: "2026-09-19T10:20:00Z",
     constructed_meeting_url: "https://zoom.us/j/5550001111",
-    data: { title: "Support Retro", attendees: [] },
+    data: { title: "Support Retro", attendees: [], metadata: { tags: ["acme", "internal"] } },
   },
   // 106 — completed, a `status: skipped` summary.v1 (too little transcript to summarize).
   {

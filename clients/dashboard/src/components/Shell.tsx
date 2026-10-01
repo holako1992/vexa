@@ -80,7 +80,7 @@ export function Shell({ user, children }: { user: ShellUser; children: React.Rea
 
       <aside
         className={clsx(
-          "fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-line bg-rail transition-transform md:static md:translate-x-0",
+          "fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-line bg-rail transition-transform md:static md:translate-x-0 print:hidden",
           railOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -131,7 +131,7 @@ export function Shell({ user, children }: { user: ShellUser; children: React.Rea
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 items-center gap-3 border-b border-line px-4 md:px-6">
+        <header className="flex h-16 items-center gap-3 border-b border-line px-4 md:px-6 print:hidden">
           <button
             type="button"
             onClick={() => setRailOpen(true)}

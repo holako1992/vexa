@@ -1,6 +1,6 @@
 # `src/lib/__tests__/` — behavioral tests
 
-Fifteen files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
+Seventeen files, covering the parts where being wrong is expensive (plus `api.test.ts`, `entitlements.test.ts`, `meetingId.test.ts` and `calendarOAuth.test.ts`, each already self-explanatory from its own name and the DTOs it exercises):
 
 - `upstream.test.ts` — the allowlist as a table, weighted towards what it **refuses**: unknown
   edges, traversal segments, a non-numeric row id, an unknown platform or separator-bearing native
@@ -21,6 +21,15 @@ Fifteen files, covering the parts where being wrong is expensive (plus `api.test
   `raw`/`download` media-byte pair (`type=audio|video` only, a non-numeric recording or media-file
   id refused, `download` and `raw` proven to resolve to the SAME gateway path since the gateway
   itself treats them as aliases), and `DELETE /recordings/<id>`.
+- `annotations.test.ts` — tags and speaker labels, weighted towards what `isAnnotateBody` refuses
+  (any metadata key the dashboard does not own, two keys at once, an empty list or map, an
+  untrimmed or over-long name, an un-normalized tag), the single-tag list filter, and a speaker
+  named `__proto__` or `constructor` read as an ordinary name, never off the prototype.
+- `export.test.ts` — every export format round-tripped back to its lines: SubRip/WebVTT cue
+  timing (the producer's end, else the next later start, else a fixed length; a line with no
+  offset kept, not dropped), WebVTT markup escaping, Markdown inline escaping, and the .docx read
+  back out of its own ZIP with every entry's CRC checked, control characters dropped, and the same
+  bytes for the same transcript.
 - `authProvenance.test.ts` — what each sign-in door tells admin-api about the address: Google's
   `email_verified` is read literally (only a boolean `true` verifies; absent, string, numeric and
   non-object profiles do not) and a Microsoft sign-in counts as verified.

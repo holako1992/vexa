@@ -156,3 +156,9 @@ export async function signIn(page: Page, email: string): Promise<void> {
   await page.waitForURL("**/");
   await page.getByRole("heading", { name: "Meetings" }).waitFor();
 }
+
+/** Make the stub's `POST /meetings/<id>/annotate` answer `status` (until the next reset) — the
+ *  failed-save specs for speaker names and tags. */
+export async function forceAnnotate(request: APIRequestContext, status: number | null): Promise<void> {
+  await request.post(`${GATEWAY_URL}/__control/force`, { data: { annotate: status } });
+}

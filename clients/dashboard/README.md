@@ -135,6 +135,9 @@ Stated plainly, because "it has auth" is not a description.
   caller supplies, and the route itself composes the fixed upstream
   `/agent/workspace/file?path=meetings/<id>/summary.md` — the post-meeting AI note (DB-60), never a
   general workspace-file proxy; a caller's own `?path=` query is always dropped, never forwarded.
+  `meetings` also admits `metadata` as exactly one tag (`{"tags":["<tag>"]}`), meeting-api's own
+  containment filter, which is how the list's tag filter narrows on the server; no other
+  containment filter is forwarded.
   `meetings/<platform>/<native>/participants` reads the invite + speaker roster for one meeting.
   `bots/status` reads the caller's currently-running bots (the live status badge DB-41's Stop
   control checks against). `user/entitlements` reads the caller's resolved plan, limits and usage
@@ -151,7 +154,10 @@ Stated plainly, because "it has auth" is not a description.
   update, disconnect, and manually sync an ICS calendar for auto-join. `POST
   meetings/<id>/annotate` renames a meeting inline (DB-42) — not `PATCH meetings/<id>`, which
   meeting-api refuses (409) once a bot has touched the row; annotate is the caller's own
-  description and works in any meeting status. `DELETE meetings/<id>` deletes a still-planned
+  description and works in any meeting status. The same route stores the meeting's tags (DB-47)
+  and speaker names (DB-43) under `metadata.tags` / `metadata.speaker_labels`; its body is
+  checked, and anything but a rename or exactly one of those two keys is a 400 here, so the
+  browser can never touch metadata another writer owns. `DELETE meetings/<id>` deletes a still-planned
   meeting outright, or wipes a completed one's transcript and recording. `DELETE
   bots/<platform>/<native>` stops an in-progress recording (DB-41), behind a confirm dialog. Each
   write is a mechanism the dashboard's own UI drives — dispatching a bot, managing calendar

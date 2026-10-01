@@ -5,6 +5,7 @@
  *  picking a title, bucketing a status, formatting a time — and every field it reads is one the
  *  backend already decided.
  */
+import { labelFor, speakerLabelsOf, tagsOf } from "./annotations";
 
 /** The envelope GET /meetings returns: the page's rows plus whether another page exists past the
  *  requested `limit`/`offset` — forwarded verbatim from meeting-api's own store (`has_more` is the
@@ -49,12 +50,16 @@ export interface MeetingRowDTO {
      *  person planned by hand, which has no calendar source to show. */
     calendar_name?: string | null;
     calendar_connection_id?: string | null;
+    /** Caller-owned annotations (`POST /meetings/<id>/annotate`). The dashboard reads its own
+     *  two keys from here through `lib/annotations.ts`; every other key belongs to someone else. */
+    metadata?: Record<string, unknown> | null;
   } | null;
 }
 
 /** A transcript segment from GET /transcripts/... */
 export interface SegmentDTO {
   start?: number | null;
+  end?: number | null;
   speaker?: string | null;
   text?: string | null;
 }
@@ -103,6 +108,11 @@ export interface Meeting {
    *  person planned by hand. */
   calendarName: string | null;
   calendarConnectionId: string | null;
+  /** The meeting's tags (`data.metadata.tags`), lower-case and unique. */
+  tags: string[];
+  /** Display names for the producer's speakers (`data.metadata.speaker_labels`), keyed by the
+   *  producer's own speaker string. */
+  speakerLabels: Record<string, string>;
 }
 
 /** Statuses where the bot is in, or heading to, the room. */
@@ -179,6 +189,8 @@ export function toMeeting(d: MeetingRowDTO): Meeting {
     autoJoinError: d.data?.auto_join_error ?? null,
     calendarName: d.data?.calendar_name ?? null,
     calendarConnectionId: d.data?.calendar_connection_id ?? null,
+    tags: tagsOf(d.data?.metadata),
+    speakerLabels: speakerLabelsOf(d.data?.metadata),
   };
 }
 
@@ -190,6 +202,44 @@ export function sortMeetings(list: Meeting[]): Meeting[] {
     if (b.phase === "live" && a.phase !== "live") return 1;
     return when(b) - when(a);
   });
+}
+
+export type MeetingSort = "newest" | "oldest" | "longest" | "title";
+
+export const MEETING_SORTS: { id: MeetingSort; label: string }[] = [
+  { id: "newest", label: "Newest first" },
+  { id: "oldest", label: "Oldest first" },
+  { id: "longest", label: "Longest first" },
+  { id: "title", label: "Title A–Z" },
+];
+
+/** Order the loaded rows by the chosen key. Live meetings stay pinned on top under every order —
+ *  the meeting happening now is never pushed down the page by a sort. A row missing the sort's
+ *  value (no time, no duration) goes last. */
+export function sortMeetingsBy(list: readonly Meeting[], by: MeetingSort): Meeting[] {
+  if (by === "newest") return sortMeetings([...list]);
+  const when = (m: Meeting) => Date.parse(m.startTime || m.scheduledAt || "");
+  const cmp: Record<Exclude<MeetingSort, "newest">, (a: Meeting, b: Meeting) => number> = {
+    oldest: (a, b) => {
+      const wa = when(a);
+      const wb = when(b);
+      if (Number.isNaN(wa) || Number.isNaN(wb)) return Number.isNaN(wa) ? (Number.isNaN(wb) ? 0 : 1) : -1;
+      return wa - wb;
+    },
+    longest: (a, b) => (b.durationSeconds ?? -1) - (a.durationSeconds ?? -1),
+    title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true }),
+  };
+  const order = cmp[by];
+  return [...list].sort((a, b) => {
+    if (a.phase === "live" && b.phase !== "live") return -1;
+    if (b.phase === "live" && a.phase !== "live") return 1;
+    return order(a, b);
+  });
+}
+
+/** Every tag on the loaded rows, alphabetical — the list's tag chips. */
+export function loadedTags(list: readonly Meeting[]): string[] {
+  return [...new Set(list.flatMap((m) => m.tags))].sort((a, b) => a.localeCompare(b));
 }
 
 /** The merge rule for combining a freshly-fetched page of rows with what is already loaded —
@@ -276,7 +326,7 @@ export function filterMeetings(list: Meeting[], query: string): Meeting[] {
   const q = query.trim().toLowerCase();
   if (!q) return list;
   return list.filter((m) =>
-    [m.title, m.platform, m.status, m.nativeId ?? "", ...m.attendees.map((a) => a.name || a.email)]
+    [m.title, m.platform, m.status, m.nativeId ?? "", ...m.tags, ...m.attendees.map((a) => a.name || a.email)]
       .some((f) => f.toLowerCase().includes(q)),
   );
 }
@@ -284,21 +334,51 @@ export function filterMeetings(list: Meeting[], query: string): Meeting[] {
 export interface TranscriptLine {
   /** Seconds from the start of the recording, when the producer gave one. */
   at: number | null;
+  /** Seconds from the start of the recording where the segment ends, when the producer gave one. */
+  end: number | null;
+  /** The name shown: the speaker's label when one is set, else the producer's attribution. */
   speaker: string;
+  /** The producer's own speaker string — what a label is keyed by. `null` when the producer
+   *  attributed the segment to nobody, which leaves nothing to label. */
+  sourceSpeaker: string | null;
   text: string;
 }
 
+function finiteOrNull(n: unknown): number | null {
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
 /** Map the segments of a transcript response. Empty/blank segments are dropped; nothing is
- *  merged, re-ordered or re-attributed — the producer's order is the order shown. */
-export function toTranscript(segments: readonly SegmentDTO[] | undefined | null): TranscriptLine[] {
+ *  merged, re-ordered or re-attributed — the producer's order is the order shown. `labels` puts
+ *  a person's name on a producer speaker for display; the producer's attribution stays on
+ *  `sourceSpeaker`. */
+export function toTranscript(
+  segments: readonly SegmentDTO[] | undefined | null,
+  labels: Readonly<Record<string, string>> = {},
+): TranscriptLine[] {
   if (!Array.isArray(segments)) return [];
   return segments
-    .map((s) => ({
-      at: typeof s.start === "number" && Number.isFinite(s.start) ? s.start : null,
-      speaker: (s.speaker || "").trim() || "Unknown speaker",
-      text: (s.text || "").trim(),
-    }))
+    .map((s) => {
+      const source = (s.speaker || "").trim() || null;
+      return {
+        at: finiteOrNull(s.start),
+        end: finiteOrNull(s.end),
+        speaker: source ? labelFor(labels, source) : "Unknown speaker",
+        sourceSpeaker: source,
+        text: (s.text || "").trim(),
+      };
+    })
     .filter((l) => l.text.length > 0);
+}
+
+/** The distinct producer speakers in a transcript, in order of first appearance — the rows of
+ *  the speaker-name editor. */
+export function distinctSpeakers(lines: readonly TranscriptLine[]): string[] {
+  const seen: string[] = [];
+  for (const l of lines) {
+    if (l.sourceSpeaker && !seen.includes(l.sourceSpeaker)) seen.push(l.sourceSpeaker);
+  }
+  return seen;
 }
 
 /** The transcript line whose `at` is the LATEST one at or before `currentTime` — the "the

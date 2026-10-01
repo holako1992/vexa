@@ -6,19 +6,22 @@
  *  tenants — so keying the read by it would show one run's words under another run's heading.
  *
  *  Nothing on this page reshapes what the backend produced: segments render in the producer's
- *  order, with the producer's speaker attribution. Search highlights, it does not filter out
- *  context; copy and download emit exactly what is shown.
+ *  order, with the producer's speaker attribution under any name the owner gave that speaker
+ *  (`data.metadata.speaker_labels`). Search highlights, it does not filter out context; copy and
+ *  every export emit exactly what is shown. The print stylesheet keeps the header, summary and
+ *  transcript and drops the controls, which is what "PDF" in the Export dialog prints.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, Copy, Download, Search } from "lucide-react";
+import { ArrowLeft, Check, Copy, Search } from "lucide-react";
 import {
   type Meeting,
   type MeetingRowDTO,
   type SegmentDTO,
   type TranscriptLine,
   activeSegmentIndex,
+  distinctSpeakers,
   formatClock,
   initialsOf,
   speakerIndex,
@@ -35,6 +38,10 @@ import { BotControls } from "./BotControls";
 import { MeetingActions } from "./MeetingActions";
 import { Participants } from "./Participants";
 import { AudioPlayer, type AudioPlayerHandle } from "./AudioPlayer";
+import { ExportMenu } from "./ExportMenu";
+import { SpeakerNames } from "./SpeakerNames";
+import { MeetingTags } from "./MeetingTags";
+import type { ExportFact } from "@/lib/export";
 
 /** Avatar hues, in the same family as the accent so a busy transcript still reads calm.
  *
@@ -54,11 +61,15 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
-  const [lines, setLines] = useState<TranscriptLine[] | null>(null);
+  const [segments, setSegments] = useState<SegmentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState(false);
   const isLive = useRef(false);
+  const lines = useMemo<TranscriptLine[] | null>(
+    () => (segments === null ? null : toTranscript(segments, meeting?.speakerLabels)),
+    [segments, meeting?.speakerLabels],
+  );
   const lineRefs = useRef<Array<HTMLLIElement | null>>([]);
   const playerRef = useRef<AudioPlayerHandle>(null);
   // The audio element's own playback position, read off `AudioPlayer`'s `onTimeUpdate` —
@@ -122,7 +133,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
       // rendered as though the meeting were absent.
       if (e instanceof ApiError && e.status === 404) {
         setMeeting(null);
-        setLines([]);
+        setSegments([]);
         setError(null);
         isLive.current = false;
         return;
@@ -141,7 +152,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
       const body = await getJson<{ segments?: SegmentDTO[] }>(
         `/api/vexa/transcripts/by-id/${encodeURIComponent(meetingId)}`,
       );
-      setLines(toTranscript(body.segments));
+      setSegments(Array.isArray(body.segments) ? body.segments : []);
     } catch (e) {
       console.warn("transcript load failed", e);
       setError(presentError(e));
@@ -175,6 +186,18 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
     [meeting, lines],
   );
 
+  const speakers = useMemo(() => (lines ? distinctSpeakers(lines) : []), [lines]);
+
+  /** The header facts as the exports carry them — the same values the page shows. */
+  const exportFacts = useMemo<ExportFact[]>(() => {
+    if (!meeting) return [];
+    const facts: ExportFact[] = [{ label: "Platform", value: meeting.platform }];
+    if (meeting.startTime) facts.push({ label: "Started", value: new Date(meeting.startTime).toLocaleString() });
+    if (meeting.durationSeconds != null) facts.push({ label: "Duration", value: formatClock(meeting.durationSeconds) });
+    if (meeting.tags.length) facts.push({ label: "Tags", value: meeting.tags.join(", ") });
+    return facts;
+  }, [meeting]);
+
   async function copyTranscript() {
     try {
       await navigator.clipboard.writeText(plainText);
@@ -183,16 +206,6 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
     } catch (e) {
       console.warn("clipboard write failed", e);
     }
-  }
-
-  function downloadTranscript() {
-    const blob = new Blob([plainText], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${(meeting?.title || "transcript").replace(/[^\w.-]+/g, "-")}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   if (error) {
@@ -221,11 +234,13 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">{meeting.title}</h1>
           <StatusPill phase={meeting.phase} status={meeting.status} />
-          <MeetingActions
-            meeting={meeting}
-            onRenamed={(title) => setMeeting((m) => (m ? { ...m, title } : m))}
-            onDeleted={() => router.push("/")}
-          />
+          <div className="print:hidden">
+            <MeetingActions
+              meeting={meeting}
+              onRenamed={(title) => setMeeting((m) => (m ? { ...m, title } : m))}
+              onDeleted={() => router.push("/")}
+            />
+          </div>
         </div>
         <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-ink-2">
           <Fact label="Platform" value={meeting.platform} />
@@ -244,20 +259,28 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
             ))}
           </div>
         )}
+        <MeetingTags
+          meetingId={meeting.id}
+          tags={meeting.tags}
+          editable={!meeting.shared}
+          onChange={(tags) => setMeeting((m) => (m ? { ...m, tags } : m))}
+        />
         <Participants meeting={meeting} />
       </header>
 
-      <BotControls meeting={meeting} onStopped={() => void load()} />
+      <div className="print:hidden">
+        <BotControls meeting={meeting} onStopped={() => void load()} />
+      </div>
 
       {meeting.hasRecording && meeting.recordingId && (
-        <div className="mb-6 rounded-card border border-line bg-card p-4">
+        <div className="mb-6 rounded-card border border-line bg-card p-4 print:hidden">
           <AudioPlayer ref={playerRef} recordingId={meeting.recordingId} onTimeUpdate={setCurrentTime} />
         </div>
       )}
 
       <SummaryPanel meetingId={meetingId} meeting={meeting} />
 
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center print:hidden">
         <Input
           type="search"
           value={query}
@@ -268,7 +291,15 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
           containerClassName="flex-1"
           className="bg-card py-2.5"
         />
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {!meeting.shared && (
+            <SpeakerNames
+              meetingId={meeting.id}
+              speakers={speakers}
+              labels={meeting.speakerLabels}
+              onSaved={(speakerLabels) => setMeeting((m) => (m ? { ...m, speakerLabels } : m))}
+            />
+          )}
           <Button
             variant="secondary"
             onClick={copyTranscript}
@@ -277,9 +308,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
           >
             {copied ? "Copied" : "Copy"}
           </Button>
-          <Button variant="secondary" onClick={downloadTranscript} disabled={!lines?.length} icon={<Download size={15} aria-hidden />}>
-            Download
-          </Button>
+          <ExportMenu title={meeting.title} facts={exportFacts} lines={lines ?? []} />
         </div>
       </div>
 
@@ -291,7 +320,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
         />
       )}
       {lines !== null && lines.length > 0 && (
-        <ol className="space-y-4">
+        <ol aria-label="Transcript" className="space-y-4">
           {lines.map((line, i) => {
             const dim = matches !== null && !matches.has(i);
             const isHighlighted = i === activeIndex;
@@ -321,7 +350,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
                     : undefined
                 }
                 className={
-                  (dim ? "opacity-35 " : "") +
+                  (dim ? "opacity-35 print:opacity-100 " : "") +
                   "transition-opacity " +
                   (seekable ? "cursor-pointer rounded-lg hover:bg-raised " : "") +
                   (isHighlighted ? "-mx-2 rounded-lg bg-accent-soft px-2 py-1 ring-2 ring-accent" : "")
@@ -353,7 +382,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
 
 function BackLink() {
   return (
-    <Link href="/" className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink">
+    <Link href="/" className="mb-5 inline-flex print:hidden items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink">
       <ArrowLeft size={15} aria-hidden />
       All meetings
     </Link>

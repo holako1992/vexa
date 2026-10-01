@@ -14,20 +14,32 @@
  *  `mergeMeetingsPage`'s header comment for why a poll that only re-fetched page one would
  *  silently drop it. Tab counts are not shown as numbers because a count built from loaded rows is
  *  not a total — see the loaded-count line below instead.
+ *
+ *  Tags: `?tag=<tag>` narrows the list on the SERVER — every request carries meeting-api's
+ *  `metadata={"tags":["<tag>"]}` containment filter, so paging and polling both walk only the
+ *  tagged meetings, never a filtered view of whatever page happened to load. The tag chips above
+ *  the list are the tags on the loaded rows; each links to that filter. Sorting reorders the
+ *  loaded rows only, with live meetings kept on top.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, Search, Users, Video } from "lucide-react";
+import { Bot, Search, Tag, Users, Video, X } from "lucide-react";
 import { getJson, presentError } from "@/lib/api";
+import { normalizeTag, tagFilterValue } from "@/lib/annotations";
 import {
+  MEETING_SORTS,
   type Meeting,
+  type MeetingSort,
   type MeetingsPageDTO,
   filterMeetings,
   formatClock,
+  loadedTags,
   mergeMeetingsPage,
+  sortMeetingsBy,
   toMeeting,
 } from "@/lib/meetings";
+import { tagHref } from "./MeetingTags";
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
 import { SendBotDialog } from "./SendBotDialog";
@@ -76,17 +88,24 @@ export function MeetingsView() {
   const [dialogInitialTab, setDialogInitialTab] = useState<"link" | "calendar">("link");
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [sortBy, setSortBy] = useState<MeetingSort>("newest");
+  const tag = normalizeTag(searchParams.get("tag") ?? "");
+  const tagQuery = tag ? `&metadata=${encodeURIComponent(tagFilterValue(tag))}` : "";
   // Kept in refs so the poll effect does not restart on every refresh, and so a concurrent
   // "Load more" click and poll tick can see each other's in-flight state.
   const hasLive = useRef(false);
   const loadedCountRef = useRef(0);
+  // The filter the list on screen belongs to. A response that comes back after the tag changed
+  // answers a question nobody is asking any more and is dropped, never merged into the new list.
+  const activeTagQuery = useRef(tagQuery);
 
   const load = useCallback(async () => {
     // The poll re-fetches the FULL loaded window (never just page one) — see the file header
     // comment for why that is the rule that keeps a live row on a later page visible.
     const limit = Math.max(loadedCountRef.current, PAGE_SIZE);
     try {
-      const body = await getJson<MeetingsPageDTO>(`/api/vexa/meetings?limit=${limit}&offset=0`);
+      const body = await getJson<MeetingsPageDTO>(`/api/vexa/meetings?limit=${limit}&offset=0${tagQuery}`);
+      if (activeTagQuery.current !== tagQuery) return;
       const page = (body.meetings ?? []).map(toMeeting);
       setMeetings((prev) => mergeMeetingsPage(prev ?? [], page, "replace"));
       loadedCountRef.current = page.length;
@@ -102,15 +121,16 @@ export function MeetingsView() {
       console.warn("meetings load failed", e);
       setError(presentError(e));
     }
-  }, []);
+  }, [tagQuery]);
 
   const loadMore = useCallback(async () => {
     setLoadingMore(true);
     try {
       const offset = loadedCountRef.current;
       const body = await getJson<MeetingsPageDTO>(
-        `/api/vexa/meetings?limit=${PAGE_SIZE}&offset=${offset}`,
+        `/api/vexa/meetings?limit=${PAGE_SIZE}&offset=${offset}${tagQuery}`,
       );
+      if (activeTagQuery.current !== tagQuery) return;
       const page = (body.meetings ?? []).map(toMeeting);
       setMeetings((prev) => {
         const next = mergeMeetingsPage(prev ?? [], page, "append");
@@ -124,9 +144,14 @@ export function MeetingsView() {
     } finally {
       setLoadingMore(false);
     }
-  }, []);
+  }, [tagQuery]);
 
   useEffect(() => {
+    // A different tag is a different list: start it from its own first page.
+    activeTagQuery.current = tagQuery;
+    setMeetings(null);
+    setHasMore(false);
+    loadedCountRef.current = 0;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -169,8 +194,10 @@ export function MeetingsView() {
   const visible = useMemo(() => {
     if (!meetings) return [];
     const byTab = tab === "all" ? meetings : meetings.filter((m) => m.phase === tab);
-    return filterMeetings(byTab, query);
-  }, [meetings, tab, query]);
+    return sortMeetingsBy(filterMeetings(byTab, query), sortBy);
+  }, [meetings, tab, query, sortBy]);
+
+  const tagsOnScreen = useMemo(() => loadedTags(meetings ?? []), [meetings]);
 
   /** Reconciling the two searches (vs. this box): this input only ever filters the rows
    *  already loaded into the browser — it cannot see a match sitting on a page nobody has loaded,
@@ -224,7 +251,49 @@ export function MeetingsView() {
             </Tab>
           ))}
         </Tabs>
+        <label className="flex items-center gap-2 text-sm text-ink-2">
+          <span className="sr-only sm:not-sr-only">Sort</span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as MeetingSort)}
+            aria-label="Sort meetings"
+            className="h-10 rounded-lg border border-line bg-card px-2.5 text-sm text-ink focus:border-accent focus:outline-none"
+          >
+            {MEETING_SORTS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+
+      {(tag || tagsOnScreen.length > 0) && (
+        <div role="group" aria-label="Filter by tag" className="mb-3 flex flex-wrap items-center gap-1.5">
+          <Tag size={13} aria-hidden className="text-ink-3" />
+          {tag ? (
+            <>
+              <span className="text-xs text-ink-2">Tagged</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-accent py-0.5 pl-2.5 pr-1 text-xs font-medium text-accent-ink">
+                {tag}
+                <Link href="/" aria-label={`Clear tag filter ${tag}`} className="rounded-full p-0.5 hover:bg-black/15">
+                  <X size={12} aria-hidden />
+                </Link>
+              </span>
+            </>
+          ) : (
+            tagsOnScreen.map((t) => (
+              <Link
+                key={t}
+                href={tagHref(t)}
+                className="rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent hover:underline"
+              >
+                {t}
+              </Link>
+            ))
+          )}
+        </div>
+      )}
 
       {/* No per-tab numbers here — meeting-api's GET /meetings never reports a total, so a
           count built from loaded rows would only ever describe what happens to be on screen, not
@@ -241,8 +310,8 @@ export function MeetingsView() {
       {!error && meetings === null && <LoadingState label="Loading meetings…" />}
       {!error && meetings !== null && visible.length === 0 && (
         <EmptyState
-          title={query ? "No meetings match that search." : "No meetings yet."}
-          hint={query ? undefined : "Send a Vexa bot to a meeting and it will show up here."}
+          title={query ? "No meetings match that search." : tag ? `No meetings tagged “${tag}”.` : "No meetings yet."}
+          hint={query || tag ? undefined : "Send a Vexa bot to a meeting and it will show up here."}
         />
       )}
 
@@ -277,6 +346,11 @@ export function MeetingsView() {
                         </span>
                       )}
                       {m.hasRecording && <span>Recording</span>}
+                      {m.tags.map((t) => (
+                        <span key={t} className="rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent">
+                          {t}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 </div>

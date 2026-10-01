@@ -6,12 +6,15 @@ import {
   type MeetingRowDTO,
   type TranscriptLine,
   activeSegmentIndex,
+  distinctSpeakers,
   filterMeetings,
   formatClock,
   groupUpcomingByDay,
   initialsOf,
+  loadedTags,
   mergeMeetingsPage,
   sortMeetings,
+  sortMeetingsBy,
   toMeeting,
   toTranscript,
   transcriptToText,
@@ -151,24 +154,66 @@ describe("toTranscript", () => {
         { start: 9, speaker: "Ada", text: "   " },
       ]),
     ).toEqual([
-      { at: 0, speaker: "Ada", text: "Hello" },
-      { at: 4, speaker: "Unknown speaker", text: "second" },
+      { at: 0, end: null, speaker: "Ada", sourceSpeaker: "Ada", text: "Hello" },
+      { at: 4, end: null, speaker: "Unknown speaker", sourceSpeaker: null, text: "second" },
     ]);
   });
 
   it("survives a missing or malformed segments field", () => {
     expect(toTranscript(undefined)).toEqual([]);
     expect(toTranscript(null)).toEqual([]);
-    expect(toTranscript([{ text: "no offset" }])).toEqual([{ at: null, speaker: "Unknown speaker", text: "no offset" }]);
+    expect(toTranscript([{ text: "no offset" }])).toEqual([
+      { at: null, end: null, speaker: "Unknown speaker", sourceSpeaker: null, text: "no offset" },
+    ]);
+  });
+
+  it("keeps the producer's end offset, and drops a non-finite one", () => {
+    const [a, b] = toTranscript([
+      { start: 1, end: 3.5, speaker: "Ada", text: "one" },
+      { start: 4, end: Number.NaN, speaker: "Ada", text: "two" },
+    ]);
+    expect(a!.end).toBe(3.5);
+    expect(b!.end).toBeNull();
+  });
+
+  it("shows a speaker's label but keeps the producer's attribution as the key", () => {
+    const lines = toTranscript(
+      [
+        { start: 0, speaker: "Speaker 1", text: "hi" },
+        { start: 2, speaker: "Speaker 2", text: "hello" },
+        { start: 4, speaker: "", text: "nobody" },
+      ],
+      { "Speaker 1": "Ada Lovelace" },
+    );
+    expect(lines.map((l) => [l.speaker, l.sourceSpeaker])).toEqual([
+      ["Ada Lovelace", "Speaker 1"],
+      ["Speaker 2", "Speaker 2"],
+      ["Unknown speaker", null],
+    ]);
+  });
+
+  it("never reads a label off the object prototype", () => {
+    const [line] = toTranscript([{ start: 0, speaker: "constructor", text: "x" }], {});
+    expect(line!.speaker).toBe("constructor");
+  });
+});
+
+describe("distinctSpeakers", () => {
+  it("lists each producer speaker once, in order of first appearance, skipping unattributed lines", () => {
+    const lines = toTranscript([
+      { speaker: "B", text: "1" },
+      { speaker: "A", text: "2" },
+      { speaker: "", text: "3" },
+      { speaker: "B", text: "4" },
+    ]);
+    expect(distinctSpeakers(lines)).toEqual(["B", "A"]);
   });
 });
 
 describe("activeSegmentIndex", () => {
-  const lines: TranscriptLine[] = [
-    { at: 0, speaker: "Ada", text: "one" },
-    { at: 8.5, speaker: "Bea", text: "two" },
-    { at: 21, speaker: "Ada", text: "three" },
-  ];
+  const line = (at: number | null, speaker: string, text: string): TranscriptLine =>
+    ({ at, end: null, speaker, sourceSpeaker: speaker, text });
+  const lines: TranscriptLine[] = [line(0, "Ada", "one"), line(8.5, "Bea", "two"), line(21, "Ada", "three")];
 
   it("is null before anything has played, or before lines have loaded", () => {
     expect(activeSegmentIndex(lines, null)).toBeNull();
@@ -187,10 +232,7 @@ describe("activeSegmentIndex", () => {
   });
 
   it("skips a segment with no offset rather than treating it as always-current", () => {
-    const withGap: TranscriptLine[] = [
-      { at: null, speaker: "Ada", text: "no offset" },
-      { at: 10, speaker: "Bea", text: "has one" },
-    ];
+    const withGap: TranscriptLine[] = [line(null, "Ada", "no offset"), line(10, "Bea", "has one")];
     expect(activeSegmentIndex(withGap, 0)).toBeNull();
     expect(activeSegmentIndex(withGap, 10)).toBe(1);
   });
@@ -208,7 +250,9 @@ describe("formatClock", () => {
 
 describe("transcriptToText", () => {
   it("emits exactly what the page shows", () => {
-    const text = transcriptToText("Sync", [{ at: 65, speaker: "Ada", text: "Hi" }]);
+    const text = transcriptToText("Sync", [
+      { at: 65, end: null, speaker: "Ada", sourceSpeaker: "Speaker 1", text: "Hi" },
+    ]);
     expect(text).toContain("[1:05] Ada: Hi");
     expect(text.startsWith("Sync\n====\n")).toBe(true);
   });
@@ -257,5 +301,52 @@ describe("mergeMeetingsPage (pagination + polling)", () => {
     const freshWindow = [m("1", { status: "completed" }), m("2", { status: "active" })];
     const merged = mergeMeetingsPage([], freshWindow, "replace");
     expect(merged[0]!.id).toBe("2");
+  });
+});
+
+describe("sortMeetingsBy", () => {
+  const m = (id: string, over: Partial<MeetingRowDTO> = {}) => toMeeting(row({ id, ...over }));
+  const list = [
+    m("a", { start_time: "2026-09-10T10:00:00Z", end_time: "2026-09-10T10:30:00Z", data: { title: "beta" } }),
+    m("b", { start_time: "2026-09-12T10:00:00Z", end_time: "2026-09-12T10:05:00Z", data: { title: "Alpha" } }),
+    m("c", { start_time: null, end_time: null, data: { title: "gamma" } }),
+    m("live", { status: "active", start_time: "2026-09-01T10:00:00Z", data: { title: "zeta" } }),
+  ];
+
+  it("keeps the live meeting on top under every order", () => {
+    for (const by of ["newest", "oldest", "longest", "title"] as const) {
+      expect(sortMeetingsBy(list, by)[0]!.id).toBe("live");
+    }
+  });
+
+  it("orders by time either way, a row with no time going last", () => {
+    expect(sortMeetingsBy(list, "oldest").map((x) => x.id)).toEqual(["live", "a", "b", "c"]);
+    expect(sortMeetingsBy(list, "newest").map((x) => x.id)).toEqual(["live", "b", "a", "c"]);
+  });
+
+  it("orders by duration, unknown last, and by title case-insensitively", () => {
+    expect(sortMeetingsBy(list, "longest").map((x) => x.id)).toEqual(["live", "a", "b", "c"]);
+    expect(sortMeetingsBy(list, "title").map((x) => x.title)).toEqual(["zeta", "Alpha", "beta", "gamma"]);
+  });
+
+  it("never mutates its input", () => {
+    const before = list.map((x) => x.id);
+    sortMeetingsBy(list, "title");
+    expect(list.map((x) => x.id)).toEqual(before);
+  });
+});
+
+describe("loadedTags", () => {
+  it("is the alphabetical union of the loaded rows' tags", () => {
+    const a = toMeeting(row({ id: 1, data: { metadata: { tags: ["sales", "q3"] } } }));
+    const b = toMeeting(row({ id: 2, data: { metadata: { tags: ["q3", "acme"] } } }));
+    expect(loadedTags([a, b])).toEqual(["acme", "q3", "sales"]);
+  });
+});
+
+describe("filterMeetings — tags", () => {
+  it("matches a tag as well as a title", () => {
+    const tagged = toMeeting(row({ id: 9, data: { title: "Call", metadata: { tags: ["acme renewal"] } } }));
+    expect(filterMeetings([tagged], "renewal").map((x) => x.id)).toEqual(["9"]);
   });
 });
