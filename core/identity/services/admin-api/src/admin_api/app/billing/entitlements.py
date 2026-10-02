@@ -67,8 +67,8 @@ class ResolvedPlan:
     period_end: datetime
     #: Set only while a `past_due` subscription is still inside its grace window.
     grace_until: Optional[datetime]
-    #: Whether the resolved plan renews at `period_end` (False for `cancel_at_period_end=true`,
-    #: a `canceled` subscription still coasting to its paid `period_end`, and a lapsed `past_due`).
+    #: Whether the resolved plan renews at `period_end` (False for `cancel_at_period_end=true`
+    #: and a `past_due` subscription).
     will_renew: bool
     catalog_version: str
     #: The raw tier string, when it did not match any entry in `catalog.PLANS` (else `None`).
@@ -268,15 +268,9 @@ def _resolve_subscription_plan(data: Dict[str, Any], now: datetime) -> ResolvedP
                             unrecognized_tier=unrecognized_tier)
 
     if status == "canceled":
-        if now < period_end:
-            # Already paid through period_end — Stripe's own "cancel effective at period end"
-            # shape, just observed after the cancellation already recorded.
-            return ResolvedPlan(
-                plan_id=tier_plan.plan_id, limits=tier_plan, status=status,
-                period_start=period_start, period_end=period_end, grace_until=None,
-                will_renew=False, catalog_version=CATALOG_VERSION,
-                unrecognized_tier=unrecognized_tier,
-            )
+        # Stripe sets `canceled` only once a subscription has ENDED — immediately, or at the end
+        # of a period it was set to cancel at. Until then a subscription cancelling at period end
+        # stays `active` with `cancel_at_period_end` (the paid branch above, `will_renew=False`).
         return _free_result(status=status, now=now, grace_until=None, will_renew=True,
                             unrecognized_tier=unrecognized_tier)
 

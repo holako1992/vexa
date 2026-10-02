@@ -87,9 +87,11 @@ def test_past_due_grace_expired_resolves_free():
     assert plan.grace_until is not None  # the fact that grace lapsed is still reported
 
 
-def test_canceled_with_future_period_end_resolves_pro_until_end():
+def test_canceled_resolves_free_even_with_a_future_period_end():
+    """Stripe's `canceled` means the subscription has ENDED (an immediate cancel keeps the period
+    end it would have renewed at). A subscription cancelling at period end is still `active`."""
     period_end = datetime(2026, 9, 20, tzinfo=UTC)
-    now = datetime(2026, 9, 15, tzinfo=UTC)  # still inside the paid period
+    now = datetime(2026, 9, 15, tzinfo=UTC)
     data = {
         "subscription_status": "canceled",
         "subscription_tier": "pro",
@@ -97,10 +99,8 @@ def test_canceled_with_future_period_end_resolves_pro_until_end():
         "subscription_current_period_end": _unix(period_end),
     }
     plan = resolve_plan(data, now)
-    assert plan.plan_id == "pro"
+    assert plan.plan_id == "free"
     assert plan.status == "canceled"
-    assert plan.will_renew is False
-    assert plan.period_end == period_end
 
 
 def test_canceled_with_past_period_end_resolves_free():

@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response, Security, status
+from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, StrictBool, field_serializer, field_validator, model_validator
 from sqlalchemy import func
@@ -45,7 +46,9 @@ from .billing import catalog as billing_catalog
 from .billing.catalog import effective_concurrent_cap
 from .billing.entitlements import resolve_entitlements, resolve_plan
 from .billing.meetings_usage import MeetingsUsagePort
-from .billing.stripe_gateway import StripeClient, StripeSignatureError, verify_signature
+from .billing import plan_change as billing_plan_change
+from .billing import prices as billing_prices
+from .billing.stripe_gateway import StripeAPIError, StripeClient, StripeSignatureError, verify_signature
 from .billing.stripe_webhook import (
     HANDLED_EVENT_TYPES,
     apply_subscription_patch,
@@ -276,6 +279,10 @@ class PlatformBillingDataPatch(BaseModel):
     stripe_payment_method_id: Optional[str] = None
     subscription_status: Optional[str] = None
     subscription_tier: Optional[str] = None
+    subscription_interval: Optional[str] = None
+    subscription_pending_plan: Optional[str] = None
+    subscription_pending_interval: Optional[str] = None
+    subscription_pending_at: Optional[int] = None
     subscription_cancel_at_period_end: Optional[bool] = None
     subscription_cancellation_date: Optional[int] = None
     subscription_current_period_start: Optional[int] = None
@@ -416,6 +423,23 @@ class CheckoutResponse(BaseModel):
 
 class PortalResponse(BaseModel):
     url: str
+
+
+class ChangePlanResponse(BaseModel):
+    #: "now", "scheduled" (at the end of the paid period), or "kept" (a pending switch called off).
+    effective: str
+
+
+class PlanPriceOut(BaseModel):
+    plan: str
+    interval: str
+    #: Minor units (cents), exactly as Stripe's `unit_amount`.
+    unit_amount: int
+    currency: str
+
+
+class PriceListResponse(BaseModel):
+    prices: List[PlanPriceOut]
 
 
 class CalendarUpdate(BaseModel):
@@ -643,8 +667,34 @@ def _resolve_capture_signal(user_data: dict, platform_diagnostics: dict) -> bool
     return True
 
 
+def _subscription_view(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The caller's live Stripe subscription as the billing page needs it — the plan and interval
+    it bills, and any switch scheduled for the end of the period — or `None` without one."""
+    if data.get("subscription_status") not in billing_plan_change.SWITCHABLE_STATUSES:
+        return None
+    pending = None
+    if data.get("subscription_pending_plan") and data.get("subscription_pending_at"):
+        pending = {
+            "plan": data["subscription_pending_plan"],
+            "interval": data.get("subscription_pending_interval"),
+            "at": datetime.fromtimestamp(int(data["subscription_pending_at"]), tz=timezone.utc).isoformat(),
+        }
+    return {
+        "plan": data.get("subscription_tier"),
+        "interval": data.get("subscription_interval"),
+        "pending_change": pending,
+    }
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Vexa Admin API (v0.12)")
+
+    # Stripe refused a call one of the /billing/* routes made: relay Stripe's own reason as a
+    # 502 (the upstream refused), never a bare 500 with the reason lost.
+    @app.exception_handler(StripeAPIError)
+    async def stripe_api_error(request: Request, exc: StripeAPIError):
+        return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY,
+                            content={"detail": f"Stripe refused the request: {exc.message}"})
 
     # --- liveness probe (gate:health): process-up, no DB dependency. Readiness (DB reachable)
     # is a separate concern — keeping /health a pure liveness check makes it green without a
@@ -1438,6 +1488,9 @@ def create_app() -> FastAPI:
             # Machine-readable why the plan's allowance is below its catalog figure
             # (`identity_unverified`), or null. The dashboard renders fixed copy from the code.
             "reason": plan.reason,
+            # The live Stripe subscription behind the plan (what it bills, and any switch due at
+            # the end of the period), or null — the billing page's switch controls read this.
+            "subscription": _subscription_view(data),
         }
 
     # --- user tier: Stripe checkout. Creates the Stripe customer on first use (stored on
@@ -1471,6 +1524,16 @@ def create_app() -> FastAPI:
             user.data = {**data_blob, "stripe_customer_id": customer_id}
             await db.commit()
             await db.refresh(user)
+        else:
+            # One subscription per customer: asked of Stripe, not of users.data, so a purchase
+            # whose webhook hasn't landed yet still counts.
+            live = billing_plan_change.live_subscriptions(await client.list_subscriptions(customer_id))
+            if live:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail="You already have a subscription — switch plans (POST /billing/change) "
+                           "instead of buying a second one",
+                )
         session = await client.create_checkout_session(
             customer_id=customer_id, price_id=price_id,
             success_url=success_url, cancel_url=cancel_url,
@@ -1497,6 +1560,46 @@ def create_app() -> FastAPI:
         client = _stripe_client()
         session = await client.create_portal_session(customer_id=customer_id, return_url=return_url)
         return PortalResponse(url=session["url"])
+
+    # --- user tier: switch the caller's ONE subscription to another catalog plan/interval, in
+    #     place — see `billing/plan_change.py` for when each kind of switch takes effect. The
+    #     result is re-read from Stripe and written exactly as the webhook would write it.
+    @app.post("/billing/change", response_model=ChangePlanResponse)
+    async def change_billing_plan(body: CheckoutRequest,
+                                  user: User = Depends(get_current_user_for_update),
+                                  db: AsyncSession = Depends(get_db)):
+        _require_stripe_billing()
+        data_blob = user.data if isinstance(user.data, dict) else {}
+        subscription_id = data_blob.get("stripe_subscription_id")
+        if not subscription_id or data_blob.get("subscription_status") not in billing_plan_change.SWITCHABLE_STATUSES:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="No active subscription to switch — subscribe first (POST /billing/checkout)",
+            )
+        client = _stripe_client()
+        subscription = await client.get_subscription(subscription_id)
+        try:
+            result = await billing_plan_change.change_plan(client, subscription, body.plan, body.interval)
+        except billing_plan_change.PlanChangeRefused as e:
+            code = status.HTTP_503_SERVICE_UNAVAILABLE if e.code == "not_on_sale" else status.HTTP_409_CONFLICT
+            raise HTTPException(code, detail=e.message) from e
+        patch = apply_subscription_patch(await client.get_subscription(subscription_id))
+        if patch is not None:
+            user.data = {**data_blob, **patch}
+            await db.commit()
+        return ChangePlanResponse(effective=result.effective)
+
+    # --- user tier: the prices this deployment sells, read from Stripe (amount, currency,
+    #     interval) for the billing page's plan cards. A price Stripe won't confirm is left out,
+    #     never guessed — see `billing/prices.py`.
+    @app.get("/billing/prices", response_model=PriceListResponse)
+    async def list_billing_prices(user: User = Depends(get_current_user)):
+        _require_stripe_billing()
+        found = await billing_prices.configured_prices(_stripe_client())
+        return PriceListResponse(prices=[
+            PlanPriceOut(plan=p.plan, interval=p.interval, unit_amount=p.unit_amount, currency=p.currency)
+            for p in found
+        ])
 
     # --- Stripe webhook — authenticated ONLY by the Stripe-Signature header (HMAC-SHA256,
     #     constant-time compare, 300s timestamp tolerance; see billing/stripe_gateway.verify_signature).
@@ -1570,6 +1673,15 @@ def create_app() -> FastAPI:
             return {"received": True, "handled": False, "reason": "no matching user"}
 
         data_blob = target_user.data if isinstance(target_user.data, dict) else {}
+        stored_id = data_blob.get("stripe_subscription_id")
+        if (
+            stored_id and stored_id != subscription.get("id")
+            and data_blob.get("subscription_status") in billing_plan_change.LIVE_STATUSES
+            and subscription.get("status") not in billing_plan_change.LIVE_STATUSES
+        ):
+            # A subscription that has ended is not the one this account now holds — an older
+            # one finishing (or a redelivered event about it) must not overwrite the live one.
+            return {"received": True, "handled": False, "reason": "not the account's current subscription"}
         merged = {**data_blob, **patch, "updated_by_webhook": int(time.time())}
         if customer_id and not data_blob.get("stripe_customer_id"):
             merged["stripe_customer_id"] = customer_id

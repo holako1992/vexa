@@ -37,7 +37,7 @@ beyond what `subscription` already carries, so the acceptance table is a table o
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .catalog import plan_for_price_id
 
@@ -87,6 +87,40 @@ def _period_bound(subscription: Dict[str, Any], field: str) -> Optional[int]:
         return None
 
 
+def _phase_price_id(phase: Dict[str, Any]) -> Optional[str]:
+    items = phase.get("items") or []
+    price = (items[0] or {}).get("price") if items else None
+    if isinstance(price, dict):
+        return price.get("id")
+    return price if isinstance(price, str) else None
+
+
+def pending_change(subscription: Dict[str, Any]) -> Optional[Tuple[str, str, int]]:
+    """The `(plan, interval, starts_at)` a subscription is scheduled to switch to at the end of its
+    current phase, read from its subscription schedule (`schedule`, expanded), or `None` when it
+    has no schedule, no later phase, or a later phase on a price no catalog plan maps to.
+
+    A plan switch that waits for the paid period to end (a downgrade, or any monthly↔yearly
+    switch) lives in Stripe as a schedule whose next phase starts at the current one's end; the
+    subscription's own price only changes when that phase begins."""
+    schedule = subscription.get("schedule")
+    if not isinstance(schedule, dict):
+        return None
+    current_end = (schedule.get("current_phase") or {}).get("end_date")
+    if current_end is None:
+        return None
+    for phase in schedule.get("phases") or []:
+        start = phase.get("start_date")
+        if start is None or int(start) < int(current_end):
+            continue
+        price_id = _phase_price_id(phase)
+        resolved = plan_for_price_id(price_id) if price_id else None
+        if resolved is None:
+            return None
+        return resolved[0], resolved[1], int(start)
+    return None
+
+
 def apply_subscription_patch(subscription: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """A Stripe subscription object (as `StripeClient.get_subscription` returns it) -> the
     `PlatformBillingDataPatch`-shaped dict to write onto `users.data`, or `None` when the
@@ -104,13 +138,18 @@ def apply_subscription_patch(subscription: Dict[str, Any]) -> Optional[Dict[str,
             subscription.get("id"), price_id,
         )
         return None
-    plan_id, _interval = resolved
+    plan_id, interval = resolved
 
+    pending = pending_change(subscription)
     patch: Dict[str, Any] = {
         "stripe_subscription_id": subscription.get("id"),
         "subscription_status": subscription.get("status"),
         "subscription_tier": plan_id,
+        "subscription_interval": interval,
         "subscription_cancel_at_period_end": bool(subscription.get("cancel_at_period_end") or False),
+        "subscription_pending_plan": pending[0] if pending else None,
+        "subscription_pending_interval": pending[1] if pending else None,
+        "subscription_pending_at": pending[2] if pending else None,
     }
     period_start = _period_bound(subscription, "current_period_start")
     period_end = _period_bound(subscription, "current_period_end")

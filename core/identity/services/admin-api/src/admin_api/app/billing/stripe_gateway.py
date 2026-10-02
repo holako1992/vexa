@@ -114,6 +114,29 @@ def verify_signature(
         )
 
 
+class StripeAPIError(Exception):
+    """Stripe answered a request with an error status. Carries Stripe's own explanation
+    (`error.message`, `error.code`) so a caller can log and relay WHY, not just that it failed."""
+
+    def __init__(self, status_code: int, message: str, code: Optional[str] = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+        self.code = code
+
+
+def _raise_for_stripe_error(r: httpx.Response) -> None:
+    if r.is_success:
+        return
+    try:
+        error = (r.json() or {}).get("error") or {}
+    except ValueError:
+        error = {}
+    message = str(error.get("message") or f"HTTP {r.status_code}")
+    log.warning("stripe %s %s refused (%s): %s", r.request.method, r.request.url.path, r.status_code, message)
+    raise StripeAPIError(r.status_code, message, error.get("code"))
+
+
 # ── form encoding: Stripe's API takes PHP-style bracket notation for nested/array params ────────
 
 def _flatten_form(params: Dict[str, Any], prefix: str = "") -> Dict[str, str]:
@@ -161,13 +184,13 @@ class StripeClient:
     async def _post(self, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
         async with self._client() as client:
             r = await client.post(path, data=_flatten_form(params))
-        r.raise_for_status()
+        _raise_for_stripe_error(r)
         return r.json()
 
     async def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         async with self._client() as client:
             r = await client.get(path, params=_flatten_form(params or {}))
-        r.raise_for_status()
+        _raise_for_stripe_error(r)
         return r.json()
 
     async def create_customer(self, *, email: str, metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -215,4 +238,32 @@ class StripeClient:
         model depends on: every subscription-affecting event re-fetches this rather than trusting
         the event body, so redelivery and reordering both converge on the same written state (see
         `billing/stripe_webhook.py` module docstring)."""
-        return await self._get(f"/subscriptions/{subscription_id}")
+        return await self._get(f"/subscriptions/{subscription_id}", {"expand": ["schedule"]})
+
+    async def list_subscriptions(self, customer_id: str) -> List[Dict[str, Any]]:
+        """`GET /v1/subscriptions?customer=…&status=all` — every subscription the customer has,
+        in any state; checkout reads it to refuse a second live subscription."""
+        body = await self._get("/subscriptions", {"customer": customer_id, "status": "all", "limit": 100})
+        return list(body.get("data") or [])
+
+    async def update_subscription(self, subscription_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """`POST /v1/subscriptions/{id}` — an in-place change, e.g. a new price on its one item."""
+        return await self._post(f"/subscriptions/{subscription_id}", params)
+
+    async def create_schedule_from_subscription(self, subscription_id: str) -> Dict[str, Any]:
+        """`POST /v1/subscription_schedules {from_subscription}` — a schedule whose one phase
+        mirrors the subscription as it stands, ready for a later phase to be added."""
+        return await self._post("/subscription_schedules", {"from_subscription": subscription_id})
+
+    async def update_schedule(self, schedule_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        return await self._post(f"/subscription_schedules/{schedule_id}", params)
+
+    async def release_schedule(self, schedule_id: str) -> Dict[str, Any]:
+        """`POST /v1/subscription_schedules/{id}/release` — drop the schedule, keeping the
+        subscription exactly as it is now (a pending switch is called off)."""
+        return await self._post(f"/subscription_schedules/{schedule_id}/release", {})
+
+    async def get_price(self, price_id: str) -> Dict[str, Any]:
+        """`GET /v1/prices/{id}` — the amount, currency and interval Stripe will actually charge,
+        read so the billing page shows Stripe's own figure rather than a second copy of it."""
+        return await self._get(f"/prices/{price_id}")

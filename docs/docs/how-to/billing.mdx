@@ -34,6 +34,68 @@ The FIRST checkout for an account creates its Stripe customer and stores the id;
 checkout or portal call reuses it. A `(plan, interval)` this deployment does not sell (no matching
 `STRIPE_PRICE_*` configured) answers 503 naming the missing key, never a guessed price.
 
+**One subscription per account.** Checkout asks Stripe for the customer's subscriptions first and
+answers **409** while one is still live (`active`, `trialing`, `past_due`, `unpaid`,
+`incomplete` or `paused`) — a subscriber changes plan with `POST /billing/change` below instead
+of buying a second one. Once a subscription has ended, checkout works again.
+
+## Switch plans
+
+```bash
+curl -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"plan": "team", "interval": "month"}' \
+  "$API_BASE/billing/change"
+```
+
+Changes the caller's one subscription in place and answers `{"effective": "now" | "scheduled" | "kept"}`:
+
+| From → to | Takes effect | Charged |
+|---|---|---|
+| Upgrade, same interval (Pro → Team) | **now** | nothing now; the next renewal bills the new price |
+| Downgrade (Team → Pro) | at the end of the paid period (**scheduled**) | the new price from that renewal |
+| Monthly ↔ yearly, same plan | at the end of the paid period (**scheduled**) | the new price from that renewal |
+| Upgrade and interval change (Pro monthly → Team yearly) | the better plan **now** at the current interval; the new interval at renewal | nothing now; Team yearly from that renewal |
+| The plan and interval it already has | a pending switch is called off (**kept**) | — |
+
+Stripe cannot move a subscription between monthly and yearly mid-period without invoicing it
+there and then, so an interval switch always waits for the period to end. A switch that waits is
+held in Stripe as a subscription schedule; `GET /user/entitlements` reports it under
+`subscription.pending_change` (`{plan, interval, at}`), alongside the plan and interval the
+subscription bills now (`subscription.plan`, `subscription.interval`).
+
+A caller with no live subscription gets **409** (check out first). A subscription set to cancel at
+the end of its period gets **409** too — resume it in the portal before switching. When Stripe
+refuses a call, the route answers **502** with Stripe's own reason in `detail`.
+
+<Note>
+Turn **off** plan switching in the Stripe Customer Portal settings (keep cancel, payment method
+and invoices): a switch made there bypasses the rules above. The webhook still records whatever
+Stripe reports either way.
+</Note>
+
+## Show the prices
+
+```bash
+curl -H "X-API-Key: $API_KEY" "$API_BASE/billing/prices"
+```
+
+```json
+{"prices": [
+  {"plan": "pro", "interval": "month", "unit_amount": 500, "currency": "usd"},
+  {"plan": "pro", "interval": "year", "unit_amount": 5000, "currency": "usd"}
+]}
+```
+
+Every configured `STRIPE_PRICE_*` (the plan → price mapping below), read back from
+Stripe: `unit_amount` is in the currency's minor units, exactly as Stripe stores it. Nothing in
+Vexa holds an amount, so the figure shown before Checkout is the figure Checkout charges. A
+complete read is cached for five minutes; a price you edit in Stripe shows within that window.
+
+A price is **left out**, and a warning names it in admin-api's log, when Stripe won't return it,
+when it's archived, when it has no fixed amount, or when Stripe bills it on a different interval
+than the env var it's configured under (a yearly price pasted into `STRIPE_PRICE_PRO_MONTHLY`).
+The dashboard then shows that plan without a figure; checkout for it is unaffected by this route.
+
 ## Manage an existing subscription
 
 ```bash
@@ -53,8 +115,9 @@ curl -H "X-API-Key: $API_KEY" "$API_BASE/user/entitlements"
 Returns the resolved plan, its limits, the current billing period, and usage so far this period —
 `plan_id`, `status`, `limits`, and `usage`. This is what `POST /bots`' quota enforcement reads; a
 `past_due` subscription keeps its paid tier for a 7-day
-grace window before falling back to Free, and a `canceled` one keeps its paid tier until
-`period_end` (Stripe's own "still paid for what you bought" shape) and resolves to Free only after.
+grace window before falling back to Free. A subscription set to cancel at the end of its period
+is still `active` (with `will_renew: false`) and keeps its tier until then; `canceled` means
+Stripe has ended it, and resolves to Free.
 
 `limits.max_minutes_per_meeting` (Free 60, Pro/Team 240) is the OTHER cap `POST /bots` enforces,
 alongside the monthly meeting quota — every bot's active phase is hard-capped at that many minutes,
@@ -290,7 +353,7 @@ STRIPE_PRICE_TEAM_YEARLY=price_...
 ```
 
 Any of `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / the three URLs left unset takes down all
-three `/billing/*` routes with a 503 naming what's missing — the rest of the deployment is
+five `/billing/*` routes with a 503 naming what's missing — the rest of the deployment is
 unaffected. An unset `STRIPE_PRICE_*` only takes down checkout for that one plan/interval. See
 also `BILLING_UPGRADE_URL` on the same service — the page a `quota_exceeded` refusal (from
 `POST /bots` when a Free user is over their monthly meeting) points them at, typically this same

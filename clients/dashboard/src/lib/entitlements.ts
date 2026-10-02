@@ -10,6 +10,8 @@
  *     as `0`. A meter that is broken must never look like a clean quota.
  */
 
+import type { SubscriptionView } from "./planSwitch";
+
 export interface EntitlementsLimits {
   meetings_per_month: number | null;
   max_minutes_per_meeting: number | null;
@@ -39,6 +41,9 @@ export interface Entitlements {
   usage: EntitlementsUsage;
   /** Machine-readable why the allowance is below the plan's catalog figure, or null. */
   reason?: string | null;
+  /** The live Stripe subscription behind the plan — what it bills and any switch due at the end
+   *  of the period — or null when the account has none. */
+  subscription?: SubscriptionView | null;
 }
 
 /** The one reason code the core states today: a Free account whose recorded sign-in did not verify

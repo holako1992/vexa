@@ -74,6 +74,19 @@ describe("resolveUpstream — read extras", () => {
   });
 });
 
+describe("resolveUpstream — billing prices", () => {
+  it("admits GET billing/prices", () => {
+    expect(resolveUpstream(["billing", "prices"])).toEqual({ path: "/billing/prices" });
+  });
+
+  it("refuses near-misses, and never admits a write to it", () => {
+    for (const path of [["billing", "price"], ["billing", "prices", "extra"], ["billing"], ["prices"]]) {
+      expect(resolveUpstream(path)).toBeNull();
+    }
+    expect(resolveWriteUpstream("POST", ["billing", "prices"])).toBeNull();
+  });
+});
+
 describe("resolveUpstream — entitlements", () => {
   it("admits GET user/entitlements", () => {
     expect(resolveUpstream(["user", "entitlements"])).toEqual({ path: "/user/entitlements" });
@@ -507,9 +520,13 @@ describe("validateBody — meetings/<id> auto-join override", () => {
 });
 
 describe("resolveWriteUpstream — billing checkout/portal", () => {
-  it("admits POST /billing/checkout and POST /billing/portal", () => {
+  it("admits POST /billing/checkout, /billing/change and /billing/portal", () => {
     expect(resolveWriteUpstream("POST", ["billing", "checkout"])).toEqual({
       path: "/billing/checkout",
+      body: expect.any(Function),
+    });
+    expect(resolveWriteUpstream("POST", ["billing", "change"])).toEqual({
+      path: "/billing/change",
       body: expect.any(Function),
     });
     expect(resolveWriteUpstream("POST", ["billing", "portal"])).toEqual({

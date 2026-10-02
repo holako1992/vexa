@@ -297,9 +297,9 @@
  ],
  "capabilities": {
   "stripe_billing": {
-   "description": "checkout, the billing portal, and the webhook's write path (POST /billing/checkout, POST /billing/portal, POST /billing/webhook)",
+   "description": "checkout, plan switching, the billing portal, the price list, and the webhook's write path (POST /billing/checkout, POST /billing/change, POST /billing/portal, GET /billing/prices, POST /billing/webhook)",
    "mode": "all",
-   "when_unconfigured": "all three /billing/* routes answer a typed 503 naming the missing key(s); every other admin-api route is unaffected"
+   "when_unconfigured": "all five /billing/* routes answer a typed 503 naming the missing key(s); every other admin-api route is unaffected"
   },
   "google_calendar": {
    "description": "the Google Calendar OAuth connect flow (GET /user/calendars/google/authorize, POST /user/calendars/google/exchange) and the internal access-token edge meeting-api's sync calls (POST /internal/calendars/{id}/google-token)",

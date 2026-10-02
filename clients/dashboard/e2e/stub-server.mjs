@@ -559,6 +559,18 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, entitlements);
   }
 
+  // GET /billing/prices — admin-api's relay of Stripe's own prices (minor units).
+  if (req.method === "GET" && parts.length === 2 && parts[0] === "billing" && parts[1] === "prices") {
+    return sendJson(res, 200, {
+      prices: [
+        { plan: "pro", interval: "month", unit_amount: 500, currency: "usd" },
+        { plan: "pro", interval: "year", unit_amount: 5000, currency: "usd" },
+        { plan: "team", interval: "month", unit_amount: 2000, currency: "usd" },
+        { plan: "team", interval: "year", unit_amount: 10000, currency: "usd" },
+      ],
+    });
+  }
+
   // DELETE /bots/<platform>/<native> — Stop recording. Mirrors meeting-api's own shape
   // closely enough for the dashboard's spec: an unsupported platform is 422, an unknown/already-
   // stopped pair is 404, otherwise the row moves to `completed` with `stop_requested: true`.
@@ -818,6 +830,37 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, {
       url: `https://checkout.stripe.com/c/pay/e2e_test_session#${body.plan}_${body.interval}`,
     });
+  }
+
+  // POST /billing/change {plan, interval} — the "Switch to …" buttons. Mirrors
+  // `billing/plan_change.py`'s rule closely enough for the dashboard's spec: an upgrade on the same
+  // interval applies now; a downgrade or interval switch is scheduled for the period end; the
+  // current plan calls a pending switch off. 409 without a subscription, like the core.
+  if (req.method === "POST" && parts.length === 2 && parts[0] === "billing" && parts[1] === "change") {
+    const body = await readAndLogBody(req, logEntry);
+    const sub = entitlements.subscription;
+    if (!sub) {
+      return sendJson(res, 409, { detail: "No active subscription to switch — subscribe first (POST /billing/checkout)" });
+    }
+    const rank = { pro: 1, team: 2 };
+    let effective;
+    if (body.plan === sub.plan && body.interval === sub.interval) {
+      effective = "kept";
+      sub.pending_change = null;
+    } else if (rank[body.plan] > rank[sub.plan] && body.interval === sub.interval) {
+      effective = "now";
+      sub.plan = body.plan;
+      sub.pending_change = null;
+      entitlements.plan_id = body.plan;
+    } else {
+      effective = "scheduled";
+      if (rank[body.plan] > rank[sub.plan]) {
+        sub.plan = body.plan;
+        entitlements.plan_id = body.plan;
+      }
+      sub.pending_change = { plan: body.plan, interval: body.interval, at: entitlements.period.end };
+    }
+    return sendJson(res, 200, { effective });
   }
 
   // POST /billing/portal — the Manage-subscription button. 409 with no body when there is no

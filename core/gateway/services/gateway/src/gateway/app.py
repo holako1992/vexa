@@ -837,6 +837,16 @@ def create_app(
     async def create_billing_portal(request: Request):
         return await _forward("POST", _admin("/billing/portal"), request)
 
+    # Switch the caller's one subscription to another plan/interval, in place.
+    @app.post("/billing/change")
+    async def change_billing_plan(request: Request):
+        return await _forward("POST", _admin("/billing/change"), request)
+
+    # The prices on sale, as Stripe states them — the billing page's plan cards.
+    @app.get("/billing/prices")
+    async def list_billing_prices(request: Request):
+        return await _forward("GET", _admin("/billing/prices"), request)
+
     # ---- the AGENT domain (P20·Stage 2): the gateway fronts agent-api under the canonical /agent/*
     # prefix so the SAME edge resolves key → user and injects X-User-Id; agent-api derives `subject`
     # from it (never the client). The terminal therefore talks ONLY to the gateway (one authenticated

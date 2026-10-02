@@ -303,9 +303,9 @@ def test_out_of_order_delivery_converges_on_stripes_current_state(client, monkey
     )
 
 
-# ── subscription.deleted resolves to free AT PERIOD END, via resolve_plan ──────────────────────
+# ── subscription.deleted resolves to free, via resolve_plan ────────────────────────────────────
 
-def test_subscription_deleted_resolves_to_free_only_after_period_end(client, monkeypatch):
+def test_subscription_deleted_resolves_to_free(client, monkeypatch):
     uid = _create_user(client, "deleted-grace@vexa.ai")
     client.patch(f"/admin/users/{uid}", headers=_admin(),
                 json={"data": {"stripe_customer_id": "cus_deleted"}})
@@ -324,12 +324,9 @@ def test_subscription_deleted_resolves_to_free_only_after_period_end(client, mon
     assert r.status_code == 200
     data = _get_user(client, uid)["data"]
 
-    still_paid = resolve_plan(data, datetime(2026, 9, 20, tzinfo=timezone.utc))
-    assert still_paid.plan_id == "pro", "still paid through period_end — Stripe's own shape"
-    assert still_paid.will_renew is False
-
-    after_period_end = resolve_plan(data, datetime(2026, 10, 2, tzinfo=timezone.utc))
-    assert after_period_end.plan_id == "free", "resolves to free once period_end has passed"
+    assert data["subscription_status"] == "canceled"
+    ended = resolve_plan(data, datetime(2026, 9, 20, tzinfo=timezone.utc))
+    assert ended.plan_id == "free", "a canceled subscription has ended, whatever its period_end"
 
 
 def test_webhook_response_names_catalog_version_consistently(client, monkeypatch):
@@ -346,3 +343,40 @@ def test_webhook_response_names_catalog_version_consistently(client, monkeypatch
     data = _get_user(client, uid)["data"]
     resolved = resolve_plan(data, datetime.now(timezone.utc))
     assert resolved.catalog_version == CATALOG_VERSION
+
+
+# ── an ended subscription that is not the account's current one is ignored ─────────────────────
+
+def test_an_older_subscription_ending_does_not_overwrite_the_live_one(client, monkeypatch):
+    uid = _create_user(client, "two-subs@vexa.ai")
+    client.patch(f"/admin/users/{uid}", headers=_admin(),
+                json={"data": {"stripe_customer_id": "cus_two"}})
+    server = _SubscriptionServer()
+    server.subscriptions["sub_new"] = _subscription("sub_new", "cus_two", status="active")
+    server.subscriptions["sub_old"] = _subscription("sub_old", "cus_two", status="canceled",
+                                                    canceled_at=1_701_000_000)
+    _wire_stripe(monkeypatch, server)
+
+    assert _post_webhook(client, _event("customer.subscription.created",
+                                        {"id": "sub_new", "customer": "cus_two"})).status_code == 200
+    r = _post_webhook(client, _event("customer.subscription.deleted",
+                                     {"id": "sub_old", "customer": "cus_two"}, event_id="evt_old"))
+    assert r.status_code == 200
+    assert r.json()["handled"] is False
+    data = _get_user(client, uid)["data"]
+    assert (data["stripe_subscription_id"], data["subscription_status"]) == ("sub_new", "active")
+
+
+def test_the_current_subscription_ending_is_still_written(client, monkeypatch):
+    uid = _create_user(client, "current-ends@vexa.ai")
+    client.patch(f"/admin/users/{uid}", headers=_admin(),
+                json={"data": {"stripe_customer_id": "cus_ends"}})
+    server = _SubscriptionServer()
+    server.subscriptions["sub_cur"] = _subscription("sub_cur", "cus_ends", status="active")
+    _wire_stripe(monkeypatch, server)
+    _post_webhook(client, _event("customer.subscription.created", {"id": "sub_cur", "customer": "cus_ends"}))
+    server.subscriptions["sub_cur"] = _subscription("sub_cur", "cus_ends", status="canceled",
+                                                    canceled_at=1_701_000_000)
+    _post_webhook(client, _event("customer.subscription.deleted", {"id": "sub_cur", "customer": "cus_ends"},
+                                 event_id="evt_end"))
+    assert _get_user(client, uid)["data"]["subscription_status"] == "canceled"

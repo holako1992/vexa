@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from admin_api.app.billing.stripe_webhook import (
     apply_subscription_patch,
+    pending_change,
     client_reference_id_for_event,
     customer_id_for_event,
     subscription_id_for_event,
@@ -41,7 +42,11 @@ def test_an_active_subscription_on_a_known_price_resolves_to_its_plan(monkeypatc
         "stripe_subscription_id": "sub_test_1",
         "subscription_status": "active",
         "subscription_tier": "pro",
+        "subscription_interval": "month",
         "subscription_cancel_at_period_end": False,
+        "subscription_pending_plan": None,
+        "subscription_pending_interval": None,
+        "subscription_pending_at": None,
         "subscription_current_period_start": 1_700_000_000,
         "subscription_current_period_end": 1_702_592_000,
     }
@@ -139,3 +144,56 @@ def test_an_invoice_with_no_subscription_is_none():
 
 def test_an_unhandled_event_type_names_no_subscription():
     assert subscription_id_for_event("customer.updated", {"id": "cus_1"}) is None
+
+
+# ── a scheduled switch (downgrade, or monthly<->yearly) is read from the subscription schedule ──
+
+def _schedule(current_end, next_phase_price, next_start=None):
+    return {
+        "id": "sub_sched_1",
+        "current_phase": {"start_date": 1_700_000_000, "end_date": current_end},
+        "phases": [
+            {"start_date": 1_700_000_000, "end_date": current_end, "items": [{"price": TEAM_MONTHLY_PRICE}]},
+            {"start_date": next_start or current_end, "end_date": None, "items": [{"price": next_phase_price}]},
+        ],
+    }
+
+
+def test_a_scheduled_next_phase_is_the_pending_change(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", PRO_MONTHLY_PRICE)
+    monkeypatch.setenv("STRIPE_PRICE_TEAM_MONTHLY", TEAM_MONTHLY_PRICE)
+    sub = _subscription(
+        items={"data": [{"price": {"id": TEAM_MONTHLY_PRICE}}]},
+        schedule=_schedule(1_702_592_000, PRO_MONTHLY_PRICE),
+    )
+    assert pending_change(sub) == ("pro", "month", 1_702_592_000)
+    patch = apply_subscription_patch(sub)
+    assert patch["subscription_tier"] == "team"
+    assert (patch["subscription_pending_plan"], patch["subscription_pending_interval"],
+            patch["subscription_pending_at"]) == ("pro", "month", 1_702_592_000)
+
+
+def test_an_expanded_price_object_in_a_phase_resolves_too(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", PRO_MONTHLY_PRICE)
+    sched = _schedule(1_702_592_000, PRO_MONTHLY_PRICE)
+    sched["phases"][1]["items"] = [{"price": {"id": PRO_MONTHLY_PRICE}}]
+    assert pending_change(_subscription(schedule=sched)) == ("pro", "month", 1_702_592_000)
+
+
+def test_no_schedule_or_an_unexpanded_one_means_no_pending_change(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", PRO_MONTHLY_PRICE)
+    assert pending_change(_subscription()) is None
+    assert pending_change(_subscription(schedule="sub_sched_1")) is None
+    assert apply_subscription_patch(_subscription())["subscription_pending_plan"] is None
+
+
+def test_a_schedule_in_its_last_phase_has_no_pending_change(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", PRO_MONTHLY_PRICE)
+    sched = _schedule(1_702_592_000, PRO_MONTHLY_PRICE)
+    sched["current_phase"] = {"start_date": 1_702_592_000, "end_date": 1_705_184_000}
+    assert pending_change(_subscription(schedule=sched)) is None
+
+
+def test_a_pending_phase_on_an_unknown_price_is_not_reported(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", PRO_MONTHLY_PRICE)
+    assert pending_change(_subscription(schedule=_schedule(1_702_592_000, "price_unknown"))) is None

@@ -271,6 +271,11 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 2 && segments[0] === "user" && segments[1] === "entitlements") {
     return { path: "/user/entitlements" };
   }
+  // GET /billing/prices — the prices on sale, as Stripe states them (the billing page's plan
+  // cards). Read-only; the amounts come from Stripe through admin-api, never from this client.
+  if (segments.length === 2 && segments[0] === "billing" && segments[1] === "prices") {
+    return { path: "/billing/prices" };
+  }
   // GET /user/calendars/google/authorize — the "Connect Google Calendar" button. Answers
   // `{authorize_url, state}`; the caller's own `isTrustedGoogleAuthorizeRedirect` (lib/security.ts)
   // checks `authorize_url` before ever navigating there, so this allowlist entry only needs to get
@@ -442,6 +447,12 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     // decision to make, not this allowlist's — the check here is only the wire shape.
     if (segments.length === 2 && segments[0] === "billing" && segments[1] === "checkout") {
       return { path: "/billing/checkout", body: isCheckoutBody };
+    }
+    // POST /billing/change {plan, interval} — the "Switch to …" buttons. Same two-key body as
+    // checkout; the core decides when the switch takes effect and answers 409 without a
+    // subscription to switch.
+    if (segments.length === 2 && segments[0] === "billing" && segments[1] === "change") {
+      return { path: "/billing/change", body: isCheckoutBody };
     }
     // POST /agent/chat — one assistant turn, streamed back as SSE. `isChatTurnBody`
     // (lib/chat.ts) admits exactly the two shapes the chat panels send: a turn focused on one

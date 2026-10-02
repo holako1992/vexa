@@ -370,6 +370,15 @@ export function proUnlimitedEntitlements() {
   };
 }
 
+/** A Pro monthly Stripe subscriber — `subscription` is what the billing page's switch controls
+ *  read (`_subscription_view` in admin-api's `main.py`). */
+export function proMonthlySubscriberEntitlements() {
+  return {
+    ...proUnlimitedEntitlements(),
+    subscription: { plan: "pro", interval: "month", pending_change: null },
+  };
+}
+
 export function pastDueEntitlements() {
   return {
     plan_id: "pro",

@@ -104,3 +104,27 @@ test("upgrade: the button disables while the checkout request is in flight", asy
   await expect(teamCard.getByRole("button", { name: "Upgrade" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Manage subscription" })).toBeDisabled();
 });
+
+test("prices: each card shows Stripe's price, and Yearly adds the saving over monthly", async ({ page }) => {
+  await signIn(page, testEmail("billing-prices"));
+  await page.goto("/billing");
+
+  await expect(page.getByTestId("price-pro")).toHaveText("$5 / month");
+  await expect(page.getByTestId("price-team")).toHaveText("$20 / month");
+
+  await page.getByRole("tab", { name: "Yearly" }).click();
+  await expect(page.getByTestId("price-pro")).toHaveText("$50 / year · save 17%");
+  await expect(page.getByTestId("price-team")).toHaveText("$100 / year · save 58%");
+});
+
+test("prices: a failed price read leaves the cards without a figure, Upgrade still live", async ({ page }) => {
+  await page.route("**/api/vexa/billing/prices", (route) =>
+    route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Stripe billing is not configured" }) }),
+  );
+  await signIn(page, testEmail("billing-prices-down"));
+  await page.goto("/billing");
+
+  const proCard = page.getByRole("heading", { name: "Pro" }).locator("..");
+  await expect(proCard.getByRole("button", { name: "Upgrade" })).toBeEnabled();
+  await expect(page.getByTestId("price-pro")).toHaveCount(0);
+});

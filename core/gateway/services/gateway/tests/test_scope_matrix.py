@@ -103,6 +103,8 @@ CASES = [
     ("GET", "/user/entitlements", "/user/entitlements"),
     ("POST", "/billing/checkout", "/billing/checkout"),
     ("POST", "/billing/portal", "/billing/portal"),
+    ("POST", "/billing/change", "/billing/change"),
+    ("GET", "/billing/prices", "/billing/prices"),
 
     ("POST", "/agent/chat", "/agent/chat"),
     ("GET", "/agent/meeting/stream", "/agent/meeting/stream"),
