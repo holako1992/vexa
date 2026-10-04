@@ -19,6 +19,9 @@ effect and what it costs:
   * **Back to what the subscription already is**: any pending switch is called off (the schedule
     is released) and nothing else changes.
 
+Cancelling (`cancel_at_period_end`) ends the subscription when its paid period ends, and
+`resume` calls that off; a cancelling subscription cannot be switched until it is resumed.
+
 Every call goes through `StripeClient`; the caller re-reads the subscription afterwards and writes
 it through the webhook's own `apply_subscription_patch`, so the stored state is Stripe's.
 """
@@ -98,8 +101,8 @@ async def change_plan(
     if subscription.get("cancel_at_period_end"):
         raise PlanChangeRefused(
             "cancelling",
-            "This subscription is set to end at the close of the period. Resume it in "
-            "Manage subscription before switching plans.",
+            "This subscription is set to end at the close of the period. Resume it before "
+            "switching plans.",
         )
     current = current_plan(subscription, env)
     if current is None:
@@ -149,3 +152,27 @@ async def change_plan(
         ],
     })
     return PlanChangeResult(effective="scheduled")
+
+
+async def cancel_at_period_end(client: Any, subscription: Dict[str, Any]) -> None:
+    """End the subscription when its paid period ends: it stays `active` (with
+    `cancel_at_period_end`) until then, and Stripe ends it — and charges nothing more — at that
+    point. A pending switch is called off first: Stripe refuses to change the cancellation of a
+    subscription a schedule manages, and a plan that is ending has nothing to switch to."""
+    if subscription.get("status") not in SWITCHABLE_STATUSES:
+        raise PlanChangeRefused("not_cancellable", f"This subscription is {subscription.get('status')}; there is nothing to cancel.")
+    if subscription.get("cancel_at_period_end"):
+        return
+    schedule = _schedule(subscription)
+    if schedule is not None:
+        await client.release_schedule(schedule["id"])
+    await client.update_subscription(subscription["id"], {"cancel_at_period_end": True})
+
+
+async def resume(client: Any, subscription: Dict[str, Any]) -> None:
+    """Call off a cancellation set for the end of the period; the subscription renews as before."""
+    if subscription.get("status") not in SWITCHABLE_STATUSES:
+        raise PlanChangeRefused("not_resumable", "This subscription has already ended; subscribe again from the billing page.")
+    if not subscription.get("cancel_at_period_end"):
+        return
+    await client.update_subscription(subscription["id"], {"cancel_at_period_end": False})

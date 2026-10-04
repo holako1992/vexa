@@ -113,6 +113,30 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/billing/cancel",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/resume",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/sync",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/billing/prices",
       "scopes": [

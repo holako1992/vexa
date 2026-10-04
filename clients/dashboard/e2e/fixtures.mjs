@@ -375,7 +375,7 @@ export function proUnlimitedEntitlements() {
 export function proMonthlySubscriberEntitlements() {
   return {
     ...proUnlimitedEntitlements(),
-    subscription: { plan: "pro", interval: "month", pending_change: null },
+    subscription: { plan: "pro", interval: "month", pending_change: null, cancel_at_period_end: false },
   };
 }
 

@@ -10,6 +10,7 @@ is ever needed and no network call ever leaves the test process.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from urllib.parse import parse_qs
 
 import httpx
@@ -77,12 +78,18 @@ class _Recorder:
         #: The customer's subscriptions, as `GET /v1/subscriptions` lists them and
         #: `GET|POST /v1/subscriptions/{id}` reads and changes them.
         self.subscriptions: dict[str, dict] = {}
+        #: Customer ids Stripe answers as deleted.
+        self.deleted_customers: set[str] = set()
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
         if path == "/v1/customers":
             return httpx.Response(200, json={"id": self.customer_id, "object": "customer"})
+        if path.startswith("/v1/customers/"):
+            cid = path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json={"id": cid, "object": "customer",
+                                             **({"deleted": True} if cid in self.deleted_customers else {})})
         if path == "/v1/checkout/sessions":
             return httpx.Response(200, json={"id": "cs_test_001", "url": "https://checkout.stripe.com/cs_test_001"})
         if path == "/v1/billing_portal/sessions":
@@ -95,7 +102,10 @@ class _Recorder:
                 return httpx.Response(404, json={"error": {"message": "No such subscription"}})
             if request.method == "POST":
                 form = _form(request)
-                sub["items"]["data"][0]["price"]["id"] = form["items[0][price]"]
+                if "items[0][price]" in form:
+                    sub["items"]["data"][0]["price"]["id"] = form["items[0][price]"]
+                if "cancel_at_period_end" in form:
+                    sub["cancel_at_period_end"] = form["cancel_at_period_end"] == "true"
             return httpx.Response(200, json=sub)
         if path.startswith("/v1/prices/"):
             price_id = path.rsplit("/", 1)[-1]
@@ -330,7 +340,8 @@ def test_change_upgrades_in_place_and_writes_the_new_plan(client, monkeypatch):
                              "proration_behavior": "none"}
     ent = client.get("/user/entitlements", headers={"X-API-Key": token}).json()
     assert ent["plan_id"] == "team"
-    assert ent["subscription"] == {"plan": "team", "interval": "month", "pending_change": None}
+    assert ent["subscription"] == {"plan": "team", "interval": "month", "pending_change": None,
+                                   "cancel_at_period_end": False}
 
 
 def test_change_without_a_subscription_409s_before_reaching_stripe(client, monkeypatch):
@@ -357,8 +368,133 @@ def test_a_stripe_refusal_is_relayed_as_a_502_with_stripes_reason(client, monkey
     del recorder.subscriptions["sub_live_1"]  # Stripe answers 404 "No such subscription"
     r = client.post("/billing/change", headers={"X-API-Key": token}, json={"plan": "team", "interval": "month"})
     assert r.status_code == 502
-    assert r.json()["detail"] == "Stripe refused the request: No such subscription"
+    assert r.json() == {"error": "stripe_refused", "detail": "Stripe refused the request: No such subscription"}
 
 
 def test_change_requires_a_valid_api_key(client):
     assert client.post("/billing/change", json={"plan": "team", "interval": "month"}).status_code == 401
+
+
+# ── a customer deleted in Stripe ──────────────────────────────────────────────────────────────
+
+def test_checkout_replaces_a_customer_deleted_in_stripe(client, monkeypatch):
+    uid, token = _create_user_with_token(client, "checkout-deleted-customer@vexa.ai")
+    recorder = _Recorder()
+    _wire_stripe(monkeypatch, recorder)
+    client.patch(f"/admin/users/{uid}", headers=_admin(), json={"data": {"stripe_customer_id": "cus_gone"}})
+    recorder.deleted_customers.add("cus_gone")
+    recorder.customer_id = "cus_fresh"
+
+    r = client.post("/billing/checkout", headers={"X-API-Key": token}, json={"plan": "pro", "interval": "month"})
+    assert r.status_code == 200, r.text
+    session = next(q for q in recorder.requests if q.url.path == "/v1/checkout/sessions")
+    assert _form(session)["customer"] == "cus_fresh"
+    assert client.get(f"/admin/users/{uid}", headers=_admin()).json()["data"]["stripe_customer_id"] == "cus_fresh"
+
+
+def test_portal_treats_a_customer_deleted_in_stripe_as_none(client, monkeypatch):
+    uid, token = _create_user_with_token(client, "portal-deleted-customer@vexa.ai")
+    recorder = _Recorder()
+    _wire_stripe(monkeypatch, recorder)
+    client.patch(f"/admin/users/{uid}", headers=_admin(), json={"data": {"stripe_customer_id": "cus_gone"}})
+    recorder.deleted_customers.add("cus_gone")
+
+    r = client.post("/billing/portal", headers={"X-API-Key": token})
+    assert r.status_code == 409
+    assert not [q for q in recorder.requests if q.url.path == "/v1/billing_portal/sessions"]
+    assert "stripe_customer_id" not in client.get(f"/admin/users/{uid}", headers=_admin()).json()["data"]
+
+
+# ── sync: the billing page re-reads the subscription on return from Checkout ──────────────────
+
+def test_sync_records_a_paid_subscription_without_waiting_for_the_webhook(client, monkeypatch):
+    uid, token = _create_user_with_token(client, "sync-paid@vexa.ai")
+    recorder = _Recorder()
+    _wire_stripe(monkeypatch, recorder)
+    client.patch(f"/admin/users/{uid}", headers=_admin(), json={"data": {"stripe_customer_id": "cus_test_001"}})
+    recorder.subscriptions["sub_old"] = {**_live_sub("sub_old", status="canceled"), "created": 1}
+    recorder.subscriptions["sub_new"] = {**_live_sub("sub_new", price="price_test_team_monthly"), "created": 2}
+
+    r = client.post("/billing/sync", headers={"X-API-Key": token})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"active": True}
+    ent = client.get("/user/entitlements", headers={"X-API-Key": token}).json()
+    assert ent["plan_id"] == "team"
+    assert ent["subscription"]["plan"] == "team"
+    assert client.get(f"/admin/users/{uid}", headers=_admin()).json()["data"]["stripe_subscription_id"] == "sub_new"
+
+
+def test_sync_without_a_customer_reports_nothing_and_never_reaches_stripe(client, monkeypatch):
+    _uid, token = _create_user_with_token(client, "sync-none@vexa.ai")
+    recorder = _Recorder()
+    _wire_stripe(monkeypatch, recorder)
+    r = client.post("/billing/sync", headers={"X-API-Key": token})
+    assert r.json() == {"active": False}
+    assert recorder.requests == []
+
+
+def test_sync_with_nothing_live_records_the_stored_subscription_ending(client, monkeypatch):
+    uid, token = _create_user_with_token(client, "sync-ended@vexa.ai")
+    recorder = _Recorder()
+    _wire_stripe(monkeypatch, recorder)
+    recorder.subscriptions["sub_live_1"] = _live_sub(status="canceled")
+    client.patch(f"/admin/users/{uid}", headers=_admin(), json={"data": {
+        "stripe_customer_id": "cus_test_001", "stripe_subscription_id": "sub_live_1",
+        "subscription_status": "active", "subscription_tier": "pro",
+    }})
+    r = client.post("/billing/sync", headers={"X-API-Key": token})
+    assert r.json() == {"active": False}
+    assert client.get("/user/entitlements", headers={"X-API-Key": token}).json()["plan_id"] == "free"
+
+
+def test_sync_requires_a_valid_api_key(client):
+    assert client.post("/billing/sync").status_code == 401
+
+
+# ── cancel at period end, and resume ──────────────────────────────────────────────────────────
+
+def test_cancel_ends_the_subscription_at_period_end_and_resume_calls_it_off(client, monkeypatch):
+    recorder = _Recorder()
+    _wire_stripe(monkeypatch, recorder)
+    _uid, token = _subscribed_user(client, recorder, "cancel@vexa.ai")
+
+    r = client.post("/billing/cancel", headers={"X-API-Key": token})
+    assert r.status_code == 200, r.text
+    assert r.json()["ends_at"] == datetime.fromtimestamp(1_792_600_000, tz=timezone.utc).isoformat()
+    update = [q for q in recorder.requests if q.method == "POST" and q.url.path == "/v1/subscriptions/sub_live_1"]
+    assert _form(update[-1]) == {"cancel_at_period_end": "true"}
+    ent = client.get("/user/entitlements", headers={"X-API-Key": token}).json()
+    assert ent["plan_id"] == "pro", "the paid plan stays in force until the period ends"
+    assert ent["will_renew"] is False
+    assert ent["subscription"]["cancel_at_period_end"] is True
+
+    r = client.post("/billing/resume", headers={"X-API-Key": token})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ends_at": None}
+    ent = client.get("/user/entitlements", headers={"X-API-Key": token}).json()
+    assert ent["will_renew"] is True
+    assert ent["subscription"]["cancel_at_period_end"] is False
+
+
+def test_switching_a_cancelling_subscription_asks_to_resume_first(client, monkeypatch):
+    recorder = _Recorder()
+    _wire_stripe(monkeypatch, recorder)
+    _uid, token = _subscribed_user(client, recorder, "cancel-then-switch@vexa.ai")
+    client.post("/billing/cancel", headers={"X-API-Key": token})
+    r = client.post("/billing/change", headers={"X-API-Key": token}, json={"plan": "team", "interval": "month"})
+    assert r.status_code == 409
+    assert "Resume it before switching" in r.json()["detail"]
+
+
+def test_cancel_and_resume_without_a_subscription_409(client, monkeypatch):
+    _uid, token = _create_user_with_token(client, "cancel-none@vexa.ai")
+    recorder = _Recorder()
+    _wire_stripe(monkeypatch, recorder)
+    assert client.post("/billing/cancel", headers={"X-API-Key": token}).status_code == 409
+    assert client.post("/billing/resume", headers={"X-API-Key": token}).status_code == 409
+    assert recorder.requests == []
+
+
+def test_cancel_and_resume_require_a_valid_api_key(client):
+    assert client.post("/billing/cancel").status_code == 401
+    assert client.post("/billing/resume").status_code == 401

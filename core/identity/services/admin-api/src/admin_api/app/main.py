@@ -430,6 +430,16 @@ class ChangePlanResponse(BaseModel):
     effective: str
 
 
+class CancelResponse(BaseModel):
+    #: When the subscription ends (ISO 8601), or null once a cancellation is called off.
+    ends_at: Optional[str]
+
+
+class SyncResponse(BaseModel):
+    #: Whether Stripe holds a live subscription for the caller, now recorded on the account.
+    active: bool
+
+
 class PlanPriceOut(BaseModel):
     plan: str
     interval: str
@@ -683,6 +693,9 @@ def _subscription_view(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "plan": data.get("subscription_tier"),
         "interval": data.get("subscription_interval"),
         "pending_change": pending,
+        #: Set to end at the close of the period (`POST /billing/cancel`); `POST /billing/resume`
+        #: calls it off.
+        "cancel_at_period_end": bool(data.get("subscription_cancel_at_period_end")),
     }
 
 
@@ -694,7 +707,8 @@ def create_app() -> FastAPI:
     @app.exception_handler(StripeAPIError)
     async def stripe_api_error(request: Request, exc: StripeAPIError):
         return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY,
-                            content={"detail": f"Stripe refused the request: {exc.message}"})
+                            content={"error": "stripe_refused",
+                                     "detail": f"Stripe refused the request: {exc.message}"})
 
     # --- liveness probe (gate:health): process-up, no DB dependency. Readiness (DB reachable)
     # is a separate concern — keeping /health a pure liveness check makes it green without a
@@ -1516,6 +1530,9 @@ def create_app() -> FastAPI:
         client = _stripe_client()
         data_blob = user.data if isinstance(user.data, dict) else {}
         customer_id = data_blob.get("stripe_customer_id")
+        if customer_id and not await client.customer_exists(customer_id):
+            # Deleted in Stripe since it was stored — this account starts over with a new one.
+            customer_id = None
         if not customer_id:
             customer = await client.create_customer(
                 email=user.email, metadata={"vexa_user_id": str(user.id)},
@@ -1546,20 +1563,101 @@ def create_app() -> FastAPI:
     #     hosts the whole surface; this route only mints the session. 409 when the caller has no
     #     Stripe customer yet (nothing to manage before a first checkout).
     @app.post("/billing/portal", response_model=PortalResponse)
-    async def create_billing_portal(user: User = Depends(get_current_user),
+    async def create_billing_portal(user: User = Depends(get_current_user_for_update),
                                     db: AsyncSession = Depends(get_db)):
         _require_stripe_billing()
         data_blob = user.data if isinstance(user.data, dict) else {}
         customer_id = data_blob.get("stripe_customer_id")
+        client = _stripe_client()
+        if customer_id and not await client.customer_exists(customer_id):
+            # Deleted in Stripe since it was stored: there is nothing left to manage.
+            user.data = {k: v for k, v in data_blob.items() if k != "stripe_customer_id"}
+            await db.commit()
+            customer_id = None
         if not customer_id:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 detail="No Stripe customer on file yet — checkout (POST /billing/checkout) first",
             )
         return_url = os.environ.get("STRIPE_PORTAL_RETURN_URL", "")
-        client = _stripe_client()
         session = await client.create_portal_session(customer_id=customer_id, return_url=return_url)
         return PortalResponse(url=session["url"])
+
+    # --- user tier: record the caller's subscription as Stripe holds it right now — the same
+    #     re-read-and-write the webhook does, asked for by the billing page when Stripe Checkout
+    #     sends the person back, so the page never waits on webhook delivery to show what they paid
+    #     for. The newest live subscription wins; with none live, the stored one is re-read so an
+    #     ending is recorded too.
+    @app.post("/billing/sync", response_model=SyncResponse)
+    async def sync_billing_subscription(user: User = Depends(get_current_user_for_update),
+                                        db: AsyncSession = Depends(get_db)):
+        _require_stripe_billing()
+        data_blob = user.data if isinstance(user.data, dict) else {}
+        customer_id = data_blob.get("stripe_customer_id")
+        if not customer_id:
+            return SyncResponse(active=False)
+        client = _stripe_client()
+        live = sorted(
+            billing_plan_change.live_subscriptions(await client.list_subscriptions(customer_id)),
+            key=lambda s: s.get("created") or 0, reverse=True,
+        )
+        subscription_id = live[0]["id"] if live else data_blob.get("stripe_subscription_id")
+        if not subscription_id:
+            return SyncResponse(active=False)
+        subscription = await client.get_subscription(subscription_id)
+        patch = apply_subscription_patch(subscription)
+        if patch is not None:
+            user.data = {**data_blob, **patch}
+            await db.commit()
+        return SyncResponse(active=bool(live) and patch is not None)
+
+    async def _live_subscription_for(user: User) -> Dict[str, Any]:
+        """The caller's live subscription, read from Stripe with its schedule — 409 without one."""
+        data_blob = user.data if isinstance(user.data, dict) else {}
+        subscription_id = data_blob.get("stripe_subscription_id")
+        if not subscription_id or data_blob.get("subscription_status") not in billing_plan_change.SWITCHABLE_STATUSES:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="No active subscription — subscribe first (POST /billing/checkout)",
+            )
+        return await _stripe_client().get_subscription(subscription_id)
+
+    async def _record_subscription(user: User, subscription_id: str, db: AsyncSession) -> Optional[Dict[str, Any]]:
+        """Re-read the subscription and write it exactly as the webhook would; the patch written."""
+        patch = apply_subscription_patch(await _stripe_client().get_subscription(subscription_id))
+        if patch is not None:
+            data_blob = user.data if isinstance(user.data, dict) else {}
+            user.data = {**data_blob, **patch}
+            await db.commit()
+        return patch
+
+    # --- user tier: cancel the caller's subscription at the end of its paid period (any pending
+    #     switch is called off), and resume one set to cancel. Stripe ends a cancelled
+    #     subscription at period end and charges nothing more; until then the plan stays in force.
+    @app.post("/billing/cancel", response_model=CancelResponse)
+    async def cancel_billing_subscription(user: User = Depends(get_current_user_for_update),
+                                          db: AsyncSession = Depends(get_db)):
+        _require_stripe_billing()
+        subscription = await _live_subscription_for(user)
+        try:
+            await billing_plan_change.cancel_at_period_end(_stripe_client(), subscription)
+        except billing_plan_change.PlanChangeRefused as e:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=e.message) from e
+        patch = await _record_subscription(user, subscription["id"], db)
+        end = (patch or {}).get("subscription_current_period_end")
+        return CancelResponse(ends_at=datetime.fromtimestamp(int(end), tz=timezone.utc).isoformat() if end else None)
+
+    @app.post("/billing/resume", response_model=CancelResponse)
+    async def resume_billing_subscription(user: User = Depends(get_current_user_for_update),
+                                          db: AsyncSession = Depends(get_db)):
+        _require_stripe_billing()
+        subscription = await _live_subscription_for(user)
+        try:
+            await billing_plan_change.resume(_stripe_client(), subscription)
+        except billing_plan_change.PlanChangeRefused as e:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=e.message) from e
+        await _record_subscription(user, subscription["id"], db)
+        return CancelResponse(ends_at=None)
 
     # --- user tier: switch the caller's ONE subscription to another catalog plan/interval, in
     #     place — see `billing/plan_change.py` for when each kind of switch takes effect. The
@@ -1569,24 +1667,13 @@ def create_app() -> FastAPI:
                                   user: User = Depends(get_current_user_for_update),
                                   db: AsyncSession = Depends(get_db)):
         _require_stripe_billing()
-        data_blob = user.data if isinstance(user.data, dict) else {}
-        subscription_id = data_blob.get("stripe_subscription_id")
-        if not subscription_id or data_blob.get("subscription_status") not in billing_plan_change.SWITCHABLE_STATUSES:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                detail="No active subscription to switch — subscribe first (POST /billing/checkout)",
-            )
-        client = _stripe_client()
-        subscription = await client.get_subscription(subscription_id)
+        subscription = await _live_subscription_for(user)
         try:
-            result = await billing_plan_change.change_plan(client, subscription, body.plan, body.interval)
+            result = await billing_plan_change.change_plan(_stripe_client(), subscription, body.plan, body.interval)
         except billing_plan_change.PlanChangeRefused as e:
             code = status.HTTP_503_SERVICE_UNAVAILABLE if e.code == "not_on_sale" else status.HTTP_409_CONFLICT
             raise HTTPException(code, detail=e.message) from e
-        patch = apply_subscription_patch(await client.get_subscription(subscription_id))
-        if patch is not None:
-            user.data = {**data_blob, **patch}
-            await db.commit()
+        await _record_subscription(user, subscription["id"], db)
         return ChangePlanResponse(effective=result.effective)
 
     # --- user tier: the prices this deployment sells, read from Stripe (amount, currency,

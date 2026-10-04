@@ -24,6 +24,15 @@ export class ApiError extends Error {
   }
 }
 
+/** admin-api's typed 502 for a Stripe refusal: `{"error": "stripe_refused", "detail": "..."}`. */
+function isStripeRefused(body: unknown): body is { error: "stripe_refused"; detail: string } {
+  return (
+    typeof body === "object" && body !== null &&
+    (body as { error?: unknown }).error === "stripe_refused" &&
+    typeof (body as { detail?: unknown }).detail === "string"
+  );
+}
+
 /** The sentence a surface shows, in the reader's vocabulary. */
 export function presentError(e: unknown): string {
   if (e instanceof ApiError) {
@@ -42,6 +51,9 @@ export function presentError(e: unknown): string {
     if (e.status === 403) return "Your account doesn't have access to this.";
     if (e.status === 404) return "Not found.";
     if (e.status === 429) return "Too many requests — try again in a moment.";
+    // A 502 the core sends when Stripe refused a billing call carries Stripe's own reason — the
+    // backend answered, so "unreachable" would be false.
+    if (e.status === 502 && isStripeRefused(e.body)) return e.body.detail;
     if (e.status === 502 || e.status === 503 || e.status === 504) return "The Vexa backend is unreachable right now.";
     return `The request failed (${e.status}).`;
   }

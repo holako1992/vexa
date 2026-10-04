@@ -39,6 +39,24 @@ answers **409** while one is still live (`active`, `trialing`, `past_due`, `unpa
 `incomplete` or `paused`) — a subscriber changes plan with `POST /billing/change` below instead
 of buying a second one. Once a subscription has ended, checkout works again.
 
+## Confirm a purchase on return from Checkout
+
+```bash
+curl -X POST -H "X-API-Key: $API_KEY" "$API_BASE/billing/sync"
+```
+
+Records the caller's subscription as Stripe holds it right now — the same re-read and write the
+webhook does — and answers `{"active": true}` once a live subscription is on record. The
+dashboard calls it when Stripe Checkout sends the person back to `?checkout=success` (retrying
+for about half a minute), so the page says "Payment received — you're on Pro monthly" without
+waiting for webhook delivery. The newest live subscription wins; with none live, the stored one is
+re-read, so an ended subscription is recorded too. A caller with no Stripe customer gets
+`{"active": false}` and nothing reaches Stripe. The webhook stays the writer for everything that
+happens later (renewals, failed payments, cancellations in the portal).
+
+A Stripe customer deleted in the Stripe dashboard is noticed on the next checkout (a new customer
+is created) or portal call (answered as "no customer yet").
+
 ## Switch plans
 
 ```bash
@@ -68,9 +86,10 @@ the end of its period gets **409** too — resume it in the portal before switch
 refuses a call, the route answers **502** with Stripe's own reason in `detail`.
 
 <Note>
-Turn **off** plan switching in the Stripe Customer Portal settings (keep cancel, payment method
-and invoices): a switch made there bypasses the rules above. The webhook still records whatever
-Stripe reports either way.
+In the Stripe Customer Portal settings, turn **off** plan switching and cancellation, and keep
+payment method and invoices: switching and cancelling have their own routes (above and below),
+and a change made in the portal bypasses their rules. The webhook still records whatever Stripe
+reports either way.
 </Note>
 
 ## Show the prices
@@ -96,15 +115,30 @@ when it's archived, when it has no fixed amount, or when Stripe bills it on a di
 than the env var it's configured under (a yearly price pasted into `STRIPE_PRICE_PRO_MONTHLY`).
 The dashboard then shows that plan without a figure; checkout for it is unaffected by this route.
 
-## Manage an existing subscription
+## Cancel, and resume
+
+```bash
+curl -X POST -H "X-API-Key: $API_KEY" "$API_BASE/billing/cancel"
+curl -X POST -H "X-API-Key: $API_KEY" "$API_BASE/billing/resume"
+```
+
+`/billing/cancel` ends the caller's subscription when its paid period ends and answers
+`{"ends_at": "<iso8601>"}`. Until then the plan stays in force — `GET /user/entitlements` reports
+`will_renew: false` and `subscription.cancel_at_period_end: true` — and Stripe charges nothing
+more; at period end Stripe ends it and the account resolves to Free. A pending plan switch is
+called off by the cancellation. `/billing/resume` calls the cancellation off before the period
+ends (`{"ends_at": null}`), and the subscription renews as before. A cancelling subscription
+can't be switched until it is resumed. Both answer **409** without a live subscription.
+
+## Payment method and invoices
 
 ```bash
 curl -X POST -H "X-API-Key: $API_KEY" "$API_BASE/billing/portal"
 ```
 
-Returns `{"url": "https://billing.stripe.com/..."}` — Stripe's own hosted portal for card changes,
-cancellation, and invoice history. Card data never touches Vexa's servers. A caller with no Stripe
-customer yet (never checked out) gets a **409** — checkout first.
+Returns `{"url": "https://billing.stripe.com/..."}` — Stripe's own hosted portal for card changes
+and invoice history. Card data never touches Vexa's servers. A caller with no Stripe customer yet
+(never checked out, or one deleted in Stripe) gets a **409** — checkout first.
 
 ## Read the resolved plan
 
@@ -353,7 +387,7 @@ STRIPE_PRICE_TEAM_YEARLY=price_...
 ```
 
 Any of `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / the three URLs left unset takes down all
-five `/billing/*` routes with a 503 naming what's missing — the rest of the deployment is
+eight `/billing/*` routes with a 503 naming what's missing — the rest of the deployment is
 unaffected. An unset `STRIPE_PRICE_*` only takes down checkout for that one plan/interval. See
 also `BILLING_UPGRADE_URL` on the same service — the page a `quota_exceeded` refusal (from
 `POST /bots` when a Free user is over their monthly meeting) points them at, typically this same

@@ -8,6 +8,8 @@ export interface SubscriptionView {
   plan: string | null;
   interval: string | null;
   pending_change: { plan: string; interval: string | null; at: string } | null;
+  /** Set to end at the close of the paid period; `POST /billing/resume` calls it off. */
+  cancel_at_period_end?: boolean;
 }
 
 export type SwitchKind = "current" | "pending" | "now" | "scheduled";

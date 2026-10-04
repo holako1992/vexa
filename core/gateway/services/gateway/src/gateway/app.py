@@ -842,6 +842,21 @@ def create_app(
     async def change_billing_plan(request: Request):
         return await _forward("POST", _admin("/billing/change"), request)
 
+    # Cancel the caller's subscription at the end of its paid period, or call that off.
+    @app.post("/billing/cancel")
+    async def cancel_billing_subscription(request: Request):
+        return await _forward("POST", _admin("/billing/cancel"), request)
+
+    @app.post("/billing/resume")
+    async def resume_billing_subscription(request: Request):
+        return await _forward("POST", _admin("/billing/resume"), request)
+
+    # Record the caller's subscription as Stripe holds it now — the billing page, on return
+    # from Checkout.
+    @app.post("/billing/sync")
+    async def sync_billing_subscription(request: Request):
+        return await _forward("POST", _admin("/billing/sync"), request)
+
     # The prices on sale, as Stripe states them — the billing page's plan cards.
     @app.get("/billing/prices")
     async def list_billing_prices(request: Request):

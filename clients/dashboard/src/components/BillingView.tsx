@@ -4,13 +4,20 @@
  *
  *   - **Upgrade** on a plan card → `POST /billing/checkout {plan, interval}` → redirect to the
  *     returned Stripe Checkout URL.
- *   - **Manage subscription** → `POST /billing/portal` → redirect to the returned Stripe Customer
- *     Portal URL, or (409, no Stripe customer yet) a toast explaining there's nothing to manage
- *     yet, with a link to Upgrade instead of a generic error.
+ *   - **Cancel subscription** (a subscriber) → a confirmation → `POST /billing/cancel`: the plan
+ *     stays until the paid period ends, then the account moves to Free. While it is set to end,
+ *     **Resume subscription** → `POST /billing/resume`.
+ *   - **Payment method & invoices** (a subscriber) → `POST /billing/portal` → redirect to the
+ *     returned Stripe Customer Portal URL.
  *
  *  A subscriber's plan cards switch instead of buying: **Switch to …** → a confirmation saying when
  *  the switch takes effect and what it bills → `POST /billing/change {plan, interval}`. The core
  *  holds one subscription per customer and changes it in place (`billing/plan_change.py`).
+ *
+ *  Stripe Checkout sends the person back to `?checkout=success` or `?checkout=cancelled`. On
+ *  success the page asks the core to record the subscription as Stripe holds it
+ *  (`POST /billing/sync`, retried for about half a minute) and says whether the plan is active —
+ *  it never waits on webhook delivery to tell someone what they just paid for.
  *
  *  Checkout and portal responses are `{url}` straight from Stripe (see `core/identity/services/admin-api/src/
  *  admin_api/app/billing/stripe_gateway.py`) — `isTrustedBillingRedirect` (`lib/security.ts`)
@@ -18,7 +25,7 @@
  *  `window.location.assign()`, so a malformed or wrong-shaped response fails closed instead of
  *  taking the browser to an arbitrary origin.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CreditCard } from "lucide-react";
 import { getJson, mutateJson, presentError, ApiError } from "@/lib/api";
 import { formatDayMonth, formatMeetingsUsage, formatMinutesUsage, planStatusLabel, reasonMessage, type Entitlements } from "@/lib/entitlements";
@@ -47,6 +54,20 @@ const UPGRADE_PLANS: { id: "pro" | "team"; label: string; blurb: string }[] = [
  *  misconfigured deployment, never something the person did, hence one shared message. */
 const UNTRUSTED_REDIRECT_MESSAGE = "Billing returned an unexpected link. Please try again, or contact support.";
 
+/** Stripe has finished a purchase within this many re-reads, SYNC_INTERVAL_MS apart, in the
+ *  ordinary case; past that the page says the plan is still activating rather than spin on. */
+const SYNC_ATTEMPTS = 10;
+const SYNC_INTERVAL_MS = 3000;
+
+type CheckoutNotice = "confirming" | "active" | "pending" | "cancelled";
+
+const CHECKOUT_NOTICE_TONE: Record<CheckoutNotice, string> = {
+  confirming: "border-line bg-card text-ink-2",
+  active: "border-ok/40 bg-ok-soft text-ink",
+  pending: "border-warn/40 bg-warn-soft text-ink",
+  cancelled: "border-line bg-card text-ink-2",
+};
+
 type ViewState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
@@ -71,10 +92,46 @@ export function BillingView() {
   // Which single control is in flight, if any — "portal", "switch", or a plan id ("pro"/"team").
   // Only one can be in progress at a time, and every button on the page disables while it is.
   const [pending, setPending] = useState<string | null>(null);
+  // Whether the cancel confirmation is open.
+  const [confirmCancel, setConfirmCancel] = useState(false);
   // The plan card a subscriber chose to switch to, awaiting confirmation.
   const [confirmTarget, setConfirmTarget] = useState<{ plan: PlanId; interval: Interval } | null>(null);
   // Bumped after a switch to re-read the plan; a re-read keeps the page on screen meanwhile.
   const [reloadKey, setReloadKey] = useState(0);
+  // What the return from Stripe Checkout means, while it is worth saying.
+  const [checkoutNotice, setCheckoutNotice] = useState<CheckoutNotice | null>(null);
+  const checkoutHandled = useRef(false);
+
+  useEffect(() => {
+    // Once per page load: the query is consumed (and removed from the address bar) on first sight.
+    if (checkoutHandled.current) return;
+    checkoutHandled.current = true;
+    const outcome = new URLSearchParams(window.location.search).get("checkout");
+    if (!outcome) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (outcome === "cancelled") {
+      setCheckoutNotice("cancelled");
+      return;
+    }
+    if (outcome !== "success") return;
+    setCheckoutNotice("confirming");
+    void (async () => {
+      for (let attempt = 0; attempt < SYNC_ATTEMPTS; attempt++) {
+        try {
+          const { active } = await mutateJson<{ active: boolean }>("POST", "/api/vexa/billing/sync");
+          if (active) {
+            setCheckoutNotice("active");
+            setReloadKey((k) => k + 1);
+            return;
+          }
+        } catch {
+          // A failed re-read is retried like an unfinished one; the final notice covers both.
+        }
+        await new Promise((resolve) => setTimeout(resolve, SYNC_INTERVAL_MS));
+      }
+      setCheckoutNotice("pending");
+    })();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +185,7 @@ export function BillingView() {
   const statusNote = planStatusLabel(data);
   const reasonNote = reasonMessage(data.reason);
   const subscription = data.subscription ?? null;
+  const cancelling = !!subscription?.cancel_at_period_end;
   const renewal = resetDay ?? "the end of this period";
   const confirmPrice = confirmTarget ? findPrice(prices, confirmTarget.plan, confirmTarget.interval) : null;
 
@@ -186,6 +244,33 @@ export function BillingView() {
     }
   }
 
+  async function cancelSubscription() {
+    setPending("cancel");
+    try {
+      await mutateJson<{ ends_at: string | null }>("POST", "/api/vexa/billing/cancel");
+      toast.push({ tone: "success", title: `Subscription cancelled — you keep your plan until ${renewal}` });
+      setConfirmCancel(false);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      toast.push({ tone: "error", title: "Couldn't cancel your subscription", description: presentError(e) });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function resumeSubscription() {
+    setPending("resume");
+    try {
+      await mutateJson<{ ends_at: string | null }>("POST", "/api/vexa/billing/resume");
+      toast.push({ tone: "success", title: "Subscription resumed — it will renew as usual" });
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      toast.push({ tone: "error", title: "Couldn't resume your subscription", description: presentError(e) });
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function manage() {
     setPending("portal");
     try {
@@ -211,6 +296,21 @@ export function BillingView() {
       <h1 className="mb-1 text-xl font-semibold">Billing</h1>
       <p className="mb-6 text-sm text-ink-3">Your plan, usage, and billing period.</p>
 
+      {checkoutNotice && (
+        <div
+          role="status"
+          data-testid="checkout-notice"
+          className={`mb-4 rounded-card border p-4 text-sm ${CHECKOUT_NOTICE_TONE[checkoutNotice]}`}
+        >
+          {checkoutNotice === "confirming" && "Confirming your payment with Stripe…"}
+          {checkoutNotice === "active" &&
+            `Payment received — you're on ${subscription ? planName(subscription.plan, subscription.interval) : `the ${planLabel} plan`}.`}
+          {checkoutNotice === "pending" &&
+            "Stripe has your payment, but your plan hasn't switched over yet. Refresh this page in a minute; if it still shows Free, contact support."}
+          {checkoutNotice === "cancelled" && "Checkout cancelled — you weren't charged."}
+        </div>
+      )}
+
       <section aria-label="Plan" className="rounded-card border border-line bg-card p-5">
         <div className="flex items-center gap-2">
           <CreditCard size={16} className="text-accent" aria-hidden />
@@ -234,7 +334,7 @@ export function BillingView() {
         {subscription && (
           <p className="mt-2 text-sm text-ink-2" data-testid="subscription-line">
             {planName(subscription.plan, subscription.interval)}
-            {data.will_renew ? ` · renews ${renewal}` : ""}
+            {cancelling ? ` · ends ${renewal}` : data.will_renew ? ` · renews ${renewal}` : ""}
           </p>
         )}
 
@@ -266,21 +366,40 @@ export function BillingView() {
           />
         </dl>
 
-        <div className="mt-5 flex justify-end border-t border-line pt-4">
-          <Button
-            variant="secondary"
-            onClick={() => void manage()}
-            loading={pending === "portal"}
-            disabled={pending !== null && pending !== "portal"}
-          >
-            Manage subscription
-          </Button>
-        </div>
+        {subscription && (
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <button
+              type="button"
+              onClick={() => void manage()}
+              disabled={pending !== null}
+              className="text-sm text-ink-3 underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
+            >
+              {pending === "portal" ? "Opening…" : "Payment method & invoices"}
+            </button>
+            {cancelling ? (
+              <Button
+                variant="primary"
+                onClick={() => void resumeSubscription()}
+                loading={pending === "resume"}
+                disabled={pending !== null && pending !== "resume"}
+              >
+                Resume subscription
+              </Button>
+            ) : (
+              <Button variant="secondary" onClick={() => setConfirmCancel(true)} disabled={pending !== null}>
+                Cancel subscription
+              </Button>
+            )}
+          </div>
+        )}
       </section>
 
       <section aria-label="Plans" className="mt-6">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{subscription ? "Change your plan" : "Upgrade your plan"}</h2>
+          <div>
+            <h2 className="text-sm font-semibold">{subscription ? "Change your plan" : "Upgrade your plan"}</h2>
+            {cancelling && <p className="mt-0.5 text-xs text-ink-3">Resume your subscription to change plans.</p>}
+          </div>
           <Tabs value={billingInterval} onChange={(v) => setBillingInterval(v as Interval)} label="Billing interval">
             <Tab value="month">Monthly</Tab>
             <Tab value="year">Yearly</Tab>
@@ -309,6 +428,7 @@ export function BillingView() {
                     className="mt-4"
                     onClick={() => setConfirmTarget({ plan: plan.id, interval: billingInterval })}
                     disabled={
+                      cancelling ||
                       ["current", "pending"].includes(switchKind(subscription, plan.id, billingInterval)) ||
                       pending !== null
                     }
@@ -330,6 +450,32 @@ export function BillingView() {
           })}
         </div>
       </section>
+
+      {subscription && confirmCancel && (
+        <Dialog
+          open
+          onClose={() => setConfirmCancel(false)}
+          title="Cancel your subscription?"
+          icon={<CreditCard size={16} aria-hidden />}
+        >
+          <div className="flex flex-col gap-4 p-6 pt-4">
+            <p className="text-sm text-ink-2" data-testid="cancel-explanation">
+              You&apos;ll keep {planName(subscription.plan, subscription.interval)} until {renewal}. After that your
+              account moves to the Free plan and you won&apos;t be charged again.
+              {subscription.pending_change &&
+                ` Your scheduled switch to ${planName(subscription.pending_change.plan, subscription.pending_change.interval)} is cancelled too.`}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setConfirmCancel(false)} disabled={pending === "cancel"}>
+                Keep subscription
+              </Button>
+              <Button variant="danger" onClick={() => void cancelSubscription()} loading={pending === "cancel"}>
+                Cancel subscription
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
 
       {subscription && confirmTarget && (
         <Dialog

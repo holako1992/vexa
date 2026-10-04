@@ -529,6 +529,18 @@ describe("resolveWriteUpstream — billing checkout/portal", () => {
       path: "/billing/change",
       body: expect.any(Function),
     });
+    expect(resolveWriteUpstream("POST", ["billing", "sync"])).toEqual({
+      path: "/billing/sync",
+      body: expect.any(Function),
+    });
+    expect(resolveWriteUpstream("POST", ["billing", "cancel"])).toEqual({
+      path: "/billing/cancel",
+      body: expect.any(Function),
+    });
+    expect(resolveWriteUpstream("POST", ["billing", "resume"])).toEqual({
+      path: "/billing/resume",
+      body: expect.any(Function),
+    });
     expect(resolveWriteUpstream("POST", ["billing", "portal"])).toEqual({
       path: "/billing/portal",
       body: expect.any(Function),

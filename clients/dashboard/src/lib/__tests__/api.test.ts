@@ -81,3 +81,20 @@ describe("presentError — the plain {detail} envelope", () => {
     expect(presentError(new Error("boom"))).toContain("Something went wrong");
   });
 });
+
+describe("presentError — 502", () => {
+  it("shows Stripe's reason when the core says Stripe refused", () => {
+    const body = { error: "stripe_refused", detail: "Stripe refused the request: No such customer: 'cus_x'" };
+    expect(presentError(new ApiError(502, body.detail, "/api/vexa/billing/checkout", body))).toBe(
+      "Stripe refused the request: No such customer: 'cus_x'",
+    );
+  });
+
+  it("still reports an unreachable upstream as unreachable", () => {
+    const body = { error: "upstream_unreachable", detail: "fetch failed" };
+    expect(presentError(new ApiError(502, "fetch failed", "/api/vexa/billing/checkout", body))).toBe(
+      "The Vexa backend is unreachable right now.",
+    );
+    expect(presentError(new ApiError(502, "", "/api/vexa/x"))).toBe("The Vexa backend is unreachable right now.");
+  });
+});

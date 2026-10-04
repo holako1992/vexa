@@ -471,6 +471,16 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     if (segments.length === 2 && segments[0] === "billing" && segments[1] === "portal") {
       return { path: "/billing/portal", body: isEmptyBody };
     }
+    // POST /billing/sync — the billing page, on return from Stripe Checkout, asks the core to
+    // record the subscription as Stripe holds it now. No body; answers `{active}`.
+    if (segments.length === 2 && segments[0] === "billing" && segments[1] === "sync") {
+      return { path: "/billing/sync", body: isEmptyBody };
+    }
+    // POST /billing/cancel, POST /billing/resume — "Cancel subscription" (at the end of the paid
+    // period) and "Resume subscription". No body; 409 without a live subscription.
+    if (segments.length === 2 && segments[0] === "billing" && (segments[1] === "cancel" || segments[1] === "resume")) {
+      return { path: `/billing/${segments[1]}`, body: isEmptyBody };
+    }
   }
   if (method === "PATCH") {
     // PATCH /user/calendars/<id> — update auto-join / bot-name / enabled / ics-url

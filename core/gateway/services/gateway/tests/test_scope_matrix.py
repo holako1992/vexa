@@ -104,6 +104,9 @@ CASES = [
     ("POST", "/billing/checkout", "/billing/checkout"),
     ("POST", "/billing/portal", "/billing/portal"),
     ("POST", "/billing/change", "/billing/change"),
+    ("POST", "/billing/cancel", "/billing/cancel"),
+    ("POST", "/billing/resume", "/billing/resume"),
+    ("POST", "/billing/sync", "/billing/sync"),
     ("GET", "/billing/prices", "/billing/prices"),
 
     ("POST", "/agent/chat", "/agent/chat"),

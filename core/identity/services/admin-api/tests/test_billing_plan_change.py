@@ -8,8 +8,10 @@ import pytest
 
 from admin_api.app.billing.plan_change import (
     PlanChangeRefused,
+    cancel_at_period_end,
     change_plan,
     live_subscriptions,
+    resume,
 )
 
 ENV = {
@@ -153,3 +155,38 @@ def test_a_target_this_deployment_does_not_sell_is_refused():
 def test_only_subscriptions_that_still_exist_count_as_live():
     subs = [{"status": s} for s in ("active", "canceled", "incomplete_expired", "past_due", "trialing")]
     assert [s["status"] for s in live_subscriptions(subs)] == ["active", "past_due", "trialing"]
+
+
+# ── cancel at period end / resume ─────────────────────────────────────────────────────────────
+
+def test_cancel_sets_cancel_at_period_end():
+    stripe = _FakeStripe()
+    asyncio.run(cancel_at_period_end(stripe, _sub()))
+    assert stripe.calls == [("update_subscription", "sub_1", {"cancel_at_period_end": True})]
+
+
+def test_cancel_calls_off_a_pending_switch_first():
+    stripe = _FakeStripe()
+    asyncio.run(cancel_at_period_end(stripe, _sub(schedule={"id": "sub_sched_old", "current_phase": dict(PERIOD)})))
+    assert [c[0] for c in stripe.calls] == ["release_schedule", "update_subscription"]
+
+
+def test_cancelling_an_already_cancelling_subscription_does_nothing():
+    stripe = _FakeStripe()
+    asyncio.run(cancel_at_period_end(stripe, _sub(cancel_at_period_end=True)))
+    assert stripe.calls == []
+
+
+def test_resume_clears_cancel_at_period_end_and_is_a_no_op_otherwise():
+    stripe = _FakeStripe()
+    asyncio.run(resume(stripe, _sub(cancel_at_period_end=True)))
+    asyncio.run(resume(stripe, _sub()))
+    assert stripe.calls == [("update_subscription", "sub_1", {"cancel_at_period_end": False})]
+
+
+def test_an_ended_subscription_can_be_neither_cancelled_nor_resumed():
+    for action in (cancel_at_period_end, resume):
+        stripe = _FakeStripe()
+        with pytest.raises(PlanChangeRefused):
+            asyncio.run(action(stripe, _sub(status="canceled")))
+        assert stripe.calls == []

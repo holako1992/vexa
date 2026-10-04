@@ -69,3 +69,45 @@ test("a refused second checkout explains itself", async ({ page }) => {
   await card(page, "Pro").getByRole("button", { name: "Upgrade" }).click();
   await expect(page.getByRole("status").filter({ hasText: "You already have a subscription" })).toBeVisible();
 });
+
+test("return from Checkout: the page confirms the payment and shows the plan", async ({ page, request }) => {
+  await setEntitlements(request, proMonthlySubscriberEntitlements());
+  await signIn(page, testEmail("billing-checkout-success"));
+  await page.goto("/billing?checkout=success");
+
+  await expect(page.getByTestId("checkout-notice")).toHaveText("Payment received — you're on Pro monthly.");
+  await expect(page).toHaveURL(/\/billing$/);
+  const syncs = (await gatewayRequests(request)).filter((r) => r.method === "POST" && r.url.includes("/billing/sync"));
+  expect(syncs.length).toBeGreaterThanOrEqual(1);
+});
+
+test("return from a cancelled Checkout says nothing was charged", async ({ page }) => {
+  await signIn(page, testEmail("billing-checkout-cancelled"));
+  await page.goto("/billing?checkout=cancelled");
+  await expect(page.getByTestId("checkout-notice")).toHaveText("Checkout cancelled — you weren't charged.");
+});
+
+test("cancel keeps the plan until the period ends, and resume calls it off", async ({ page, request }) => {
+  await setEntitlements(request, proMonthlySubscriberEntitlements());
+  await signIn(page, testEmail("billing-cancel"));
+  await page.goto("/billing");
+
+  await page.getByRole("button", { name: "Cancel subscription" }).click();
+  const dialog = page.getByRole("dialog", { name: "Cancel your subscription?" });
+  await expect(dialog.getByTestId("cancel-explanation")).toContainText("You'll keep Pro monthly until");
+  await expect(dialog.getByTestId("cancel-explanation")).toContainText("you won't be charged again");
+  await dialog.getByRole("button", { name: "Cancel subscription" }).click();
+
+  await expect(page.getByRole("status").filter({ hasText: "Subscription cancelled" })).toBeVisible();
+  await expect(page.getByTestId("subscription-line")).toContainText("ends");
+  await expect(page.getByText("Resume your subscription to change plans.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Team", exact: true }).locator("..").getByRole("button")).toBeDisabled();
+
+  await page.getByRole("button", { name: "Resume subscription" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Subscription resumed" })).toBeVisible();
+  await expect(page.getByTestId("subscription-line")).toContainText("renews");
+  await expect(page.getByRole("button", { name: "Cancel subscription" })).toBeVisible();
+
+  const calls = (await gatewayRequests(request)).filter((r) => r.method === "POST" && /\/billing\/(cancel|resume)/.test(r.url));
+  expect(calls.map((r) => r.url.replace(/.*\/billing\//, ""))).toEqual(["cancel", "resume"]);
+});

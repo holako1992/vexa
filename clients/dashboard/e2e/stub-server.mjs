@@ -863,6 +863,24 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { effective });
   }
 
+  // POST /billing/cancel, POST /billing/resume — mirror `cancel_billing_subscription` /
+  // `resume_billing_subscription`: the plan stays until period end; a pending switch is dropped.
+  if (req.method === "POST" && parts.length === 2 && parts[0] === "billing" && (parts[1] === "cancel" || parts[1] === "resume")) {
+    const sub = entitlements.subscription;
+    if (!sub) return sendJson(res, 409, { detail: "No active subscription — subscribe first (POST /billing/checkout)" });
+    const cancel = parts[1] === "cancel";
+    sub.cancel_at_period_end = cancel;
+    if (cancel) sub.pending_change = null;
+    entitlements.will_renew = !cancel;
+    return sendJson(res, 200, { ends_at: cancel ? entitlements.period.end : null });
+  }
+
+  // POST /billing/sync — the billing page on return from Checkout. Mirrors `sync_billing_subscription`:
+  // `active` is whether a live subscription is on record (here: the current entitlements carry one).
+  if (req.method === "POST" && parts.length === 2 && parts[0] === "billing" && parts[1] === "sync") {
+    return sendJson(res, 200, { active: !!entitlements.subscription });
+  }
+
   // POST /billing/portal — the Manage-subscription button. 409 with no body when there is no
   // Stripe customer yet, exactly like `create_billing_portal`'s `HTTPException(409, ...)`.
   if (req.method === "POST" && parts.length === 2 && parts[0] === "billing" && parts[1] === "portal") {

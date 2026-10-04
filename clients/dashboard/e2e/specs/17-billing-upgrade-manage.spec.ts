@@ -1,6 +1,6 @@
-/** The two write controls the billing page grows over the read-only page:
- *  Upgrade (`POST /billing/checkout {plan, interval}` → redirect) and Manage subscription
- *  (`POST /billing/portal` → redirect, or a 409 toast when there's no subscription yet).
+/** The billing page's purchase controls: Upgrade (`POST /billing/checkout {plan, interval}` →
+ *  redirect) and, for a subscriber, the "Payment method & invoices" link (`POST /billing/portal`
+ *  → redirect). Cancel and resume are in `18-billing-switch-plan.spec.ts`.
  *
  *  Expected:
  *   - Clicking Upgrade on a plan card sends the exact `{plan, interval}` the card and the
@@ -11,12 +11,12 @@
  *   - Real navigation to `checkout.stripe.com`/`billing.stripe.com` never happens: each test
  *     installs a `page.route()` intercept for exactly that host before clicking, so the browser's
  *     navigation is fulfilled locally rather than leaving the test environment.
- *   - Manage subscription redirects to the Stripe portal URL when the account has a Stripe
- *     customer on file, and shows an explanatory toast (never a generic error) — with a live
- *     Upgrade button visible on the same page — when the core answers 409 because it doesn't.
+ *   - A subscriber's "Payment method & invoices" redirects to the Stripe portal URL; an account
+ *     with no subscription sees neither that link nor a cancel button.
  */
 import { test, expect } from "@playwright/test";
-import { resetStub, setStripeCustomer, signIn, testEmail } from "./helpers";
+import { proMonthlySubscriberEntitlements } from "../fixtures.mjs";
+import { resetStub, setEntitlements, setStripeCustomer, signIn, testEmail } from "./helpers";
 
 test.beforeEach(async ({ request }) => { await resetStub(request); });
 
@@ -51,21 +51,18 @@ test("upgrade: Team + Yearly (toggled) sends {plan: 'team', interval: 'year'}", 
   await page.waitForURL(/checkout\.stripe\.com\/.*#team_year/);
 });
 
-test("manage subscription: no Stripe customer yet shows a toast, never a generic error", async ({ page, request }) => {
-  await signIn(page, testEmail("billing-manage-409"));
+test("no subscription: neither the portal link nor a cancel button is shown", async ({ page }) => {
+  await signIn(page, testEmail("billing-no-subscription"));
   await page.goto("/billing");
 
-  await page.getByRole("button", { name: "Manage subscription" }).click();
-
-  const toast = page.getByRole("status").filter({ hasText: "No subscription to manage yet" });
-  await expect(toast).toBeVisible();
-  await expect(toast.getByText(/upgrade first/i)).toBeVisible();
-  // Upgrade is right there on the same page — the toast never has to be the only way forward.
   await expect(page.getByRole("button", { name: "Upgrade" }).first()).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Payment method & invoices" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel subscription" })).toHaveCount(0);
 });
 
-test("manage subscription: an existing Stripe customer redirects straight to the Portal", async ({ page, request }) => {
+test("payment method & invoices: a subscriber goes straight to the Stripe portal", async ({ page, request }) => {
   await setStripeCustomer(request, true);
+  await setEntitlements(request, proMonthlySubscriberEntitlements());
   await signIn(page, testEmail("billing-manage-success"));
   await page.goto("/billing");
 
@@ -75,7 +72,7 @@ test("manage subscription: an existing Stripe customer redirects straight to the
     await route.fulfill({ status: 200, contentType: "text/html", body: "<html>stripe portal (e2e stub)</html>" });
   });
 
-  await page.getByRole("button", { name: "Manage subscription" }).click();
+  await page.getByRole("button", { name: "Payment method & invoices" }).click();
 
   await page.waitForURL(/billing\.stripe\.com/);
   expect(navigatedTo).toContain("/p/session/");
@@ -102,7 +99,6 @@ test("upgrade: the button disables while the checkout request is in flight", asy
 
   const teamCard = page.getByRole("heading", { name: "Team" }).locator("..");
   await expect(teamCard.getByRole("button", { name: "Upgrade" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Manage subscription" })).toBeDisabled();
 });
 
 test("prices: each card shows Stripe's price, and Yearly adds the saving over monthly", async ({ page }) => {

@@ -193,6 +193,17 @@ class StripeClient:
         _raise_for_stripe_error(r)
         return r.json()
 
+    async def customer_exists(self, customer_id: str) -> bool:
+        """`GET /v1/customers/{id}` — False when Stripe has deleted the customer (it answers the
+        object with `deleted: true`) or has no such customer at all."""
+        try:
+            customer = await self._get(f"/customers/{customer_id}")
+        except StripeAPIError as e:
+            if e.status_code == 404 or e.code == "resource_missing":
+                return False
+            raise
+        return not customer.get("deleted")
+
     async def create_customer(self, *, email: str, metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """`POST /v1/customers` — called once, the first time a user checks out or opens the
         portal with no `stripe_customer_id` stored yet."""
