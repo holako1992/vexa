@@ -403,7 +403,7 @@ took the suite from 6 passing to 10.
 
 ---
 
-## Status at 2026-09-28 — paused, resume next week
+## Status (updated 2026-10-04)
 
 Work is done by Sonnet agents, one task per agent, verified by a coordinator that re-runs every
 claimed test before pushing. **Every agent reads [`AGENT-RULES.md`](AGENT-RULES.md) first.** It holds
@@ -448,15 +448,21 @@ the known environmental traps.
 | DB-45, DB-43, DB-47 | `32708f96` | Export dialog (.txt/.md/.docx/.srt/.vtt, copy as Markdown, PDF via print); Speakers dialog naming producer speakers (`metadata.speaker_labels`); tags on meetings with a server-side `?tag=` list filter (`metadata.tags`), list sorting; annotate body now checked. e2e 105/105 twice |
 | DB-62 | `09cfbb1a` | flows' summary turn also yields a title and 1–3 tags; an untitled meeting gets the title (an invite's own title wins), a tagless one gets the tags, via meeting-api annotate after a re-read; a person's title is never overwritten (one-round-trip race documented). flows 780 passed / 12 skipped |
 | DB-40 | `f48b39c0` | Live meeting page streams transcript lines over `/agent/meeting/stream` (resume via `Last-Event-ID`), falls back to the 5s poll when the stream is unavailable, "Jump to live" pill |
+| Billing prices + switching | `307a3ee5` | `/billing` cards show each plan's price read from Stripe (`GET /billing/prices`, 5-min cache) and the yearly saving; one subscription per account (checkout 409s while one is live); `POST /billing/change` switches in place — upgrade on the same interval now with nothing charged until renewal, downgrade or monthly↔yearly at period end (subscription schedule), current plan calls a pending switch off; `canceled` resolves to Free at once; an ended older subscription no longer overwrites the live one; Stripe refusals answer 502 with Stripe's reason. admin-api 405, unit 422, billing e2e 19 |
+| Billing return, cancel, resume | `4a07164e` | `POST /billing/sync` re-reads the subscription when Checkout returns (`?checkout=success` → "Payment received — you're on Pro monthly"; `?checkout=cancelled` → "you weren't charged"); "Manage subscription" replaced by "Cancel subscription" (end of paid period, confirmation) / "Resume subscription" plus a "Payment method & invoices" portal link; a Stripe customer deleted in Stripe is replaced on checkout; `stripe_refused` 502 shown as Stripe's reason, not "unreachable". admin-api 419, unit 424, billing e2e 22 |
 | DB-61 | `c3cc6773` | Chat panel on the meeting page (focus = that row) and "Ask across all my meetings" on /search over `/agent/chat`, streamed, Stop and New conversation; strict body allowlist. **Do not ship before the core authorization fix in decision 4.** Merged e2e 120/120 twice, unit 402 |
 
 ### Decisions waiting on the user
 
-1. **Stripe webhook ingress.** The handler exists on admin-api (`POST /billing/webhook`, signature
-   verified) but nothing public reaches it. The gateway rejects every request without an API key,
-   and every service binds 127.0.0.1. The options are: (1) a reverse-proxy rule forwarding exactly
-   `/billing/webhook` to admin-api; (2) a new signature-gated route class in the gateway; (3) a small
-   ingress service. The coordinator recommends (1). See `docs/docs/how-to/billing.mdx`.
+1. **Stripe webhook ingress (production).** Locally this works end to end in Stripe test mode
+   (2026-10-04): `stripe listen --forward-to localhost:18057/billing/webhook` delivers to admin-api,
+   and the billing page no longer depends on it to confirm a purchase (`POST /billing/sync`). Run
+   `stripe listen` with **no `--events`** on Windows: PowerShell turns `a,b,c` into a
+   space-separated argument and the CLI then forwards nothing. In production nothing public reaches
+   `POST /billing/webhook` yet, so renewals, failed payments and period-end cancellations are only
+   recorded on the person's next visit to the billing page. Recommended: a reverse-proxy rule
+   forwarding exactly `/billing/webhook` to admin-api. **Blocked on the user choosing a production
+   host** (VPS + nginx/Caddy, Cloudflare Tunnel, …). See `docs/docs/how-to/billing.mdx`.
 2. ~~**Calendar token encryption.**~~ Decided 2026-09-26: AES-256-GCM (`cryptography`), shipped. `admin_api/app/token_cipher.py` is a sound but hand-built
    HMAC-CTR plus encrypt-then-MAC. Either harden it (enforce a minimum key length; bind the user id
    and calendar id as associated data) or replace it with AES-GCM from `cryptography`, which is
@@ -475,14 +481,17 @@ the known environmental traps.
    `SECURITY.md`'s private channel rather than written up here. DB-61 must not ship to users before
    the core fix lands.
 
-### Next, in order (updated 2026-10-01)
+### Next, in order (updated 2026-10-04)
 
 Items 1, 3, 4, 6 and 7, and DB-45 from item 5, are done. DB-46 is blocked on core (see "Decisions
 waiting on the user", decision 3). Next up: 2 (needs the user), then 7. Remaining, in order:
 
 1. ~~Run the docker-gated suites~~ — done 2026-09-29, all green, no defects (see Done table).
-2. **Stripe webhook ingress** (decision 1 above, still open — needs the user). Until it exists,
-   DB-73/DB-74b/DB-78 do nothing live: no plan change, no dunning email.
+2. **Stripe webhook ingress** for production (decision 1 above — needs the user's host). Test-mode
+   billing is done and verified locally (checkout, return confirmation, switching, cancel/resume).
+   Still for the user in the Stripe dashboard: turn **off** plan switching and cancellation in the
+   Customer Portal settings (keep payment method and invoices). Going live needs live-mode keys,
+   price ids and a live webhook endpoint.
 3. ~~DB-76 dashboard follow-ups~~ — done 2026-09-29.
 4. ~~DB-12 identity oracle, then the rest of DB-76~~ — done 2026-09-29. Open point: Microsoft counts as verified (see open questions).
 5. ~~**DB-45 export**~~ — done 2026-10-01. **DB-46 sharing** (`/s/<token>`) — blocked, decision 3.
@@ -555,17 +564,26 @@ How the work was run this week (keep doing it): one coordinator, Sonnet sub-agen
 
 ### Product changes already live in the code
 
+- One Stripe subscription per account; plan changes go through `POST /billing/change`.
+- A `canceled` subscription is Free at once (Stripe sets it only when the subscription has ended);
+  cancelling from the billing page keeps the plan until the paid period ends.
 - Existing free users drop from 3 concurrent bots to 1.
 - Accounts carrying a tier outside the catalog (for example `commitment_25`) resolve to Free.
 - Unknown usage refuses a free user's send instead of allowing it.
 
 ### What the user must supply before these work live
 
-Stripe secret key, webhook secret and price ids · Google Cloud OAuth client for calendar plus
+Stripe **live-mode** secret key, webhook secret and price ids (test mode is configured and working
+locally) · Google Cloud OAuth client for calendar plus
 `CALENDAR_TOKEN_ENCRYPTION_KEY` · an Azure app for DB-32 · mail settings for DB-10 · real legal
 text for DB-93 · `DASHBOARD_NEXT_URL` for email links.
 
-To run it locally, rebuild `dashboard-next`, `gateway`, `admin-api`, `meeting-api` and `flows-worker`.
+To run it locally, rebuild `dashboard-next`, `gateway`, `admin-api`, `meeting-api` and `flows-worker`
+— **and the bot image** (`make bot`, or its two `docker build` steps): `meeting-api` and the bot
+share the `invocation.v1` contract, which rejects unknown fields, so a bot older than `meeting-api`
+exits at start with `FATAL invocation.v1 … must NOT have additional properties` and never joins.
+In production, build and deploy every image, the bot included, from one commit under one
+`IMAGE_TAG`, and pull the bot image before switching the services.
 
 ### Not verified anywhere
 
@@ -578,7 +596,15 @@ To run it locally, rebuild `dashboard-next`, `gateway`, `admin-api`, `meeting-ap
   inside each client.
 - The terminal admin Users tab (DB-77) has unit coverage only; no browser test.
 
-- No live leg against real Stripe or Google. Everything is mocked or stubbed.
+- Stripe: test-mode live leg done 2026-10-04 — checkout, `/billing/sync` on return, webhook via the
+  Stripe CLI; schedule and cancel calls proven against the test API with throwaway customers. Not
+  witnessed in the browser yet: a plan switch and cancel/resume on a real subscription, and a
+  scheduled switch actually taking effect at period end. Nothing against live mode.
+- No live leg against Google. Calendar is mocked or stubbed.
+- `admin-api/tests/test_onboarding_event.py`'s second-create case failed once in a slow full run
+  (2026-10-04) and passes alone; watch for it.
+- Gateway `test_edge_guard.py::TestBothLayers::test_valid_key_429_from_rate_limiter_and_keyless_429_from_guard`
+  fails on the base too (a stray `retry-after` header); not caused by this branch.
 - `admin-api/tests/test_stack_admin_api.py` and `test_stack_redis.py` hang on this host.
 - These gates are red here for environmental reasons that predate this work: `node`, `graph`,
   `schema`, `config-contract` (no root `node_modules`, and `npx` cannot be spawned on Windows),
