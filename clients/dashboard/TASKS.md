@@ -578,6 +578,19 @@ locally) · Google Cloud OAuth client for calendar plus
 `CALENDAR_TOKEN_ENCRYPTION_KEY` · an Azure app for DB-32 · mail settings for DB-10 · real legal
 text for DB-93 · `DASHBOARD_NEXT_URL` for email links.
 
+**Model wiring for chat and summaries (verified 2026-10-04).** Chat, the post-meeting summary and the
+company setup all run on the claude-code harness (the Claude CLI), which speaks the **Anthropic**
+API; the meeting copilot's cards speak the **OpenAI** API. A provider usually serves the two on
+different URLs — DeepInfra: `https://api.deepinfra.com/v1/openai` (OpenAI) and
+`https://api.deepinfra.com/anthropic` (Anthropic) — while Settings → Models "custom" mode holds ONE
+URL and hands it to both, so the CLI fails with "There's an issue with the selected model". Working
+setup: in `deploy/compose/.env`, `VEXA_LLM_*` on the OpenAI URL, `ANTHROPIC_BASE_URL` on the
+Anthropic URL with `ANTHROPIC_AUTH_TOKEN` = the same provider key, and `ANTHROPIC_MODEL`,
+`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` and `VEXA_AGENT_MODEL` all set to the provider's model
+id (today `Qwen/Qwen3.5-9B`); Settings → Models on **subscription** (deployment credentials), not
+custom. Recreate `runtime` and `agent-api` after changing them, and stop any running
+`vexa-worker-*` container (it keeps the env it was spawned with).
+
 To run it locally, rebuild `dashboard-next`, `gateway`, `admin-api`, `meeting-api` and `flows-worker`
 — **and the bot image** (`make bot`, or its two `docker build` steps): `meeting-api` and the bot
 share the `invocation.v1` contract, which rejects unknown fields, so a bot older than `meeting-api`
@@ -601,6 +614,11 @@ In production, build and deploy every image, the bot included, from one commit u
   witnessed in the browser yet: a plan switch and cancel/resume on a real subscription, and a
   scheduled switch actually taking effect at period end. Nothing against live mode.
 - No live leg against Google. Calendar is mocked or stubbed.
+- **Summaries and every flows email wait on the instance gate** (`[loop] PARKED by the instance gate`
+  in the flows-worker log) until admin-api's `global_setup` platform setting reads
+  `state: completed`. The code names agent-api's `POST /api/global/ready` as its only writer, but no
+  such route exists in this tree — a fresh install never opens the gate on its own. Report upstream;
+  until then it is opened by hand through admin-api's internal settings route.
 - `admin-api/tests/test_onboarding_event.py`'s second-create case failed once in a slow full run
   (2026-10-04) and passes alone; watch for it.
 - Gateway `test_edge_guard.py::TestBothLayers::test_valid_key_429_from_rate_limiter_and_keyless_429_from_guard`
