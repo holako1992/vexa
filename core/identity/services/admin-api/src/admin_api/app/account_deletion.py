@@ -52,6 +52,11 @@ STATE_DELETING = "deleting"
 
 MEETING_API_URL_ENV = "VEXA_MEETING_API_URL"
 AGENT_API_URL_ENV = "VEXA_AGENT_API_URL"
+#: Where flows is erased. Separate from the publish edge (``VEXA_FLOWS_API_URL``), whose empty value
+#: is a deliberate "publish nothing" profile: a stack that runs flows-api but publishes no facts to it
+#: still holds the person's mail and reactions there, and they must go. Falls back to the publish
+#: edge; with neither set the deployment carries no flows domain and the stage is skipped.
+FLOWS_ERASE_URL_ENV = "VEXA_FLOWS_ERASE_URL"
 
 #: A domain erasure can walk a lot of stored recordings, so this is far above the 2 s publish bound.
 ERASE_TIMEOUT_S = 120.0
@@ -239,7 +244,8 @@ async def delete_account(user_id: int, db: AsyncSession, *,
                                    optional=False)
 
     async def flows() -> Dict[str, Any]:
-        return await _erase_remote("flows", events_mod._flows_base(), user,
+        base = os.environ.get(FLOWS_ERASE_URL_ENV, "").strip() or events_mod._flows_base()
+        return await _erase_remote("flows", base, user,
                                    {"emails": [email]} if email else None, optional=True)
 
     stages: List[Tuple[str, Callable[[], Awaitable[Dict[str, Any]]], Tuple[str, ...]]] = [

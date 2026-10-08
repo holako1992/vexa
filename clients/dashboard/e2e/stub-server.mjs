@@ -1181,7 +1181,7 @@ async function handleAdmin(req, res) {
   //   502 {error:"partial", pending, detail}   the account is locked and its tokens revoked, a
   //                                            part of the erasure failed; a repeat resumes.
   // The gateway stub's meetings and calendars are one world shared by every signed-in user, so a
-  // completed erasure empties that world. `force.userDelete` = "conflict" | "partial" (always);
+  // completed erasure empties that world. `force.userDelete` = "conflict" | "last_admin" | "partial" (always);
   // `force.userDeletePartialFirst` = N makes the first N calls partial, then the next completes.
   if (req.method === "DELETE" && parts.length === 3 && parts[0] === "admin" && parts[1] === "users") {
     const userId = Number(parts[2]);
@@ -1189,6 +1189,9 @@ async function handleAdmin(req, res) {
     if (!user) return sendJson(res, 404, { detail: "User not found" });
     if (force.userDelete === "conflict") {
       return sendJson(res, 409, { error: "cannot delete: a raw producer sentence the dashboard must not relay" });
+    }
+    if (force.userDelete === "last_admin") {
+      return sendJson(res, 409, { error: "last_admin", detail: "a raw producer sentence about admins" });
     }
     const revokeTokens = () => {
       let revoked = 0;

@@ -78,11 +78,13 @@ export function emailMatches(typed: unknown, actual: string): boolean {
 /** What `DELETE /api/account` answers, as a code the view maps to words. `partial` is the one
  *  failure after which the browser is signed out: the core revoked the account's tokens before
  *  the part that failed. */
-export type DeleteOutcome = "deleted" | "blocked" | "partial" | "unavailable";
+export type DeleteOutcome = "deleted" | "blocked" | "last_admin" | "partial" | "unavailable";
 
 /** The sentences for each failure — fixed text, never the producer's. */
 export const DELETE_FAILURE_TEXT: Record<Exclude<DeleteOutcome, "deleted">, string> = {
   blocked: "Your account can't be deleted right now. Nothing was changed. Try again later, or contact support.",
+  last_admin:
+    "This is the only administrator account on this deployment, so it can't be deleted. Make another account an administrator first. Nothing was changed.",
   partial:
     "Your account is being deleted, but part of it didn't finish. Sign-in is blocked for this account. Contact support to complete the deletion.",
   unavailable: "We couldn't reach the account service. Nothing was changed. Try again in a moment.",

@@ -214,9 +214,26 @@ def test_missing_meeting_url_is_pending_not_silent(env):
     assert _count(engine, "users", uid) == 1
 
 
+def test_flows_erase_url_erases_flows_even_with_the_publish_edge_off(env):
+    """An empty publish edge means "publish no facts", not "no flows data": the erase URL still
+    reaches flows, with the address in the body."""
+    c, domains, published, engine, mp = env
+    mp.delenv("VEXA_FLOWS_API_URL")
+    mp.setenv("VEXA_FLOWS_ERASE_URL", FLOWS)
+    uid = _user(c)
+    r = c.delete(f"/admin/users/{uid}", headers=ADMIN)
+    assert r.status_code == 200
+    flows_calls = [call for call in domains.calls if call[0] == "flows"]
+    assert len(flows_calls) == 1
+    assert flows_calls[0][1] == f"/internal/accounts/{uid}/erase"
+    assert flows_calls[0][2] == SECRET
+    assert flows_calls[0][3] == {"emails": ["a@example.com"]}
+
+
 def test_no_flows_domain_is_a_profile_not_a_failure(env):
     c, domains, published, engine, mp = env
     mp.delenv("VEXA_FLOWS_API_URL")
+    mp.delenv("VEXA_FLOWS_ERASE_URL", raising=False)
     uid = _user(c)
     r = c.delete(f"/admin/users/{uid}", headers=ADMIN)
     assert r.status_code == 200

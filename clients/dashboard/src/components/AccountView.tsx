@@ -121,7 +121,8 @@ export function AccountView() {
       if (e instanceof ApiError && e.status === 502) {
         setDeletePartial(true);
       } else if (e instanceof ApiError && e.status === 409) {
-        setDeleteError(DELETE_FAILURE_TEXT.blocked);
+        const outcome = (e.body as { outcome?: unknown } | undefined)?.outcome;
+        setDeleteError(outcome === "last_admin" ? DELETE_FAILURE_TEXT.last_admin : DELETE_FAILURE_TEXT.blocked);
       } else if (e instanceof ApiError && e.status === 400) {
         setDeleteError("That doesn't match your account's email address.");
       } else if (e instanceof ApiError && (e.status === 0 || e.status === 503)) {

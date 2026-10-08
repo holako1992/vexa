@@ -128,10 +128,23 @@ export async function revokeAllLoginSessions(userId: number): Promise<RevokeResu
 export const DELETE_ATTEMPTS = 3;
 const DELETE_RETRY_DELAY_MS = 400;
 
-type DeleteCall = () => Promise<{ ok: boolean; status: number }>;
+type DeleteCall = () => Promise<{ ok: boolean; status: number; error?: string }>;
+
+/** The core's refusal code on a 409 (`{"error": "<code>", ...}`), or null. Only the code is read
+ *  and only a known one changes the outcome — the core's sentence is never shown. */
+function refusalCode(error: string | undefined): string | null {
+  if (!error) return null;
+  try {
+    const code = (JSON.parse(error) as { error?: unknown })?.error;
+    return typeof code === "string" ? code : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Run an account deletion and say what happened. 200 and 404 are one outcome: the account is
- *  gone. 409 is final and changes nothing. A 502 `partial` is retried up to `DELETE_ATTEMPTS`
+ *  gone. 409 is final and changes nothing (`last_admin` when the core names this account the
+ *  deployment's only administrator). A 502 `partial` is retried up to `DELETE_ATTEMPTS`
  *  times; if it is still not done the account stays locked and the outcome is `partial`. Anything
  *  else (admin-api unreachable, an unexpected status) is `unavailable`: it says nothing about
  *  whether the account still exists. */
@@ -142,7 +155,7 @@ export async function runAccountDeletion(
   for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt += 1) {
     const r = await call();
     if (r.ok || r.status === 404) return "deleted";
-    if (r.status === 409) return "blocked";
+    if (r.status === 409) return refusalCode(r.error) === "last_admin" ? "last_admin" : "blocked";
     if (r.status !== 502) return "unavailable";
     if (attempt < DELETE_ATTEMPTS) await sleep(DELETE_RETRY_DELAY_MS);
   }

@@ -31,7 +31,7 @@ describe("the account-deleted notice", () => {
   });
 
   it("has a fixed sentence for every failure", () => {
-    expect(Object.keys(DELETE_FAILURE_TEXT).sort()).toEqual(["blocked", "partial", "unavailable"]);
+    expect(Object.keys(DELETE_FAILURE_TEXT).sort()).toEqual(["blocked", "last_admin", "partial", "unavailable"]);
   });
 });
 
@@ -55,6 +55,14 @@ describe("runAccountDeletion", () => {
 
   it("does not retry a refusal", async () => {
     expect(await run([409])).toMatchObject({ outcome: "blocked", seen: [409] });
+  });
+
+  it("names the last-admin refusal by its code only, never by the core's sentence", async () => {
+    const once = (error: string) => runAccountDeletion(async () => ({ ok: false, status: 409, error }), async () => {});
+    expect(await once(JSON.stringify({ error: "last_admin", detail: "anything" }))).toBe("last_admin");
+    expect(await once(JSON.stringify({ error: "something_else" }))).toBe("blocked");
+    expect(await once("not json")).toBe("blocked");
+    expect(await once(JSON.stringify({ error: { nested: true } }))).toBe("blocked");
   });
 
   it("retries a partial and finishes when the core does", async () => {

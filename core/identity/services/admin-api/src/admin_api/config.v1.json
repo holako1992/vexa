@@ -143,6 +143,13 @@
    "targets": ["compose"]
   },
   {
+   "key": "VEXA_FLOWS_ERASE_URL",
+   "class": "defaulted",
+   "default": "(unset — falls back to VEXA_FLOWS_API_URL; with both unset the deployment carries no flows domain and the flows stage is skipped)",
+   "description": "flows-api's base URL, called ONLY by DELETE /admin/users/{id} (POST /internal/accounts/{subject}/erase, X-Internal-Secret, body {emails}) to erase a deleted account's flows data. Separate from the VEXA_FLOWS_API_URL publish edge, whose empty value means 'publish no facts' — not 'no flows data exists' (app/account_deletion.py).",
+   "targets": ["compose"]
+  },
+  {
    "key": "VEXA_AGENT_API_URL",
    "class": "defaulted",
    "default": "(unset — account deletion then reports the agent stage as pending)",

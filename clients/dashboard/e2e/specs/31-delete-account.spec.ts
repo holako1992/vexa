@@ -183,6 +183,22 @@ test("a refusal is a fixed sentence, not the producer's, and changes nothing", a
   expect((await lookup(request, email)).status).toBe(200);
 });
 
+test("the deployment's only administrator is told why, in fixed words, and nothing changes", async ({ page, request }) => {
+  const email = testEmail("delete-last-admin");
+  await signIn(page, email);
+  await force(request, { userDelete: "last_admin" });
+
+  const dialog = await openDialog(page);
+  await dialog.getByLabel("Your email address").fill(email);
+  await dialog.getByRole("button", { name: "Delete my account" }).click();
+
+  await expect(dialog.getByText("This is the only administrator account on this deployment")).toBeVisible();
+  await expect(page.getByText(/raw producer sentence/)).toHaveCount(0);
+  await expect(page).toHaveURL(/\/settings\/account$/);
+  expect((await page.request.get("/api/auth/me")).status()).toBe(200);
+  expect((await lookup(request, email)).status).toBe(200);
+});
+
 test("a body, query or path naming another user is ignored: that user survives", async ({ page, browser, request }) => {
   const mine = testEmail("delete-mine");
   const theirs = testEmail("delete-theirs");

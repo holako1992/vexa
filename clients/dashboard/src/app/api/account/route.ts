@@ -76,6 +76,6 @@ export async function DELETE(request: NextRequest) {
   }
   return NextResponse.json(
     { error: DELETE_FAILURE_TEXT[outcome], outcome },
-    { status: outcome === "blocked" ? 409 : 503, headers: NO_STORE },
+    { status: outcome === "blocked" || outcome === "last_admin" ? 409 : 503, headers: NO_STORE },
   );
 }
