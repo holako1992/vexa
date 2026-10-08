@@ -469,9 +469,8 @@ the known environmental traps.
 
 4. **A core authorization finding on the `/agent/chat` meeting focus** (found while building
    DB-61; reproduced). Fixed in core 2026-10-08 (`be3f6c4d`, agent tests 599 passed, with a test
-   that fails on the previous code). Still for the user: report it to the upstream maintainers
-   through `SECURITY.md`'s private channel — this fork is public, so the fix is held back from the
-   remote until that is decided. DB-61 ships only with this fix.
+   that fails on the previous code), pushed. The user decided no upstream report is needed.
+   DB-61 ships only with this fix.
 
 ### Next, in order (updated 2026-10-04)
 
