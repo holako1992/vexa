@@ -80,3 +80,6 @@ flowchart LR
   flows_worker -->|""| agent_api
   flows_worker -->|""| gateway
   flows_worker -->|""| admin_api
+  admin_api -->|"HTTPS"| meeting_api
+  admin_api -->|"HTTPS"| agent_api
+  admin_api -->|"HTTPS"| flows_api

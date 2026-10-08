@@ -766,7 +766,17 @@
     }
    ]
   },
-    {"unique-id": "claude-plugin", "node-type": "webclient", "name": "claude-plugin", "description": "claude-plugin — client (Claude Code plugin: manifest, skills, hosted MCP config; no code)", "metadata": [{"path": "clients/claude-plugin"}]},
+  {
+   "unique-id": "claude-plugin",
+   "node-type": "webclient",
+   "name": "claude-plugin",
+   "description": "claude-plugin — client (Claude Code plugin: manifest, skills, hosted MCP config; no code)",
+   "metadata": [
+    {
+     "path": "clients/claude-plugin"
+    }
+   ]
+  },
   {
    "unique-id": "terminal",
    "node-type": "webclient",
@@ -2098,7 +2108,7 @@
      }
     }
    },
-   "description": "DB-30: OAuth code/refresh-token exchange (oauth2.googleapis.com/token) and account-email lookup (oauth2/v3/userinfo) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard",
+   "description": "DB-30: OAuth code/refresh-token exchange (oauth2.googleapis.com/token) and account-email lookup (oauth2/v3/userinfo) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard; account deletion revokes the stored refresh token (oauth2.googleapis.com/revoke), best-effort",
    "protocol": "HTTPS"
   },
   {
@@ -2735,6 +2745,54 @@
      ]
     }
    }
+  },
+  {
+   "unique-id": "admin-erase-meeting-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "admin-api"
+     },
+     "destination": {
+      "node": "meeting-api",
+      "interface": "meeting-api-rest"
+     }
+    }
+   },
+   "description": "Account deletion: POST /internal/accounts/{user_id}/erase (X-Internal-Secret) erases the account's meetings, transcripts, sessions, recordings and their stored objects, live streams and share grants; idempotent, so a repeat call resumes a partial deletion",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "admin-erase-agent-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "admin-api"
+     },
+     "destination": {
+      "node": "agent-api",
+      "interface": "agent-api-rest"
+     }
+    }
+   },
+   "description": "Account deletion: POST /internal/accounts/{subject}/erase (X-Internal-Secret; outside /api, so the gateway's /agent/* catch-all cannot reach it) erases workspaces, chat sessions, routines and warm units, and hands shared workspaces to the remaining members; idempotent",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "admin-erase-flows-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "admin-api"
+     },
+     "destination": {
+      "node": "flows-api",
+      "interface": "flows-http"
+     }
+    }
+   },
+   "description": "Account deletion: POST /internal/accounts/{subject}/erase (X-Internal-Secret, body {emails}) cancels the person's queued reactions and erases their reactions, receipts, signals and mail rows; idempotent",
+   "protocol": "HTTPS"
   }
  ],
  "flows": [
@@ -2789,6 +2847,28 @@
      "relationship-unique-id": "aa-unitout",
      "sequence-number": 4,
      "description": "agent-api relays as SSE"
+    }
+   ]
+  },
+  {
+   "unique-id": "account-deletion-flow",
+   "name": "account deletion",
+   "description": "DELETE /admin/users/{id}: identity locks the account (tokens revoked, validate refuses), cancels billing, revokes calendar grants, then has each domain erase what it holds before the user row goes. Every stage is recorded on the row, so a repeat call resumes a partial deletion.",
+   "transitions": [
+    {
+     "relationship-unique-id": "admin-erase-meeting-api",
+     "sequence-number": 1,
+     "description": "meetings domain erases meetings, transcripts, recordings and streams"
+    },
+    {
+     "relationship-unique-id": "admin-erase-agent-api",
+     "sequence-number": 2,
+     "description": "agent domain erases workspaces, sessions and routines"
+    },
+    {
+     "relationship-unique-id": "admin-erase-flows-api",
+     "sequence-number": 3,
+     "description": "flows erases reactions and mail rows"
     }
    ]
   }

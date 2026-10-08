@@ -129,7 +129,7 @@ edges:
   meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated calendar connections for sync and disconnect cleanup
   meeting-api -req-> admin-api  # DB-30: POST /internal/calendars/{id}/google-token mints a short-lived Google access token for a google-kind connection's sync; meeting-api never reads identity's tables or the encrypted refresh token directly (the core owns its contracts)
   meeting-api -req-> google-calendar-api  # DB-30: GET calendar/v3/calendars/{id}/events (singleEvents=true, paginated) with the access token minted above — the Google adapter beside the ICS one, producing identical planned-meeting rows for an equivalent event (parity)
-  admin-api -req-> google-calendar-api  # DB-30: OAuth code/refresh-token exchange (oauth2.googleapis.com/token) and account-email lookup (oauth2/v3/userinfo) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard
+  admin-api -req-> google-calendar-api  # DB-30: OAuth code/refresh-token exchange (oauth2.googleapis.com/token) and account-email lookup (oauth2/v3/userinfo) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard; account deletion revokes the stored refresh token (oauth2.googleapis.com/revoke), best-effort
   meeting-api -req-> admin-api  # DB-32: POST /internal/calendars/{id}/microsoft-token mints a short-lived Microsoft Graph access token for a microsoft-kind connection's sync; meeting-api never reads identity's tables or the encrypted refresh token directly (the core owns its contracts)
   meeting-api -req-> microsoft-calendar-api  # DB-32: GET /me/calendarView (or /me/calendars/{id}/calendarView, paginated via @odata.nextLink) with the access token minted above — the Microsoft adapter beside the ICS and Google ones, producing identical planned-meeting rows for an equivalent event (parity)
   admin-api -req-> microsoft-calendar-api  # DB-32: OAuth code/refresh-token exchange (login.microsoftonline.com/{tenant}/oauth2/v2.0/token) and account-email lookup (graph.microsoft.com/v1.0/me) — the client secret and the encrypted refresh token live ONLY here, never in meeting-api or the dashboard
@@ -164,6 +164,9 @@ edges:
   flows-worker -req-> agent-api  # steps reach domains only over their published HTTP surfaces (core/flows/src/flows_steps/common.py) — a domain never knows flows exists
   flows-worker -req-> gateway
   flows-worker -req-> admin-api
+  admin-api -req-> meeting-api  # Account deletion: POST /internal/accounts/{user_id}/erase (X-Internal-Secret) erases the account's meetings, transcripts, sessions, recordings and their stored objects, live streams and share grants; idempotent, so a repeat call resumes a partial deletion
+  admin-api -req-> agent-api  # Account deletion: POST /internal/accounts/{subject}/erase (X-Internal-Secret; outside /api, so the gateway's /agent/* catch-all cannot reach it) erases workspaces, chat sessions, routines and warm units, and hands shared workspaces to the remaining members; idempotent
+  admin-api -req-> flows-api  # Account deletion: POST /internal/accounts/{subject}/erase (X-Internal-Secret, body {emails}) cancels the person's queued reactions and erases their reactions, receipts, signals and mail rows; idempotent
   bot, agent-worker deployed-in runtime
   gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, minio, transcription deployed-in deploy
   flows-api, flows-worker deployed-in deploy
@@ -171,3 +174,4 @@ edges:
 flows:
   live-transcript-flow: bot-writes-segments-stream -> collector-reads-segments -> collector-writes-tc -> aw-tcnative
   dispatch-flow: aa-runtime -> workers-deployed -> aw-unitout -> aa-unitout
+  account-deletion-flow: admin-erase-meeting-api -> admin-erase-agent-api -> admin-erase-flows-api

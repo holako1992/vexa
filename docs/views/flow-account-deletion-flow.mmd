@@ -1,0 +1,6 @@
+%% GENERATED — pnpm arch:dsl --write
+sequenceDiagram
+  autonumber
+  admin_api->>meeting_api: meetings domain erases meetings, transcripts, recordings and streams
+  admin_api->>agent_api: agent domain erases workspaces, sessions and routines
+  admin_api->>flows_api: flows erases reactions and mail rows
