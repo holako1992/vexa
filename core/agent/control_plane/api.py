@@ -637,7 +637,8 @@ def _fold_meeting_processed(redis_url: "str | None", stream_key: str, *, limit: 
 
 
 def _meeting_grounding(
-    active: "dict | None", session: str, prompt: str, redis_url: "str | None"
+    active: "dict | None", session: str, prompt: str, redis_url: "str | None", *,
+    row_verified: bool = False,
 ) -> "tuple[dict, list[str], str]":
     """Cookbook #1 — chat grounding in the terminal's ACTIVE meeting, branched by the meeting's
     LIFECYCLE PHASE (design-spec meeting-lifecycle-v2, W4; steering templates + the _global override
@@ -653,7 +654,13 @@ def _meeting_grounding(
 
     The transcript reaches the agent the SAME way the live copilot gets it: the meeting's redis Stream
     (the meetings⊥agent seam) — NOT a file, NOT a cross-domain HTTP call, NO token. Returns the plain
-    (none-context, no tools, prompt) when the active tab isn't a meeting."""
+    (none-context, no tools, prompt) when the active tab isn't a meeting.
+
+    ``row_verified`` says ``active["meeting_id"]`` is a row the caller may read, established by the
+    caller against the meetings domain (``_context_grounding``). The streams are keyed on that row id
+    and hold the meeting's words, so the live and post branches read them ONLY for a verified row; an
+    unverified focus folds nothing from them. The prep branch reads no stream and renders only what
+    the focus itself carries."""
     a = active or {}
     if a.get("kind") != "meeting":
         return ({"kind": "none", "session": session}, [], prompt)
@@ -665,11 +672,9 @@ def _meeting_grounding(
     # A chat turn (trigger "message"), not a live-meeting serve — the transcript travels in the prompt,
     # so the dispatch context stays plain (no meeting env / serve path is engaged for a chat).
     ctx = {"kind": "none", "session": session}
-    # P0 (cross-tenant leak fix): read the streams by the meetings-domain ROW id (``meeting_id``),
-    # which the terminal passes on the active meeting — the carriers key on it, never the native id
-    # (which would fold a DIFFERENT tenant's / an older row's transcript into this user's chat).
-    # Fall back to native only when the client didn't send a row id (legacy), documented as best-effort.
-    stream_key = str(m.get("meeting_id") or native)
+    # The streams are keyed by the meetings-domain ROW id, never the native id, and only a row the
+    # caller was verified to read is ever folded (see ``row_verified`` above).
+    stream_key = str(m.get("meeting_id") or "") if row_verified else ""
     status = str(m.get("status") or "").strip().lower()
     phase = meeting_steering.phase_for(status)
     fields = {
@@ -693,6 +698,9 @@ def _meeting_grounding(
             )
         )
         return (ctx, [], meeting_steering.render("prep", fields) + prompt)
+
+    if not stream_key:
+        return (ctx, [], prompt)
 
     if phase == "post":
         fields["failed"] = " — the bot FAILED during this meeting" if status == "failed" else ""
@@ -784,22 +792,13 @@ def _fold_workspace_grounding(mounts: "list", slug: str) -> str:
     return meeting_steering.render("workspace_focus", fields)
 
 
-def _enriched_meeting_focus(focus: dict, rows: "list[dict]") -> dict:
-    """Overlay the SERVER row's truth onto the client-sent meeting focus — status/title/
-    scheduled_at/workspace_id come from the meetings domain when the row is found; the client's
-    values remain only as the fallback (legacy clients / row not fetched)."""
-    nid = focus.get("native_id") or focus.get("ref")
-    row = schedule_digest_mod.find_row(
-        rows, meeting_id=focus.get("meeting_id"), platform=focus.get("platform"), native_id=nid)
-    if row is None and nid is not None:
-        # The terminal's tab param is the ROW id for planned meetings without a link (native is
-        # NULL there) — it rides in native_id, so retry it as the row id before giving up.
-        row = schedule_digest_mod.find_row(rows, meeting_id=nid)
-    if row is None:
-        return focus
+def _overlay_meeting_row(focus: dict, row: dict) -> dict:
+    """Overlay the SERVER row's truth onto the client-sent meeting focus — the row id, status, title,
+    scheduled_at and workspace_id all come from the meetings domain; the client's values remain only
+    where the row has none."""
     data = row.get("data") or {}
     merged = dict(focus)
-    merged["meeting_id"] = row.get("id", focus.get("meeting_id"))
+    merged["meeting_id"] = row.get("id")
     merged["status"] = row.get("status") or focus.get("status")
     if row.get("platform") and row.get("platform") != "unknown":
         merged["platform"] = row["platform"]
@@ -811,14 +810,49 @@ def _enriched_meeting_focus(focus: dict, rows: "list[dict]") -> dict:
     return merged
 
 
+def _verified_meeting_focus(
+    focus: dict, rows: "list[dict]", meeting_owner: "Callable[[str], dict | None]",
+) -> "tuple[dict, bool]":
+    """Resolve the client-sent meeting focus to a row the caller may read → ``(focus, verified)``.
+
+    First among the caller's own rows (the schedule source, fetched under the caller's identity);
+    otherwise the meetings domain is asked directly for the candidate row id (``meeting_owner`` —
+    meeting-api ``GET /meetings/{id}`` under the caller's identity, ``None`` for a row that is
+    absent or not theirs, or when the lookup fails). A verified focus carries the ROW's id, so
+    whatever the client named, the streams read are the verified row's. An unverified focus is
+    returned as the client sent it, and ``_meeting_grounding`` folds no stream for it."""
+    nid = focus.get("native_id") or focus.get("ref")
+    row = schedule_digest_mod.find_row(
+        rows, meeting_id=focus.get("meeting_id"), platform=focus.get("platform"), native_id=nid)
+    if row is None and nid is not None:
+        # The terminal's tab param is the ROW id for planned meetings without a link (native is
+        # NULL there) — it rides in native_id, so retry it as the row id before giving up.
+        row = schedule_digest_mod.find_row(rows, meeting_id=nid)
+    if row is None:
+        candidate = str(focus.get("meeting_id") or nid or "").strip()
+        if candidate.isdigit():
+            try:
+                found = meeting_owner(candidate)
+            except Exception:  # noqa: BLE001 — a failed lookup verifies nothing
+                found = None
+            if isinstance(found, dict) and str(found.get("id")) == candidate:
+                row = found
+    if row is None or row.get("id") is None:
+        return dict(focus), False
+    return _overlay_meeting_row(focus, row), True
+
+
 def _context_grounding(
     body: "ChatBody", session: str, redis_url: "str | None", *,
     schedule_rows: "Callable[[], list[dict]]",
     workspace_mounts: "Callable[[], list]",
+    meeting_owner: "Callable[[str], dict | None]",
 ) -> "tuple[dict, list[str], str]":
     """Assemble the turn's grounding from the context bundle (or the legacy ``active``).
     ``schedule_rows`` / ``workspace_mounts`` are LAZY — fetched only for the branches that
-    need them, and both degrade to empty on failure (a bundle must never fail the turn)."""
+    need them, and both degrade to empty on failure (a bundle must never fail the turn).
+    ``meeting_owner`` resolves a row id to the caller's readable meeting record (or ``None``); it
+    is the authorization for folding a meeting's streams — see ``_verified_meeting_focus``."""
     prompt = body.prompt
     context = body.context
     focus = context.focus if context is not None else body.active
@@ -848,8 +882,9 @@ def _context_grounding(
             preamble = digest + meeting_steering.render("schedule", {})
 
     if kind == "meeting":
-        enriched = _enriched_meeting_focus(dict(focus), rows) if rows else dict(focus)
-        _c, _t, folded_prompt = _meeting_grounding(enriched, session, prompt, redis_url)
+        enriched, verified = _verified_meeting_focus(dict(focus), rows, meeting_owner)
+        _c, _t, folded_prompt = _meeting_grounding(
+            enriched, session, prompt, redis_url, row_verified=verified)
         return (_c, _t, preamble + folded_prompt if preamble else folded_prompt)
 
     if kind == "workspace" and (focus or {}).get("slug"):
@@ -1204,6 +1239,7 @@ def create_app(
             schedule_rows=lambda: _schedule_source(subject),
             workspace_mounts=lambda: (active_workspaces(wsr.root, subject)
                                       + shared_active_mounts(wsr.root, subject, mindex.list(subject))),
+            meeting_owner=lambda meeting_id: _meeting_owner_lookup(subject, meeting_id),
         )
         # Mark the grounding→user boundary so the terminal strips ALL folded context in one cut. Every
         # branch returns `<grounding> + body.prompt`, so the user's words are the exact suffix; insert the

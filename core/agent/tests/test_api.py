@@ -1481,3 +1481,49 @@ def test_redis_stream_reader_yields_keepalive_ticks(monkeypatch):
     reader = RedisStreamReader("redis://test", block_ms=10, idle_giveup_ms=30)
     out = list(reader.read("u1"))
     assert out == [None, None]                  # ticks until the giveup, then a clean end
+
+
+# ── chat meeting focus: a turn folds only a meeting its caller may read ───────────────────────────
+# `POST /api/chat`'s `context.focus` names a meeting by CALLER-SUPPLIED row id; the turn folds that
+# meeting's processed notes / transcript stream into the prompt. Before the fix a row id outside the
+# caller's own rows was folded unchecked, so any key could read another tenant's meeting through chat.
+
+def test_chat_meeting_focus_on_another_tenants_row_folds_nothing(monkeypatch):
+    import json as _j
+
+    import fakeredis
+    import redis
+
+    from control_plane import api as api_mod
+
+    secret = "Our acquisition price is 42M"
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    fake.xadd("proc:meeting:10", {"note": _j.dumps({"id": "n1", "speaker": "Alice", "text": secret})})
+    monkeypatch.setattr(redis, "from_url", lambda *_a, **_k: fake)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "t")
+
+    prompts = []
+    real_make_dispatch = api_mod.units.make_dispatch
+
+    def spy(**kw):
+        prompts.append(kw["start"]["entrypoint"]["inline"])
+        return real_make_dispatch(**kw)
+
+    monkeypatch.setattr(api_mod.units, "make_dispatch", spy)
+    c = TestClient(create_app(
+        Dispatcher(load_settings(), _FakeRuntime(), _FakeIdentity()),
+        stream_reader=_FakeReader(), redis_url="redis://test",
+        meeting_owner_lookup=_fake_owner_lookup({("u_alice", "10"): "aaa-bbb-ccc"}),
+        schedule_source=lambda _subject: [],
+    ))
+    focus = {"kind": "meeting", "meeting_id": "10", "native_id": "aaa-bbb-ccc",
+             "platform": "google_meet", "status": "completed"}
+    body = {"prompt": "what was said?", "session": "s1", "context": {"focus": focus}}
+
+    r = c.post("/api/chat", json=body, headers={"X-User-Id": "u_bob"})
+    assert r.status_code == 200
+    assert secret not in prompts[-1], "user B must not read tenant A's meeting through chat"
+
+    r = c.post("/api/chat", json=body, headers={"X-User-Id": "u_alice"})
+    assert r.status_code == 200
+    assert secret in prompts[-1]              # the owner's own meeting still grounds the turn

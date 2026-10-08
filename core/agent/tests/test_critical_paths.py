@@ -67,14 +67,14 @@ def test_cp4_copilot_turn_byte_identical_across_runs():
 
 # ── CP6: chat grounded in a live meeting by folding its redis transcript stream (cookbook #1) ───────
 
-def _seed_transcript_stream(native, *payloads):
-    """A fakeredis with the meeting's transcript stream tc:meeting:{native} pre-seeded — the SAME wire
+def _seed_transcript_stream(row_id, *payloads):
+    """A fakeredis with the meeting's transcript stream tc:meeting:{row_id} pre-seeded — the SAME wire
     the live copilot tails (worker/meeting.py)."""
     import fakeredis
 
     r = fakeredis.FakeRedis(decode_responses=True)
     for p in payloads:
-        r.xadd(f"tc:meeting:{native}", {"payload": json.dumps(p)})
+        r.xadd(f"tc:meeting:{row_id}", {"payload": json.dumps(p)})
     return r
 
 
@@ -105,13 +105,13 @@ def test_cp6_meeting_grounding_folds_live_transcript(monkeypatch):
     """active=meeting → plain dispatch context (a chat turn, no serve), no tools, and the prompt is
     grounded with the meeting's live transcript folded from its redis stream."""
     r = _seed_transcript_stream(
-        "abc-defg-hij",
+        "77",
         {"type": "transcription", "segments": [{"segment_id": "s1", "speaker": "Jane", "text": "ship it Friday"}]},
     )
     url = _fake_url(r, monkeypatch)
     ctx, tools, prompt = _meeting_grounding(
-        {"kind": "meeting", "meeting": {"platform": "google_meet", "native_id": "abc-defg-hij"}},
-        session="main", prompt="who spoke last?", redis_url=url)
+        {"kind": "meeting", "meeting": {"platform": "google_meet", "native_id": "abc-defg-hij", "meeting_id": 77}},
+        session="main", prompt="who spoke last?", redis_url=url, row_verified=True)
     assert ctx == {"kind": "none", "session": "main"} and tools == []
     assert "Jane: ship it Friday" in prompt
     assert prompt.startswith("You are assisting in a live meeting (google_meet/abc-defg-hij).")
@@ -121,11 +121,11 @@ def test_cp6_meeting_grounding_folds_live_transcript(monkeypatch):
 def test_cp6_meeting_with_no_transcript_says_so(monkeypatch):
     """active=meeting but the stream is empty → the agent is told no transcript has been captured yet
     (so it never claims the meeting 'hasn't been processed' off a missing notes file)."""
-    r = _seed_transcript_stream("empty-mtg")  # no entries
+    r = _seed_transcript_stream("78")  # no entries
     url = _fake_url(r, monkeypatch)
     _ctx, tools, prompt = _meeting_grounding(
-        {"kind": "meeting", "meeting": {"native_id": "empty-mtg"}},
-        session="main", prompt="summary?", redis_url=url)
+        {"kind": "meeting", "meeting": {"native_id": "empty-mtg", "meeting_id": 78}},
+        session="main", prompt="summary?", redis_url=url, row_verified=True)
     assert tools == []
     assert "no transcript has been captured yet" in prompt
 

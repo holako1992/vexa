@@ -27,11 +27,12 @@ def _body(prompt="hi", active=None, context=None):
                     context=ChatContextBody(**context) if context is not None else None)
 
 
-def _ground(body, *, rows=None, mounts=None):
+def _ground(body, *, rows=None, mounts=None, owner=None, redis_url=None):
     return _context_grounding(
-        body, "s1", None,
+        body, "s1", redis_url,
         schedule_rows=lambda: rows or [],
         workspace_mounts=lambda: mounts or [],
+        meeting_owner=owner or (lambda _mid: None),
     )
 
 
@@ -86,7 +87,8 @@ def test_schedule_rows_failure_never_fails_the_turn():
         raise OSError("meeting-api down")
 
     _c, _t, prompt = _context_grounding(body, "s1", None, schedule_rows=boom,
-                                        workspace_mounts=lambda: [])
+                                        workspace_mounts=lambda: [],
+                                        meeting_owner=lambda _mid: None)
     assert prompt == "hi"
 
 
@@ -194,3 +196,100 @@ def test_file_focus_untouched():
     body = _body(context={"focus": {"kind": "file", "ref": "@file:notes.md"},
                           "surface": {"tab": {"kind": "doc"}}})
     assert _ground(body)[2] == "hi"
+
+
+# ── authorization: a meeting focus folds only a row the caller may read ───────────────
+
+_SECRET = "Our acquisition price is 42M"
+
+
+def _seeded(monkeypatch, row_id="9001"):
+    import json
+
+    import fakeredis
+    import redis
+
+    r = fakeredis.FakeRedis(decode_responses=True)
+    r.xadd(f"proc:meeting:{row_id}", {"note": json.dumps({"id": "n1", "speaker": "Alice", "text": _SECRET})})
+    r.xadd(f"tc:meeting:{row_id}", {"payload": json.dumps({"type": "transcription", "segments": [
+        {"segment_id": "s1", "speaker": "Alice", "text": _SECRET}]})})
+    monkeypatch.setattr(redis, "from_url", lambda *a, **k: r)
+    return "redis://fake"
+
+
+def _own_row(rid=5, status="completed", native="bbb-own"):
+    return {"id": rid, "status": status, "platform": "google_meet", "native_meeting_id": native,
+            "data": {}, "end_time": None, "start_time": None, "updated_at": None}
+
+
+def _foreign_focus(**over):
+    focus = {"kind": "meeting", "meeting_id": "9001", "native_id": "x", "platform": "google_meet",
+             "status": "completed"}
+    focus.update(over)
+    return focus
+
+
+def test_foreign_row_id_folds_nothing_when_the_owner_lookup_refuses(monkeypatch):
+    """Another tenant's row id, absent from the caller's rows and refused by the meetings domain,
+    folds nothing — the cross-tenant read this guards."""
+    url = _seeded(monkeypatch)
+    asked = []
+    body = _body(context={"focus": _foreign_focus()})
+    _c, _t, prompt = _ground(body, rows=[_own_row()], redis_url=url,
+                             owner=lambda mid: asked.append(mid) or None)
+    assert _SECRET not in prompt
+    assert prompt == "hi"
+    assert asked == ["9001"]                  # the meetings domain was asked, and said no
+
+
+def test_foreign_row_id_in_the_native_slot_folds_nothing(monkeypatch):
+    url = _seeded(monkeypatch)
+    body = _body(context={"focus": {"kind": "meeting", "native_id": "9001", "status": "active"}})
+    assert _SECRET not in _ground(body, rows=[], redis_url=url)[2]
+
+
+def test_legacy_active_naming_a_foreign_row_folds_nothing(monkeypatch):
+    url = _seeded(monkeypatch)
+    body = _body(active=_foreign_focus())
+    assert _SECRET not in _ground(body, rows=[], redis_url=url)[2]
+
+
+def test_failed_rows_fetch_and_failed_owner_lookup_fold_nothing(monkeypatch):
+    url = _seeded(monkeypatch)
+    body = _body(context={"focus": _foreign_focus()})
+
+    def boom(_mid):
+        raise OSError("meeting-api down")
+
+    _c, _t, prompt = _context_grounding(
+        body, "s1", url, schedule_rows=lambda: (_ for _ in ()).throw(OSError("down")),
+        workspace_mounts=lambda: [], meeting_owner=boom)
+    assert _SECRET not in prompt and prompt == "hi"
+
+
+def test_owner_lookup_answering_a_different_row_folds_nothing(monkeypatch):
+    url = _seeded(monkeypatch)
+    body = _body(context={"focus": _foreign_focus()})
+    _c, _t, prompt = _ground(body, rows=[], redis_url=url,
+                             owner=lambda _mid: _own_row(rid=5))
+    assert _SECRET not in prompt
+
+
+def test_a_row_the_meetings_domain_confirms_is_folded(monkeypatch):
+    """A row outside the bounded schedule window but confirmed by the meetings domain (an old
+    meeting the caller owns) still grounds the chat."""
+    url = _seeded(monkeypatch)
+    body = _body(context={"focus": _foreign_focus()})
+    _c, _t, prompt = _ground(body, rows=[], redis_url=url,
+                             owner=lambda mid: _own_row(rid=int(mid), native="x"))
+    assert _SECRET in prompt and prompt.endswith("hi")
+
+
+def test_own_native_with_a_foreign_row_id_reads_only_the_own_row(monkeypatch):
+    """A focus pairing the caller's own native id with another tenant's row id resolves to the
+    caller's row, so only that row's streams are read."""
+    url = _seeded(monkeypatch)
+    body = _body(context={"focus": _foreign_focus(native_id="bbb-own")})
+    _c, _t, prompt = _ground(body, rows=[_own_row(rid=5, status="active")], redis_url=url,
+                             owner=lambda _mid: None)
+    assert _SECRET not in prompt

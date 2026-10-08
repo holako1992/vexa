@@ -87,7 +87,7 @@ def test_post_grounding_prefers_processed_notes(monkeypatch):
     _ctx, _tools, prompt = _meeting_grounding(
         {"kind": "meeting", "meeting": {"native_id": "abc", "meeting_id": 46, "status": "completed",
                                          "title": "Acme kickoff"}},
-        session="s", prompt="what was decided?", redis_url=url)
+        session="s", prompt="what was decided?", redis_url=url, row_verified=True)
     assert "has ended" in prompt and "Acme kickoff" in prompt
     assert "processed notes" in prompt
     assert "we agreed on the Q3 pilot" in prompt          # cleaned line, not…
@@ -102,7 +102,7 @@ def test_post_grounding_falls_back_to_raw_transcript(monkeypatch):
     })
     _ctx, _tools, prompt = _meeting_grounding(
         {"kind": "meeting", "meeting": {"native_id": "abc", "meeting_id": 46, "status": "completed"}},
-        session="s", prompt="recap", redis_url=url)
+        session="s", prompt="recap", redis_url=url, row_verified=True)
     assert "raw transcript" in prompt and "Raj: SSO first" in prompt
 
 
@@ -111,7 +111,7 @@ def test_post_grounding_with_no_record_is_honest(monkeypatch):
     _ctx, _tools, prompt = _meeting_grounding(
         {"kind": "meeting", "meeting": {"native_id": "abc", "meeting_id": 46, "status": "failed",
                                          "title": "Ghost"}},
-        session="s", prompt="summary?", redis_url=url)
+        session="s", prompt="summary?", redis_url=url, row_verified=True)
     assert "no record of this meeting exists" in prompt
     assert "FAILED" in prompt
     assert "do not reconstruct or invent" in prompt
@@ -134,14 +134,52 @@ def test_fold_processed_upserts_by_id_and_skips_view_end(monkeypatch):
 
 def test_statusless_active_is_legacy_live_path(monkeypatch):
     url = _fake_redis(monkeypatch, {
-        "tc:meeting:abc-defg-hij": [{"payload": json.dumps({"type": "transcription", "segments": [
+        "tc:meeting:46": [{"payload": json.dumps({"type": "transcription", "segments": [
             {"segment_id": "s1", "speaker": "Jane", "text": "ship it Friday"}]})}],
     })
     _ctx, _tools, prompt = _meeting_grounding(
-        {"kind": "meeting", "meeting": {"platform": "google_meet", "native_id": "abc-defg-hij"}},
-        session="main", prompt="who spoke last?", redis_url=url)
+        {"kind": "meeting", "meeting": {"platform": "google_meet", "native_id": "abc-defg-hij",
+                                         "meeting_id": 46}},
+        session="main", prompt="who spoke last?", redis_url=url, row_verified=True)
     assert prompt.startswith("You are assisting in a live meeting (google_meet/abc-defg-hij).")
     assert "Jane: ship it Friday" in prompt and prompt.endswith("who spoke last?")
+
+
+# ── authorization: only a verified row's streams are ever read ───────────────────────
+
+def test_unverified_focus_reads_no_stream_in_any_phase(monkeypatch):
+    """The streams hold a meeting's words; a focus nobody verified folds none of them, whatever
+    row id or native id it names and whatever status it claims."""
+    secret = "Our acquisition price is 42M"
+    url = _fake_redis(monkeypatch, {
+        "proc:meeting:9001": [_note("n1", "Alice", secret)],
+        "tc:meeting:9001": [{"payload": json.dumps({"type": "transcription", "segments": [
+            {"segment_id": "s1", "speaker": "Alice", "text": secret}]})}],
+    })
+    for meeting in (
+        {"native_id": "x", "meeting_id": 9001, "status": "completed"},
+        {"native_id": "x", "meeting_id": 9001, "status": "active"},
+        {"native_id": "x", "meeting_id": 9001},
+        {"native_id": "9001", "status": "completed"},
+        {"native_id": "9001"},
+    ):
+        _ctx, _tools, prompt = _meeting_grounding(
+            {"kind": "meeting", "meeting": meeting}, session="s", prompt="what was said?", redis_url=url)
+        assert secret not in prompt, meeting
+        assert prompt == "what was said?", meeting
+
+
+def test_verified_focus_never_falls_back_to_a_native_keyed_stream(monkeypatch):
+    """A verified row with no row id of its own (malformed) reads nothing — the native id is never a
+    stream key."""
+    url = _fake_redis(monkeypatch, {
+        "tc:meeting:abc-defg-hij": [{"payload": json.dumps({"type": "transcription", "segments": [
+            {"segment_id": "s1", "speaker": "Jane", "text": "not yours"}]})}],
+    })
+    _ctx, _tools, prompt = _meeting_grounding(
+        {"kind": "meeting", "meeting": {"native_id": "abc-defg-hij"}},
+        session="s", prompt="hi", redis_url=url, row_verified=True)
+    assert "not yours" not in prompt and prompt == "hi"
 
 
 # ── the _global override file ────────────────────────────────────────────────────────
