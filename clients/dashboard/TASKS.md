@@ -178,10 +178,7 @@ Search box in the shell hitting `GET /transcripts/search`; results grouped by me
 TXT (exists), SRT/VTT with timestamps, DOCX and PDF (server-side render in a Next route; Category-A libs only), and
 "copy as Markdown". Done when each export round-trips the same segments the page shows.
 
-**DB-46 · Sharing** — M
-Share dialog: generate a link (`POST /meetings/{id}/share`), list/revoke shares, and a public read-only
-`/s/<token>` page that accepts via `POST /transcripts/share/accept` without a dashboard account. Shared-with-me tab
-(the row already carries `shared`). Done when an incognito browser reads a shared transcript and nothing else.
+**DB-46 · Sharing** — removed from scope 2026-10-08 (user decision). Not planned.
 
 **DB-47 · Tags and folders** — M
 User-defined tags on meetings (store in the meeting row's metadata via `PATCH /meetings/{id}`; add a core field if the
@@ -335,7 +332,7 @@ meetings (some jurisdictions require announcing recording — the bot already na
 footer and the wizard.
 
 **DB-94 · Security review of the widened surface** — M · after sections 5–8 land
-Re-run `/security-review` on the dashboard: every new allowlist entry, the share page, the Stripe webhook, the
+Re-run `/security-review` on the dashboard: every new allowlist entry, the Stripe webhook, the
 recordings range proxy, magic-link token handling. CSP unchanged (nonce-based, no `unsafe-inline`). Update
 `SECURITY.md` if the threat model changes.
 
@@ -357,7 +354,7 @@ re-sealed whenever a module or data flow is added (DB-30, DB-32, DB-60, DB-71, D
    - *Billing lane (core):* DB-70 → DB-71 → DB-72 → DB-73.
    - *Calendar lane (core + UI):* DB-30 → DB-31 → DB-33 → DB-34, then DB-32.
    - *Product lane (UI):* DB-10, DB-11, DB-20, DB-41, DB-42, DB-48, DB-44.
-3. **Weeks 4–5:** DB-74, DB-75, DB-76, DB-78 (billing UI once core lands); DB-50/51/52; DB-60 → DB-61/62; DB-45, DB-46, DB-47.
+3. **Weeks 4–5:** DB-74, DB-75, DB-76, DB-78 (billing UI once core lands); DB-50/51/52; DB-60 → DB-61/62; DB-45, DB-47.
 4. **Week 6:** DB-80..83, DB-90..96, DB-94 last.
 
 Rules for anyone taking a task: read `AGENTS.md`; quotas and usage are enforced in the core (point of introduction),
@@ -403,7 +400,7 @@ took the suite from 6 passing to 10.
 
 ---
 
-## Status (updated 2026-10-04)
+## Status (updated 2026-10-08)
 
 Work is done by Sonnet agents, one task per agent, verified by a coordinator that re-runs every
 claimed test before pushing. **Every agent reads [`AGENT-RULES.md`](AGENT-RULES.md) first.** It holds
@@ -468,23 +465,18 @@ the known environmental traps.
    and calendar id as associated data) or replace it with AES-GCM from `cryptography`, which is
    Category A but a new compiled dependency. **Do this before DB-31 ships.** Until DB-31 exists,
    nobody can store a Google token.
-3. **DB-46 sharing needs core work first.** The core can mint a share
-   (`POST /meetings/{id}/share`) and redeem one (`POST /transcripts/share/accept`), but it has no
-   route to list or revoke a meeting's shares, and redeeming requires a signed-in user (it adds
-   them to `transcript_viewers`). DB-46's "an incognito browser reads a shared transcript without a
-   dashboard account" therefore needs either (a) a new core read-by-token route for anonymous
-   viewers, or (b) the requirement relaxed to "the recipient signs in, then sees it under Shared
-   with me". Either way it also needs core list/revoke routes. Pick (a) or (b) on the issue.
+3. ~~**DB-46 sharing**~~ — removed from scope 2026-10-08 (user decision).
 
 4. **A core authorization finding on the `/agent/chat` meeting focus** (found while building
-   DB-61; reproduced). It is not caused by the dashboard and is reported to the maintainers through
-   `SECURITY.md`'s private channel rather than written up here. DB-61 must not ship to users before
-   the core fix lands.
+   DB-61; reproduced). Fixed in core 2026-10-08 (`be3f6c4d`, agent tests 599 passed, with a test
+   that fails on the previous code). Still for the user: report it to the upstream maintainers
+   through `SECURITY.md`'s private channel — this fork is public, so the fix is held back from the
+   remote until that is decided. DB-61 ships only with this fix.
 
 ### Next, in order (updated 2026-10-04)
 
-Items 1, 3, 4, 6 and 7, and DB-45 from item 5, are done. DB-46 is blocked on core (see "Decisions
-waiting on the user", decision 3). Next up: 2 (needs the user), then 7. Remaining, in order:
+Items 1 and 3–7 are done (DB-46 removed from scope 2026-10-08). Next up: 2 (needs the user), then
+8. Remaining, in order:
 
 1. ~~Run the docker-gated suites~~ — done 2026-09-29, all green, no defects (see Done table).
 2. **Stripe webhook ingress** for production (decision 1 above — needs the user's host). Test-mode
@@ -494,10 +486,10 @@ waiting on the user", decision 3). Next up: 2 (needs the user), then 7. Remainin
    price ids and a live webhook endpoint.
 3. ~~DB-76 dashboard follow-ups~~ — done 2026-09-29.
 4. ~~DB-12 identity oracle, then the rest of DB-76~~ — done 2026-09-29. Open point: Microsoft counts as verified (see open questions).
-5. ~~**DB-45 export**~~ — done 2026-10-01. **DB-46 sharing** (`/s/<token>`) — blocked, decision 3.
+5. ~~**DB-45 export**~~ — done 2026-10-01. ~~DB-46 sharing~~ — removed from scope.
 6. ~~**DB-43 speaker rename** and **DB-47 tags**~~ — done 2026-10-01 (annotate carries both; no
    core field needed).
-7. ~~**DB-40 live transcript**, **DB-61 chat**, **DB-62 auto-title**~~ — done 2026-10-01 (DB-61 gated on decision 4).
+7. ~~**DB-40 live transcript**, **DB-61 chat**, **DB-62 auto-title**~~ — done 2026-10-01 (DB-61 ships with the core fix in decision 4).
 8. **DB-10 magic link**, **DB-11 account page**, **DB-20 first-run wizard**, **DB-21 empty/error
    audit**.
 9. **DB-81/82/83 settings** (webhooks UI, API keys, transcription settings).
@@ -602,8 +594,8 @@ In production, build and deploy every image, the bot included, from one commit u
 
 - Docker-gated suites: run 2026-09-29 on the Windows docker host, all green (admin-api 367 after
   DB-12; bot 644 checks). Recipe in AGENT-RULES rule 15.
-- e2e ports in `e2e/ports.mjs` are fixed, so two agents running `test:e2e` at once in one container
-  collide. Run dashboard e2e from one agent at a time.
+- e2e ports shift with `E2E_PORT_OFFSET=<n>` (`e2e/ports.mjs`), so two checkouts can run
+  `test:e2e` at once; without it, two runs in one container collide.
 - Never run a workspace-wide `pnpm install`/`turbo` on that host: it moves npm-installed
   `clients/dashboard` and `clients/terminal` node_modules into `.ignored/`. Recover with `npm ci`
   inside each client.
