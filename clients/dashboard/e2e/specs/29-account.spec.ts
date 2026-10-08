@@ -29,7 +29,9 @@ test("profile, sign-in method and sessions render for the signed-in person", asy
   const email = testEmail("account-view");
   await signIn(page, email);
   await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Account" }).click();
-  await expect(page).toHaveURL(/\/settings\/account$/);
+  // The first visit to /settings/account in a run is when `next dev` compiles the route, which the
+  // client-side navigation waits on; the rest of this file reuses the compiled page.
+  await expect(page).toHaveURL(/\/settings\/account$/, { timeout: 20_000 });
   await expect(page.getByRole("heading", { name: "Account", level: 1 })).toBeVisible();
 
   await expect(page.getByTestId("account-email")).toHaveText(email);

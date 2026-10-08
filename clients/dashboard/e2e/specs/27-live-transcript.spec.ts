@@ -205,9 +205,17 @@ test("the allowlist admits only meetings/<numeric id>/stream and composes the up
       const ctl = new AbortController();
       const res = await fetch(u, { headers: { "Last-Event-ID": id }, signal: ctl.signal });
       const reader = res.body!.getReader();
-      const { value } = await reader.read();
+      // The proxy opens with an SSE comment (`: connected`) so the browser gets the head at once;
+      // whether the first event shares that chunk is up to the network. Read until a `data:` line.
+      const decoder = new TextDecoder();
+      let first = "";
+      for (let i = 0; i < 20 && !first.includes("data:"); i++) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        first += decoder.decode(value, { stream: true });
+      }
       ctl.abort();
-      return { status: res.status, type: res.headers.get("content-type"), cache: res.headers.get("cache-control"), first: new TextDecoder().decode(value) };
+      return { status: res.status, type: res.headers.get("content-type"), cache: res.headers.get("cache-control"), first };
     }, [url, lastEventId] as const);
 
   const first = await readFirstChunk("/api/vexa/meetings/101/stream?meeting_id=999&session_uid=999&lid=x", "garbage");
