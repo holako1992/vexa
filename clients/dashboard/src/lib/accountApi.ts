@@ -9,6 +9,7 @@
 import {
   DASHBOARD_LOGIN_TOKEN_NAME,
   adminRequest,
+  deleteUser,
   listUserTokens,
   revokeToken,
   validateAuthToken,
@@ -16,7 +17,7 @@ import {
   type AdminTokenInfo,
 } from "./adminApi";
 import { sessionToken } from "./session";
-import type { AccountProvider, AccountSession, AccountView } from "./account";
+import type { AccountProvider, AccountSession, AccountView, DeleteOutcome } from "./account";
 
 interface AdminUserRecord {
   id: number;
@@ -53,7 +54,7 @@ export function sessionsFromTokens(tokens: AdminTokenInfo[]): AccountSession[] {
 }
 
 export type AccountCaller =
-  | { ok: true; userId: number }
+  | { ok: true; userId: number; email: string }
   | { ok: false; status: 401 | 503; error: string };
 
 /** The caller's user id, taken from admin-api's oracle for the session cookie and from nowhere
@@ -68,7 +69,7 @@ export async function resolveAccountCaller(): Promise<AccountCaller> {
   const validated = await validateAuthToken(token);
   if (validated.ok) {
     const id = Number(validated.userId);
-    if (Number.isSafeInteger(id) && id > 0) return { ok: true, userId: id };
+    if (Number.isSafeInteger(id) && id > 0) return { ok: true, userId: id, email: validated.email };
     return { ok: false, status: 503, error: "Identity check returned an unusable user id." };
   }
   if (validated.status === 401) return { ok: false, status: 401, error: "Not signed in" };
@@ -119,4 +120,35 @@ export async function revokeAllLoginSessions(userId: number): Promise<RevokeResu
     return { ok: false, status: 502, error: `${failed} of ${mine.length} sessions could not be revoked`, revoked, failed };
   }
   return { ok: true, revoked };
+}
+
+/** How many times one request asks admin-api to finish a deletion that came back partial. The
+ *  core locks the account and revokes its tokens before the first erasure step, so the browser has
+ *  no session to retry with afterwards: the retry has to happen here, inside this one request. */
+export const DELETE_ATTEMPTS = 3;
+const DELETE_RETRY_DELAY_MS = 400;
+
+type DeleteCall = () => Promise<{ ok: boolean; status: number }>;
+
+/** Run an account deletion and say what happened. 200 and 404 are one outcome: the account is
+ *  gone. 409 is final and changes nothing. A 502 `partial` is retried up to `DELETE_ATTEMPTS`
+ *  times; if it is still not done the account stays locked and the outcome is `partial`. Anything
+ *  else (admin-api unreachable, an unexpected status) is `unavailable`: it says nothing about
+ *  whether the account still exists. */
+export async function runAccountDeletion(
+  call: DeleteCall,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<DeleteOutcome> {
+  for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt += 1) {
+    const r = await call();
+    if (r.ok || r.status === 404) return "deleted";
+    if (r.status === 409) return "blocked";
+    if (r.status !== 502) return "unavailable";
+    if (attempt < DELETE_ATTEMPTS) await sleep(DELETE_RETRY_DELAY_MS);
+  }
+  return "partial";
+}
+
+export function deleteAccount(userId: number): Promise<DeleteOutcome> {
+  return runAccountDeletion(() => deleteUser(userId));
 }

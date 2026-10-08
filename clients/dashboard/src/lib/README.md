@@ -8,7 +8,9 @@
   resolves the caller's user id from the identity oracle (never from a request), reads the user's
   record and `dashboard-login` tokens from admin-api, and revokes them all. `account.ts` is the
   client-safe half: the shapes, the sentences for each recorded sign-in door, initials, and the
-  fixed `/login?notice=` sentence.
+  fixed `/login?notice=` sentences, `emailMatches` (the typed-email check, shared by the dialog and the
+  server) and the fixed deletion-failure sentences. `accountApi.ts` also runs the deletion
+  (`runAccountDeletion`: 200/404 deleted, 409 blocked, a partial retried up to 3 times).
 - **`adminApi.ts`** — server-only admin-api client: find-or-create by email (forwarding the user's
   address as `X-Forwarded-For` on the create call, recording how the sign-in proved the address —
   provenance on create, a verified upgrade on an existing account — and returning a typed refusal on failure), mint the login token,

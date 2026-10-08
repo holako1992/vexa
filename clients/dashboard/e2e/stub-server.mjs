@@ -68,6 +68,7 @@ const adminLog = [];
 let force = {
   meetings: null, meetingDetail: null, botsQuota: false, search: null,
   googleExchange: null, microsoftExchange: null, annotate: null, tokenDelete: null,
+  userDelete: null, userDeletePartialFirst: 0,
 };
 /** The state tokens `GET /user/calendars/google/authorize` has issued, and which of
  *  those have already been consumed by an exchange. Mirrors just enough of the core's real
@@ -156,6 +157,7 @@ function resetAll() {
   force = {
     meetings: null, meetingDetail: null, botsQuota: false, search: null,
     googleExchange: null, microsoftExchange: null, annotate: null, tokenDelete: null,
+  userDelete: null, userDeletePartialFirst: 0,
   };
   issuedGoogleStates = new Set();
   usedGoogleStates = new Set();
@@ -1170,6 +1172,41 @@ async function handleAdmin(req, res) {
       users.set(email, user);
     }
     return sendJson(res, 200, user);
+  }
+
+  // DELETE /admin/users/<id> — immediate account erasure, as the core answers it:
+  //   200 {status:"deleted", user_id, erased}  the user, their tokens and their data are gone
+  //   404                                     no such user (already deleted)
+  //   409 {error}                              cannot be deleted now; nothing changed
+  //   502 {error:"partial", pending, detail}   the account is locked and its tokens revoked, a
+  //                                            part of the erasure failed; a repeat resumes.
+  // The gateway stub's meetings and calendars are one world shared by every signed-in user, so a
+  // completed erasure empties that world. `force.userDelete` = "conflict" | "partial" (always);
+  // `force.userDeletePartialFirst` = N makes the first N calls partial, then the next completes.
+  if (req.method === "DELETE" && parts.length === 3 && parts[0] === "admin" && parts[1] === "users") {
+    const userId = Number(parts[2]);
+    const user = [...users.values()].find((u) => u.id === userId);
+    if (!user) return sendJson(res, 404, { detail: "User not found" });
+    if (force.userDelete === "conflict") {
+      return sendJson(res, 409, { error: "cannot delete: a raw producer sentence the dashboard must not relay" });
+    }
+    const revokeTokens = () => {
+      let revoked = 0;
+      for (const [value, t] of [...tokens.entries()]) {
+        if (t.userId === userId) { tokens.delete(value); revoked += 1; }
+      }
+      return revoked;
+    };
+    if (force.userDelete === "partial" || force.userDeletePartialFirst > 0) {
+      if (force.userDeletePartialFirst > 0) force.userDeletePartialFirst -= 1;
+      revokeTokens();
+      return sendJson(res, 502, { error: "partial", pending: ["recordings"], detail: "recording storage did not answer" });
+    }
+    const erased = { tokens: revokeTokens(), meetings: meetings.length, calendars: calendars.length };
+    meetings = [];
+    calendars = [];
+    users.delete(user.email);
+    return sendJson(res, 200, { status: "deleted", user_id: userId, erased });
   }
 
   // PATCH /admin/users/<id> — the provenance upgrade (the only patch the dashboard sends)

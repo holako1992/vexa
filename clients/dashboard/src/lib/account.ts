@@ -57,7 +57,33 @@ export function formatWhen(iso: string | null): string {
  *  otherwise ignored. */
 export const SIGNED_OUT_EVERYWHERE = "signed-out-everywhere";
 
+export const ACCOUNT_DELETED = "account-deleted";
+
 export function loginNotice(code: string | null): string | null {
   if (code === SIGNED_OUT_EVERYWHERE) return "You've been signed out on every device. Sign in again to continue.";
+  if (code === ACCOUNT_DELETED) return "Your account and everything in it has been deleted.";
   return null;
 }
+
+/** Does what the person typed name this account? Trimmed and case-insensitive: an email address
+ *  is the account's key, not a password, and a stray space or capital must not block a delete
+ *  the person means. Used by the dialog (to enable the button) and again by the server (the
+ *  check that counts). An empty string never matches. */
+export function emailMatches(typed: unknown, actual: string): boolean {
+  if (typeof typed !== "string") return false;
+  const a = typed.trim().toLowerCase();
+  return a.length > 0 && a === actual.trim().toLowerCase();
+}
+
+/** What `DELETE /api/account` answers, as a code the view maps to words. `partial` is the one
+ *  failure after which the browser is signed out: the core revoked the account's tokens before
+ *  the part that failed. */
+export type DeleteOutcome = "deleted" | "blocked" | "partial" | "unavailable";
+
+/** The sentences for each failure — fixed text, never the producer's. */
+export const DELETE_FAILURE_TEXT: Record<Exclude<DeleteOutcome, "deleted">, string> = {
+  blocked: "Your account can't be deleted right now. Nothing was changed. Try again later, or contact support.",
+  partial:
+    "Your account is being deleted, but part of it didn't finish. Sign-in is blocked for this account. Contact support to complete the deletion.",
+  unavailable: "We couldn't reach the account service. Nothing was changed. Try again in a moment.",
+};

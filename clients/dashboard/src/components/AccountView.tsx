@@ -6,20 +6,29 @@
  *  `DELETE /api/account/sessions`, after which every `dashboard-login` token is revoked (a second
  *  browser's next request is refused) and this browser lands on `/login` with a plain notice.
  *
+ *  The other write is **Delete account**: a danger section, then a dialog that asks for the
+ *  account's own email typed out. The button stays disabled until it matches (a convenience; the
+ *  server checks again). Deletion is immediate and cannot be undone. On success this browser
+ *  lands on `/login` with a plain notice; if the core could only finish part of it, the dialog
+ *  says so in plain words and the session is already gone.
+ *
  *  Name and email are shown, not edited: the email is the account's key, and the name comes from
  *  the sign-in provider.
  */
-import { useEffect, useState } from "react";
-import { LogOut } from "lucide-react";
-import { getJson, mutateJson, presentError } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { LogOut, Trash2 } from "lucide-react";
+import { ApiError, getJson, mutateJson, presentError } from "@/lib/api";
 import {
+  ACCOUNT_DELETED,
+  DELETE_FAILURE_TEXT,
   SIGNED_OUT_EVERYWHERE,
   describeProvider,
+  emailMatches,
   formatWhen,
   initialsOf,
   type AccountView as Account,
 } from "@/lib/account";
-import { Button, Dialog, useToast } from "./ui";
+import { Button, Dialog, Input, useToast } from "./ui";
 import { ErrorState, LoadingState } from "./EmptyState";
 
 type ViewState = { kind: "loading" } | { kind: "error"; message: string } | { kind: "loaded"; account: Account };
@@ -51,6 +60,20 @@ export function AccountView() {
   const [reloadKey, setReloadKey] = useState(0);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [typedEmail, setTypedEmail] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletePartial, setDeletePartial] = useState(false);
+
+  // The dialog puts focus on its close button when it opens; the field to type in is where the
+  // person needs to be. This effect lives above the dialog, so it runs after the dialog's own.
+  const emailRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!confirmDelete || deletePartial) return;
+    const t = setTimeout(() => emailRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [confirmDelete, deletePartial]);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +99,36 @@ export function AccountView() {
       setSigningOut(false);
       setConfirmSignOut(false);
       toast.push({ tone: "error", title: "Couldn't sign out everywhere", description: presentError(e) });
+    }
+  }
+
+  function openDelete() {
+    setTypedEmail("");
+    setDeleteError(null);
+    setDeletePartial(false);
+    setConfirmDelete(true);
+  }
+
+  async function deleteAccount(email: string) {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await mutateJson("DELETE", "/api/account", { confirmEmail: email });
+      // A hard navigation: nothing from the deleted account survives in client state.
+      window.location.href = `/login?notice=${ACCOUNT_DELETED}`;
+    } catch (e) {
+      setDeleting(false);
+      if (e instanceof ApiError && e.status === 502) {
+        setDeletePartial(true);
+      } else if (e instanceof ApiError && e.status === 409) {
+        setDeleteError(DELETE_FAILURE_TEXT.blocked);
+      } else if (e instanceof ApiError && e.status === 400) {
+        setDeleteError("That doesn't match your account's email address.");
+      } else if (e instanceof ApiError && (e.status === 0 || e.status === 503)) {
+        setDeleteError(DELETE_FAILURE_TEXT.unavailable);
+      } else {
+        setDeleteError(presentError(e));
+      }
     }
   }
 
@@ -149,6 +202,84 @@ export function AccountView() {
           </Button>
         </div>
       </Section>
+
+      <section className="rounded-card border border-live/40 bg-card p-5" aria-labelledby="delete-account-heading">
+        <h2 id="delete-account-heading" className="text-sm font-semibold">Delete account</h2>
+        <p className="mt-0.5 text-sm text-ink-3">
+          Permanently erases your account and everything in it: meetings, transcripts, recordings,
+          summaries and notes, calendar connections, API keys and chat history. A paid subscription is
+          cancelled immediately, with no refund. This cannot be undone.
+        </p>
+        <div className="mt-4">
+          <Button variant="danger" icon={<Trash2 size={15} aria-hidden />} onClick={openDelete}>
+            Delete account
+          </Button>
+        </div>
+      </section>
+
+      {confirmDelete && (
+        <Dialog
+          open
+          onClose={() => {
+            if (deleting) return;
+            if (deletePartial) window.location.href = "/login";
+            else setConfirmDelete(false);
+          }}
+          title="Delete your account?"
+          icon={<Trash2 size={16} aria-hidden />}
+        >
+          {deletePartial ? (
+            <div className="flex flex-col gap-4 p-6 pt-4">
+              <p role="alert" className="text-sm text-ink-2" data-testid="delete-partial">
+                {DELETE_FAILURE_TEXT.partial}
+              </p>
+              <div className="flex justify-end">
+                <Button variant="secondary" onClick={() => { window.location.href = "/login"; }}>
+                  Go to sign in
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <form
+              className="flex flex-col gap-4 p-6 pt-4"
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                if (emailMatches(typedEmail, account.email) && !deleting) void deleteAccount(typedEmail);
+              }}
+            >
+              <p className="text-sm text-ink-2">
+                This deletes everything right now and cannot be undone. Type{" "}
+                <strong className="break-all font-semibold">{account.email}</strong> to confirm.
+              </p>
+              <Input
+                label="Your email address"
+                type="email"
+                ref={emailRef}
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={typedEmail}
+                onChange={(ev) => setTypedEmail(ev.target.value)}
+                disabled={deleting}
+                error={deleteError ?? undefined}
+              />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="danger"
+                  loading={deleting}
+                  disabled={!emailMatches(typedEmail, account.email)}
+                >
+                  Delete my account
+                </Button>
+              </div>
+            </form>
+          )}
+        </Dialog>
+      )}
 
       {confirmSignOut && (
         <Dialog

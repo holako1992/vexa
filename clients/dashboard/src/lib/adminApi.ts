@@ -132,6 +132,13 @@ export function revokeToken(tokenId: string | number): Promise<AdminResult<void>
   return adminRequest<void>(`/admin/tokens/${encodeURIComponent(String(tokenId))}`, { method: "DELETE" });
 }
 
+/** admin-api's immediate, irreversible account erasure. 200 = gone, 404 = already gone, 409 =
+ *  cannot be deleted now, 502 = started and locked but a part failed (a repeat resumes). The
+ *  timeout is long: erasure touches object storage and the payment provider. */
+export function deleteUser(userId: string | number): Promise<AdminResult<unknown>> {
+  return adminRequest<unknown>(`/admin/users/${encodeURIComponent(String(userId))}`, { method: "DELETE" }, 60000);
+}
+
 // ── verified identity — admin-api's internal oracle (`POST /internal/validate`, the same
 //    X-Internal-Secret edge the gateway uses). The `vexa-token` auth cookie is the ONLY input; the
 //    returned {user_id, email} is the ONLY identity this server trusts. The `vexa-user-info` cookie

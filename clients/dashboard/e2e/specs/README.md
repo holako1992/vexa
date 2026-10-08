@@ -176,6 +176,16 @@ spec's body is only the property, not the plumbing.
   403 and an anonymous caller 401; a live session is bounced off `/login` while a revoked one gets
   the form (a cookie-only bounce would loop a revoked session between `/login` and the page).
 
+- `31-delete-account.spec.ts` — Delete account: the page lists what is erased; the dialog's Delete
+  stays disabled until the typed email matches (trimmed, any case) and Cancel sends nothing; a
+  hand-made wrong or missing confirmation is a 400 that never reaches admin-api; a confirmed delete
+  removes the user at the stub core, clears the cookies, lands on `/login?notice=account-deleted`,
+  refuses a second browser, and the same address signs in to a new empty account; a partial the core
+  keeps returning is retried 3 times and said in plain words (never "deleted"), one the retry
+  finishes is a success; a 409 shows a fixed sentence and changes nothing; a body, query or path
+  naming another user is ignored and that user survives; cross-origin is 403, anonymous 401; the
+  fourth guess in ten minutes is 429; the dialog fits 375x812 and works from the keyboard.
+
 - `30-first-run.spec.ts` — DB-20: who is welcomed (a new account with no meetings; not one with
   meetings, not one that is not new, not an ended welcome, not an unreadable answer), the bot
   name saved as the default and said by the send form, a refresh resuming the step, Skip setup from

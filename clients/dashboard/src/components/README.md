@@ -129,7 +129,11 @@ Client components. They receive identity as props (resolved on the server) and f
   comment for why; a later task fills that slot once DB-73's Stripe endpoints are final.
 - `AccountView` — `/settings/account`: name, read-only email, avatar initials, the recorded sign-in
   door (`lib/account.ts`'s `describeProvider`), the `dashboard-login` sessions, and **Sign out
-  everywhere** behind `ui/Dialog`. Reads `GET /api/account`, writes `DELETE /api/account/sessions`.
+  everywhere** behind `ui/Dialog`. Reads `GET /api/account`, writes `DELETE /api/account/sessions`. A **Delete account** danger section
+  (what is erased, subscription cancelled at once with no refund, irreversible) opens a `ui/Dialog`
+  that asks for the account's email; Delete stays disabled until it matches (`emailMatches`), then
+  `DELETE /api/account` and a hard navigation to `/login?notice=account-deleted`. A partial result
+  is said in plain words with a link to sign in; a refusal is a fixed sentence.
 - `BotControls` — DB-41: the bot's live status (from `GET /bots/status`) and a **Stop recording**
   button behind `ui/Dialog`'s confirm. A join-failure `reason`, when the producer recorded one, is
   shown verbatim — never reworded.

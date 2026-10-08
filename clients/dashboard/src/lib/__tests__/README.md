@@ -108,6 +108,11 @@ Twenty files, covering the parts where being wrong is expensive (plus `api.test.
   those; one failed revoke is a reported failure, not a complete sign-out; an unreadable token
   list revokes nothing; a missing, malformed or unknown identity record is "not recorded", never
   "unverified"; the login notice is chosen by a fixed code, so markup in `?notice=` is dropped.
+- `accountDelete.test.ts` — account deletion's pure parts: the typed email matches only the
+  account's own address (trimmed, any case; empty, other, suffixed and non-string values never),
+  the `account-deleted` notice is chosen by its fixed code, and `runAccountDeletion` maps 200/404 to
+  deleted after one call, 409 to blocked without a retry, a partial to a bounded number of retries
+  (never to "deleted"), and anything else to unavailable.
 - `recordings.test.ts` — DB-50/52's `/recordings` list mapping: `toRecording` picks the AUDIO
   entry out of `media_files[]` (never video, never the first entry regardless of type), is `null`
   on `audioMediaFileId` for a video-only or still-uploading recording, and falls back to an honest

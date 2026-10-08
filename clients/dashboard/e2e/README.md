@@ -72,6 +72,11 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   opened. `/__control/firstRun {state, step, noMeetings, dispatchCreatesMeeting}` sets the account
   the next sign-in lands on; the default world is a new account that already has meetings, so no
   other spec meets the welcome.
+  Account deletion adds admin-api `DELETE /admin/users/<id>` to the contract: 200
+  `{status:"deleted",user_id,erased}` (the user, their tokens and the shared meetings/calendars
+  world are gone), 404 for an unknown user, and `/__control/force` knobs `userDelete` (`"conflict"`
+  → 409, `"partial"` → 502 with the tokens revoked, every time) and `userDeletePartialFirst` (the
+  first N calls are partial, the next completes).
 - `liveStreamStub.mjs` — DB-40's `GET /agent/meeting/stream`, faked to the producer's shape: the
   collector's write path (a pushed segment is persisted for the REST read AND appended to the
   row's transcript stream; retract and session-end markers), agent-api's `meeting_stream`

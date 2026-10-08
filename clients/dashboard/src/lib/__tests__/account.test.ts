@@ -125,7 +125,7 @@ describe("admin-api calls", () => {
 
   it("the caller is whoever the oracle names for the cookie, and nobody else", async () => {
     session.token = "good-token";
-    expect(await resolveAccountCaller()).toEqual({ ok: true, userId: 7 });
+    expect(await resolveAccountCaller()).toEqual({ ok: true, userId: 7, email: "me@x.test" });
     session.token = "revoked-token";
     expect(await resolveAccountCaller()).toMatchObject({ ok: false, status: 401 });
     session.token = undefined;
