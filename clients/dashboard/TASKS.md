@@ -304,7 +304,11 @@ Self-serve token list/create/revoke (admin-api token routes the terminal already
 (Free: none; Pro: yes). Shows the MCP snippet from AGENTS.md with the key filled.
 
 **DB-83 · Transcription settings** — S
-Language, model, and bot name via `GET/PUT /user/transcription`; default bot name reused by DB-20.
+Language, model and bot name. `GET/PUT /user/transcription` holds only the transcription-backend
+override (`{url, token_set}`) — find where language and model actually live (`/user/models` is a lead)
+before building. The bot name lives in `users.data.calendar_bot_name`
+(`GET/PUT /user/calendar {bot_name}`, which `POST /bots` and auto-join already default from) — DB-20 writes it there,
+so DB-83 must read and write the same field, never a second store.
 
 ---
 
@@ -400,7 +404,7 @@ took the suite from 6 passing to 10.
 
 ---
 
-## Status (updated 2026-10-08)
+## Status (updated 2026-10-08, after DB-11/DB-20)
 
 Work is done by Sonnet agents, one task per agent, verified by a coordinator that re-runs every
 claimed test before pushing. **Every agent reads [`AGENT-RULES.md`](AGENT-RULES.md) first.** It holds
@@ -448,6 +452,8 @@ the known environmental traps.
 | Billing prices + switching | `307a3ee5` | `/billing` cards show each plan's price read from Stripe (`GET /billing/prices`, 5-min cache) and the yearly saving; one subscription per account (checkout 409s while one is live); `POST /billing/change` switches in place — upgrade on the same interval now with nothing charged until renewal, downgrade or monthly↔yearly at period end (subscription schedule), current plan calls a pending switch off; `canceled` resolves to Free at once; an ended older subscription no longer overwrites the live one; Stripe refusals answer 502 with Stripe's reason. admin-api 405, unit 422, billing e2e 19 |
 | Billing return, cancel, resume | `4a07164e` | `POST /billing/sync` re-reads the subscription when Checkout returns (`?checkout=success` → "Payment received — you're on Pro monthly"; `?checkout=cancelled` → "you weren't charged"); "Manage subscription" replaced by "Cancel subscription" (end of paid period, confirmation) / "Resume subscription" plus a "Payment method & invoices" portal link; a Stripe customer deleted in Stripe is replaced on checkout; `stripe_refused` 502 shown as Stripe's reason, not "unreachable". admin-api 419, unit 424, billing e2e 22 |
 | DB-61 | `c3cc6773` | Chat panel on the meeting page (focus = that row) and "Ask across all my meetings" on /search over `/agent/chat`, streamed, Stop and New conversation; strict body allowlist. **Do not ship before the core authorization fix in decision 4.** Merged e2e 120/120 twice, unit 402 |
+| DB-11 (sign out everywhere) | `25513d5d` | `/settings/account`: name, email, recorded sign-in door + verified state, the dashboard's sessions (signed in / last used), **Sign out everywhere** (revokes every `dashboard-login` token via admin-api; the user id comes only from the identity oracle; all-or-nothing). Also fixes a `/login` ↔ `/` redirect loop for any revoked or expired session. **Delete account not built** — see decision 5 |
+| DB-20 | `86b27b39` | First-run welcome for new accounts (≤7 days old, `GET/PUT /user/first-run` in identity + gateway, route rule done): bot name (`/user/calendar {bot_name}`), connect a calendar (resumes after the OAuth round-trip), paste a first link with the allowance shown up front; skippable, resumes on refresh, never shown again once done/skipped. admin-api 41 first-run tests on real Postgres, gateway 395 + 1 xfailed, unit 460, e2e 158/158 twice |
 
 ### Decisions waiting on the user
 
@@ -471,6 +477,13 @@ the known environmental traps.
    DB-61; reproduced). Fixed in core 2026-10-08 (`be3f6c4d`, agent tests 599 passed, with a test
    that fails on the previous code), pushed. The user decided no upstream report is needed.
    DB-61 ships only with this fix.
+5. **Account deletion (rest of DB-11) needs core work across services.** admin-api has no user
+   delete, and meeting-api has no per-account erasure. A complete delete must remove: the user row
+   and `api_tokens`; meetings, transcriptions and sessions; recording objects under
+   `recordings/{user_id}/` (only meeting-api reaches object storage); calendar connections and their
+   sealed refresh tokens (`users.data`); the agent workspace and flows data; and the Stripe customer.
+   Billing only cancels at period end, so deletion must refuse while a subscription is live (or an
+   immediate-cancel path is added). Decide whether to make this its own core task.
 
 ### Next, in order (updated 2026-10-04)
 
@@ -489,8 +502,8 @@ Items 1 and 3–7 are done (DB-46 removed from scope 2026-10-08). Next up: 2 (ne
 6. ~~**DB-43 speaker rename** and **DB-47 tags**~~ — done 2026-10-01 (annotate carries both; no
    core field needed).
 7. ~~**DB-40 live transcript**, **DB-61 chat**, **DB-62 auto-title**~~ — done 2026-10-01 (DB-61 ships with the core fix in decision 4).
-8. **DB-10 magic link**, **DB-11 account page**, **DB-20 first-run wizard**, **DB-21 empty/error
-   audit**.
+8. **DB-10 magic link**, **DB-21 empty/error audit**. DB-11 (except delete — decision 5) and DB-20
+   done 2026-10-08.
 9. **DB-81/82/83 settings** (webhooks UI, API keys, transcription settings).
 10. **DB-92/93/95**, **DB-90/91**, then **DB-94 security review last** — include the recordings
     raw proxy (`forwardRaw` in `src/app/api/vexa/[...path]/route.ts`) and the terminal admin
@@ -519,6 +532,12 @@ Open questions found while working (answer on the issue before building on them)
   allowlisted) and does not resume a dropped answer.
 - **`config-contract` gate is red on the base**: `core/flows/src/config_preflight.py` has drifted
   from `deploy/contracts/config.v1/preflight.py` (both last touched in b92d8de1).
+- **DB-20: the OAuth callback page's button still says "Back to Calendar"** when it returns into the
+  welcome (changing it would rewrite specs 06/18). A Continue clicked before the saved default bot
+  name has loaded, with the default typed exactly, does not rewrite it.
+- **DB-11: "Connected providers" is one record** (`users.data.identity` holds the door that last
+  set it), not a list of linked providers. The session list cannot mark "this browser" (the token
+  list carries no token values).
 - **Two stream proxies** (`lib/sseProxy.ts` for GET SSE, `lib/eventStreamProxy.ts` for the chat
   POST) were built in parallel; they overlap and could become one.
 - **`docs/docs/api/agent.mdx`** lacks the `turn-complete` frame, `context` and `turn_id`.
