@@ -20,6 +20,7 @@ and stays in their ecosystem (FastAPI + redis + DB).
 | calls | api-gateway `/ws` | `POST /ws/authorize-subscribe` | identity-scoped subscribe authorization |
 | spawns-over | runtime kernel | `runtime.v1` (`RuntimeClient.create_workload`) | the meeting-bot workload (carries the `invocation.v1` BOT_CONFIG + MeetingToken) |
 | consumes | meeting-bot | `POST /bots/internal/callback/lifecycle` | `lifecycle.v1` `LifecycleEvent` → FSM advance + DB persist |
+| consumes | admin-api (identity) | `POST /internal/accounts/{user_id}/erase` | account deletion: stops the user's bots, erases meetings, transcripts, recordings (rows + objects), cache keys and shares; internal secret, idempotent, not routed by the gateway — see `account_erase/README.md` |
 | consumes | runtime kernel | `POST /runtime/callback` | workload state/terminal ACK (CC5 synthetic `failed`) |
 | calls (optional) | operator service authority | `service-authority.v1` over signed HTTP | allow/deny before spawn and at each one-minute active-service boundary; no hosted billing data |
 | consumes | transcription worker | redis stream `transcription_segments` | raw `transcript.v1` segments → DB |

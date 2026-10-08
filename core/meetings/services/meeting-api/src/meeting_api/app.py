@@ -183,6 +183,10 @@ def create_app(
     # calendar-sync user edges (async callables from the composition root; None → routes 503)
     calendar_sync_now: Optional["object"] = None,
     calendar_sync_status: Optional["object"] = None,
+    # account erasure — the meeting store port and the raw redis client its cache keys live on
+    # (None → in-memory fakes, the app-factory / test default)
+    account_erase_repo: Optional["object"] = None,
+    account_erase_redis: Optional["object"] = None,
 ) -> FastAPI:
     """Build the unified meeting-api app from the injected ports.
 
@@ -295,6 +299,18 @@ def create_app(
     if recording_repo is None:
         recording_repo = _recordings_fakes().InMemoryRecordingRepo()
     app.include_router(_recordings.build_router(recording_repo, storage, token_secret=token_secret))
+
+    # --- account_erase: POST /internal/accounts/{user_id}/erase (service-to-service, internal secret) ---
+    from . import account_erase as _account_erase
+
+    if account_erase_repo is None:
+        account_erase_repo = _account_erase.fakes.InMemoryAccountEraseRepo()
+    if account_erase_redis is None:
+        account_erase_redis = _account_erase.fakes.in_memory_redis()
+    app.include_router(_account_erase.build_router(_account_erase.AccountEraser(
+        repo=account_erase_repo, storage=storage, runtime=runtime,
+        publisher=command_publisher, redis=account_erase_redis,
+    )))
 
     # --- webhooks: GET /webhooks/deliveries — the per-user delivery history the dashboard reads (#841) ---
     app.include_router(_build_webhooks_router(delivery_ledger))

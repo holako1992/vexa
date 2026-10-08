@@ -105,6 +105,7 @@ def build_production_app():
 
     from . import create_app
     from .db import build_engine
+    from .account_erase.adapters import SqlAlchemyAccountEraseRepo
     from .bot_spawn.adapters import HttpRuntimeClient, SqlAlchemyMeetingRepo
     from .collector.adapters import RedisStreamBus, SqlAlchemyTranscriptStore
     from .recordings.adapters import S3Storage, SqlAlchemyRecordingRepo
@@ -245,6 +246,8 @@ def build_production_app():
         transcript_finalizer=_transcript_finalizer,
         calendar_sync_now=_calendar_sync_now,
         calendar_sync_status=_calendar_sync_status,
+        account_erase_repo=SqlAlchemyAccountEraseRepo(session_factory),
+        account_erase_redis=redis_client,
     )
 
     _attach_background_loops(
