@@ -454,6 +454,7 @@ the known environmental traps.
 | DB-61 | `c3cc6773` | Chat panel on the meeting page (focus = that row) and "Ask across all my meetings" on /search over `/agent/chat`, streamed, Stop and New conversation; strict body allowlist. **Do not ship before the core authorization fix in decision 4.** Merged e2e 120/120 twice, unit 402 |
 | DB-11 (sign out everywhere) | `25513d5d` | `/settings/account`: name, email, recorded sign-in door + verified state, the dashboard's sessions (signed in / last used), **Sign out everywhere** (revokes every `dashboard-login` token via admin-api; the user id comes only from the identity oracle; all-or-nothing). Also fixes a `/login` ↔ `/` redirect loop for any revoked or expired session. **Delete account not built** — see decision 5 |
 | DB-20 | `86b27b39` | First-run welcome for new accounts (≤7 days old, `GET/PUT /user/first-run` in identity + gateway, route rule done): bot name (`/user/calendar {bot_name}`), connect a calendar (resumes after the OAuth round-trip), paste a first link with the allowance shown up front; skippable, resumes on refresh, never shown again once done/skipped. admin-api 41 first-run tests on real Postgres, gateway 395 + 1 xfailed, unit 460, e2e 158/158 twice |
+| DB-11 (delete account) | `ccfae4bd`, `384cd503`, `b24f2619`, `303b74a7`, `f596c0ad`, `883237d0` | Immediate account deletion. admin-api `DELETE /admin/users/{id}` locks the account (every token revoked, validate/sign-in/mint refuse, late Stripe webhooks ignored), cancels a live subscription immediately without refund and deletes the Stripe customer, revokes Google calendar grants, then calls each domain's idempotent `POST /internal/accounts/{id}/erase` (meeting-api: bots, meetings, transcripts, sessions, recordings + objects, streams, share grants; agent-api: workspaces, sessions, routines, units, shared-workspace hand-over; flows-api: reactions, receipts, signals, mail rows, queued sends), then deletes the row and emits `account.deleted`. A failed stage → 502 partial, account stays locked, a repeat call resumes. Dashboard: "Delete account" on `/settings/account`, typed-email confirmation re-checked server-side, bounded retry, fixed sentences (incl. last-admin). CALM edges + flow added and re-sealed. Verified: agent 614, flows 797/12 skipped, meeting-api 1489 (+2 pre-existing `test_stream_retention` failures on the base) + erase on real Postgres, admin-api 471 on real Postgres (+3 path tests in-tree), unit 470, e2e twice |
 
 ### Decisions waiting on the user
 
@@ -477,13 +478,19 @@ the known environmental traps.
    DB-61; reproduced). Fixed in core 2026-10-08 (`be3f6c4d`, agent tests 599 passed, with a test
    that fails on the previous code), pushed. The user decided no upstream report is needed.
    DB-61 ships only with this fix.
-5. **Account deletion (rest of DB-11) needs core work across services.** admin-api has no user
-   delete, and meeting-api has no per-account erasure. A complete delete must remove: the user row
-   and `api_tokens`; meetings, transcriptions and sessions; recording objects under
-   `recordings/{user_id}/` (only meeting-api reaches object storage); calendar connections and their
-   sealed refresh tokens (`users.data`); the agent workspace and flows data; and the Stripe customer.
-   Billing only cancels at period end, so deletion must refuse while a subscription is live (or an
-   immediate-cancel path is added). Decide whether to make this its own core task.
+5. ~~**Account deletion**~~ — done 2026-10-08, immediate (see the Done table). Follow-ups:
+   - Lite and helm do not wire `VEXA_MEETING_API_URL` / `VEXA_AGENT_API_URL` / `VEXA_FLOWS_ERASE_URL`
+     for admin-api: deletion there answers 502 `pending` until set (helm: `adminApi.extraEnv`).
+   - `account.deleted` is published best-effort but is not in flows' carrier census, so flows' `/events`
+     refuses it today; add the census entry if anything should react to it.
+   - Microsoft calendar grants cannot be revoked server-side (no per-token revocation in the v2
+     platform); the docs tell the person to remove Vexa's access in their Microsoft account.
+   - A bot spawn already past validation when the account locks can still start (narrow window).
+   - A partial deletion is finished by repeating `DELETE /admin/users/{id}`; the terminal admin Users
+     tab does not expose it yet.
+   - The only admin cannot be deleted (`409 last_admin`) — another account must be made admin first.
+   - In shared workspaces the person's commits and files remain as history; ownership passes to the
+     longest-standing remaining member.
 
 ### Next, in order (updated 2026-10-04)
 
