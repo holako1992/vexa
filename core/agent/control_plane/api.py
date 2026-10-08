@@ -66,6 +66,7 @@ from control_plane.workspace_purpose import read_purpose, write_purpose
 from control_plane import workspace_membership as membership_mod
 from control_plane import git_credentials as git_creds
 from control_plane import system_mounts
+from control_plane import account_erasure
 from control_plane.workspace_membership import MembershipError, MembershipIndex, InMemoryMembershipIndex
 from control_plane.dispatch import Dispatcher
 from control_plane.events import event_to_invocation
@@ -227,6 +228,14 @@ class _Sessions:
             self._redis.delete(self._meta_key(subject, session))
             return
         self._mem.get(subject, {}).pop(session, None)
+
+    def purge(self, subject: str) -> int:
+        """Remove every session of the subject (account erasure); returns the number of keys/records removed."""
+        if self._redis is not None:
+            keys = [self._ids_key(subject)]
+            keys += list(self._redis.scan_iter(match=f"agent:session:{subject}:*", count=500))
+            return int(self._redis.delete(*keys))
+        return 1 if self._mem.pop(subject, None) is not None else 0
 
 
 # P21 (ADR 0027 family — the panel's stale-live finding): a registry entry is "live" only while
@@ -952,6 +961,8 @@ def create_app(
     membership_index: Optional[MembershipIndex] = None,
     meeting_owner_lookup: "Optional[object]" = None,
     schedule_source: "Optional[Callable[[str], list]]" = None,
+    unit_reaper: "Optional[account_erasure.UnitReaper]" = None,
+    erasure_redis: "Optional[object]" = None,
 ) -> FastAPI:
     if sessions is not None:
         sess = sessions
@@ -977,6 +988,20 @@ def create_app(
     # injectable for L2 tests, same seam style as meeting_owner_lookup.
     _schedule_source = schedule_source or schedule_digest_mod.digest_source(
         settings.meeting_api_url if settings is not None else "", mindex.list)
+
+    # Account erasure's edges: the runtime kernel (destroy the subject's warm units) and the shared redis
+    # (unit streams). Injectable for tests; the redis client is built on first use from ``redis_url``.
+    _unit_reaper = unit_reaper if unit_reaper is not None else (
+        account_erasure.HttpUnitReaper(settings.runtime_api_url) if settings is not None else None)
+
+    def _erasure_redis():
+        if erasure_redis is not None:
+            return erasure_redis
+        if redis_url:
+            import redis as _redis
+
+            return _redis.from_url(redis_url, decode_responses=True)
+        return None
 
     # TOPOLOGY BOUNDARY (Lane M vector 3): agent-api trusts X-User-Id / X-User-Email as ground truth.
     # That trust is only SOUND when the gateway is the SOLE ingress — the gateway strips any client-sent
@@ -1088,6 +1113,33 @@ def create_app(
         `native_resolve: {ok:false, kind:'unauthorized', detail:…}` instead of silent dead air."""
         from control_plane import transcription_watcher as _txw
         return _txw.relay_health()
+
+    @app.post("/internal/accounts/{subject}/erase")
+    def erase_account_route(subject: str, request: Request):
+        """Erase one account's footprint in the agent domain (account deletion, orchestrated by admin-api).
+
+        INTERNAL TIER ONLY, fail-closed: an unconfigured ``VEXA_INTERNAL_API_SECRET`` answers 503, a
+        missing/wrong ``X-Internal-Secret`` 403. The route sits outside ``/api`` — the only prefix the
+        gateway's ``/agent/*`` catch-all forwards to — and it additionally refuses any request that carries
+        the gateway's identity headers, so a path rewritten into it is refused as well. Idempotent: an
+        erased account answers 200 with zero counts. A failed stage answers 500 ``{error, stage}``."""
+        secret = settings.internal_api_secret.get_secret_value() if settings is not None else ""
+        if not secret:
+            raise HTTPException(status_code=503, detail="internal secret not configured")
+        if not hmac.compare_digest(request.headers.get("x-internal-secret", ""), secret):
+            raise HTTPException(status_code=403, detail="internal secret required")
+        if request.headers.get("x-user-id") or request.headers.get("x-gateway-verified"):
+            raise HTTPException(status_code=403, detail="not reachable through the gateway")
+        if not account_erasure.valid_subject(subject):
+            raise HTTPException(status_code=400, detail="invalid subject")
+        try:
+            erased = account_erasure.erase_account(
+                subject, root=wsr.root, scheduler=scheduler, reaper=_unit_reaper,
+                redis_client=_erasure_redis(), membership_index=mindex, purge_sessions=getattr(sess, "purge", None),
+            )
+        except account_erasure.ErasureError as e:
+            return JSONResponse({"error": str(e), "stage": e.stage}, status_code=500)
+        return {"subject": subject, "erased": erased}
 
     @app.get("/api/admin/overview")
     def admin_overview(request: Request):

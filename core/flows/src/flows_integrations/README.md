@@ -10,3 +10,11 @@ imap.gmail.com exactly as before, `=mailpit` polls the dev stack's mail double o
 RFC822 source and share one parse, so the two produce identical facts. Mailpit ids are random
 rather than monotonic, so its position is a `Created` watermark (`mail_cursor.token`) plus a
 seen-id set (`mail_seen`) — see the contracts at the top of `inbox.py`.
+
+`account_erasure.py` is flows' part of immediate account deletion (`POST /internal/accounts/{subject}/erase`
+on flows-api, internal tier: `X-Internal-Secret` == `INTERNAL_API_SECRET`, unset → 503, wrong → 403). It
+cancels the person's queued reactions first, then deletes the reactions they own with their receipts and
+signals, then the rows keyed by uid (`mail_thread`, `mail_outbox_sent`) or sender address
+(`mail_quarantine`, `mail_turn`). The addresses come from the request body (`{"emails": [...]}`, optional)
+and from admin-api's record of the account. A reaction that only lists the person as a participant belongs to
+the organizer and is kept. Idempotent; a failing stage answers `500 {"error", "stage"}`.

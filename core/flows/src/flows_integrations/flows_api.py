@@ -631,6 +631,59 @@ def admit_batch(batch: SeedBatch, x_actor: str = Header(default="")):
     return _with_gate({**log, "meetings": out})
 
 
+class AccountErasure(BaseModel):
+    """What the identity service knows about the account that flows cannot derive from the uid alone."""
+    emails: list[str] = Field(default_factory=list, max_length=20)
+
+
+def internal_tier(x_internal_secret: str = Header(default="")) -> None:
+    """The internal tier, FAIL-CLOSED: no secret configured answers 503 (nobody gets in), a missing or
+    wrong one 403. Not a route the MCP edge or any person's credential reaches — it is not in the tool
+    manifest and takes no key but the internal secret."""
+    if not INTERNAL_SECRET:
+        raise HTTPException(status_code=503, detail="internal secret not configured")
+    if not _same_key(x_internal_secret, INTERNAL_SECRET):
+        raise HTTPException(status_code=403, detail="internal secret required")
+
+
+def _account_emails(uid: str) -> list[str]:
+    """The account's own address as admin-api records it. 404 is an account already gone (nothing to
+    add); any other answer is a failure to learn the address and must not pass for "has none", or an
+    address-keyed row would survive a call that reported success."""
+    from flows_steps.common import _admin_headers, _door, http
+    from urllib.parse import quote
+    code, user = http("GET", f"{_door('VEXA_FLOWS_ADMIN_API_URL')}/admin/users/{quote(uid, safe='')}",
+                      _admin_headers())
+    if code == 404:
+        return []
+    if code != 200 or not isinstance(user, dict):
+        raise RuntimeError(f"admin-api answered {code} for the account lookup")
+    return [str(user["email"])] if user.get("email") else []
+
+
+@app.post("/internal/accounts/{subject}/erase", dependencies=[Depends(internal_tier)])
+def erase_account(subject: str, body: AccountErasure = Body(default_factory=AccountErasure)):
+    """Erase everything flows holds for ONE account, and cancel what is queued for it (account deletion,
+    orchestrated by the identity service). Idempotent: an erased account answers 200 with zero counts.
+    A failed stage answers 500 `{error, stage}` and claims nothing beyond the stages that completed."""
+    from fastapi.responses import JSONResponse
+    from flows_integrations import account_erasure
+    uid = subject.strip()
+    if not uid or len(uid) > 64 or not all(c.isalnum() or c == "_" for c in uid):
+        raise HTTPException(status_code=400, detail="invalid subject")
+    try:
+        emails = {e.strip().lower() for e in body.emails if e.strip()}
+        try:
+            emails.update(e.lower() for e in _account_emails(uid))
+        except Exception as exc:  # noqa: BLE001 — typed to its stage below
+            raise account_erasure.ErasureError("resolve_email", f"{type(exc).__name__}: {exc}"[:400]) from exc
+        erased = account_erasure.erase_account(db, uid, emails=sorted(emails), now=clock.now())
+    except account_erasure.ErasureError as e:
+        logger.error("account erasure failed stage=%s subject=%s: %s", e.stage, uid, e)
+        return JSONResponse({"error": str(e), "stage": e.stage}, status_code=500)
+    return {"subject": uid, "erased": erased}
+
+
 @app.post("/flows/{name}/{version}/{action}", dependencies=[Depends(auth)])
 def set_flow_status(name: str, version: int, action: str):
     if action not in ("activate", "retire"):

@@ -61,3 +61,28 @@ runs right before `git add -A` — it reverts any tracked `policy/` change back 
 untracked `policy/` add, emitting `{"type":"policy-reverted","paths":[…]}`. So a turn's legitimate
 (non-policy) writes still commit while a policy tamper is reverted before it can land. (Chosen default
 per plan Q3: post-turn validation + revert.)
+
+## Account erasure (`account_erasure.py`)
+
+`POST /internal/accounts/{subject}/erase` — the agent domain's part of immediate account deletion, which
+the identity service orchestrates (lock the account, ask each domain to erase, delete the user row).
+`subject` is the stringified `users.id`, the same value the gateway injects as `X-User-Id`.
+
+- **Internal tier only, fail-closed.** `X-Internal-Secret` must equal `VEXA_INTERNAL_API_SECRET`: unset →
+  503, missing/wrong → 403. The route is outside `/api`, the only prefix the gateway's `/agent/*`
+  catch-all forwards to (`/agent/<path>` → `/api/<path>`), and it also refuses any request carrying the
+  gateway's `X-User-Id` / `X-Gateway-Verified`; the gateway strips every `x-internal-*` header besides.
+- **Idempotent, resumable.** Stages: routine jobs (schedule.v1 `metadata.owner`) → warm units
+  (`agent-<subject>-*` workloads) → shared workspaces → private storage (`<root>/<subject>`,
+  `.attached/<subject>`, `.system/<subject>`, `.secrets/<subject>.ghtoken`) → redis
+  (`agent:session[s]:<subject>…`, `unit:agent-<subject>-*`). Each stage discovers its own work by scan, so a
+  retry finishes the job and an erased account answers `200 {"subject", "erased": {…zero counts}}`. A
+  failing stage answers `500 {"error", "stage"}`.
+- **Shared workspaces.** The authoritative member list is each workspace's `policy/members.json`. A
+  workspace the subject was the only member of is deleted; otherwise the subject leaves, invites they
+  minted are revoked, and when they were the sole owner the longest-standing remaining member (contributors
+  before viewers) becomes owner — the workspace is the other members' data and stays intact. The
+  `users.data.memberships[]` mirror lives in admin-api and goes with the user row; this module only removes
+  entries through the injected `MembershipIndex` port.
+- **Not user-keyed here.** Meeting copilot units (`agent-meet-<session_uid>`) and their `proc:meeting:*` /
+  `tc:meeting:*` carriers are keyed by the meeting, not the person.
