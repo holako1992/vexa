@@ -48,7 +48,7 @@ export function forwardedForHeader(clientIp: string | null | undefined): Record<
   return /^[0-9a-fA-F:.]{2,45}$/.test(ip) ? { "X-Forwarded-For": ip } : {};
 }
 
-async function adminRequest<T>(path: string, init: RequestInit = {}, timeout = 15000): Promise<AdminResult<T>> {
+export async function adminRequest<T>(path: string, init: RequestInit = {}, timeout = 15000): Promise<AdminResult<T>> {
   const cfg = adminConfig();
   if (!cfg) return { ok: false, status: 503, error: "Admin API is not configured (VEXA_ADMIN_API_URL / VEXA_ADMIN_API_KEY)" };
 
@@ -104,10 +104,11 @@ function recordProvenance(userId: string | number, provenance: IdentityProvenanc
 }
 
 /** A token as admin-api lists it — metadata only, never the secret value. */
-interface AdminTokenInfo {
+export interface AdminTokenInfo {
   id: number;
   name?: string | null;
   created_at?: string | null;
+  last_used_at?: string | null;
 }
 
 /** The mint response — the ONLY place the token value ever crosses. */
@@ -115,7 +116,7 @@ interface AdminMintedToken extends AdminTokenInfo {
   token: string;
 }
 
-function listUserTokens(userId: string | number): Promise<AdminResult<AdminTokenInfo[]>> {
+export function listUserTokens(userId: string | number): Promise<AdminResult<AdminTokenInfo[]>> {
   return adminRequest<AdminTokenInfo[]>(`/admin/users/${encodeURIComponent(String(userId))}/tokens`, { method: "GET" });
 }
 
@@ -127,7 +128,7 @@ function mintUserToken(userId: string | number, opts: { scopes: string[]; name: 
   );
 }
 
-function revokeToken(tokenId: string | number): Promise<AdminResult<void>> {
+export function revokeToken(tokenId: string | number): Promise<AdminResult<void>> {
   return adminRequest<void>(`/admin/tokens/${encodeURIComponent(String(tokenId))}`, { method: "DELETE" });
 }
 

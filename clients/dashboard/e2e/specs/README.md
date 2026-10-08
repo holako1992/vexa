@@ -166,6 +166,15 @@ spec's body is only the property, not the plumbing.
   104 has no chat; hand-made bodies outside the panels' shapes are 400s that never reach the
   gateway; and the panel opens, asks and closes (focus back on its button) from the keyboard.
   Proved against a buffering proxy as a negative control: the streaming and Stop tests fail.
+- `29-account.spec.ts` — `/settings/account`: email, initials, the recorded sign-in door and one
+  session per `dashboard-login` token render; Sign out everywhere (behind a confirmation) leaves
+  only the person's own `my-ci-key` token at the core, clears this browser's cookies, lands on
+  `/login` with a plain notice, and a second signed-in browser's next `/api/auth/me`,
+  `/api/vexa/meetings` and `/api/account` are 401s and its next page is `/login`; cancelling does
+  nothing; a revoke the core refuses is a sentence and leaves the browser signed in; a body, query
+  or path naming another user is ignored and that user's token survives; a cross-origin write is
+  403 and an anonymous caller 401; a live session is bounced off `/login` while a revoked one gets
+  the form (a cookie-only bounce would loop a revoked session between `/login` and the page).
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

@@ -17,9 +17,11 @@
   touched) and Reconnect. `calendar/google/` and `calendar/microsoft/` hold each provider's OAuth
   `callback/` route (DB-31, DB-32/DB-33) — no nav-rail entry of their own; see that directory's
   own `README.md`.
+- `settings/account/page.tsx` — `/settings/account`: profile, recorded sign-in method, active
+  sessions and **Sign out everywhere**. See `settings/README.md`.
 - `login/page.tsx` — the sign-in page. It computes on the SERVER which providers exist, so no OAuth
   identifier is ever sent to the browser.
-- `api/` — the handlers.
+- `api/` — the handlers (`account/` serves the account page).
 
 Every page here is a server component that resolves the signed-in user before rendering and
 redirects to `/login` when there is none. That is a second gate behind `middleware.ts`, not a

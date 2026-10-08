@@ -14,6 +14,7 @@ import { signIn } from "next-auth/react";
 import { AudioLines } from "lucide-react";
 import { safeNext } from "@/lib/security";
 import { refusalMessage } from "@/lib/signInRefusal";
+import { loginNotice } from "@/lib/account";
 import { Button, Input } from "./ui";
 
 export interface LoginOptions {
@@ -27,6 +28,7 @@ export function LoginForm({ options }: { options: LoginOptions }) {
   const next = safeNext(params.get("next"));
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const notice = loginNotice(params.get("notice"));
   // `?error=` is a code, never text: it selects one of the fixed strings and is otherwise ignored.
   const [error, setError] = useState<string | null>(() => refusalMessage(params.get("error")));
 
@@ -65,6 +67,12 @@ export function LoginForm({ options }: { options: LoginOptions }) {
           <h1 className="text-xl font-semibold tracking-tight">Sign in to Vexa</h1>
           <p className="mt-1 text-sm text-ink-2">Your meetings and transcripts.</p>
         </div>
+
+        {notice && (
+          <p role="status" className="mb-4 rounded-lg border border-line bg-card px-4 py-3 text-sm text-ink-2">
+            {notice}
+          </p>
+        )}
 
         <div className="rounded-card border border-line bg-card p-6">
           {noProvider && (

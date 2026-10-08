@@ -67,7 +67,7 @@ const adminLog = [];
  *  instead of dispatching — spec 14's paywall proof. */
 let force = {
   meetings: null, meetingDetail: null, botsQuota: false, search: null,
-  googleExchange: null, microsoftExchange: null, annotate: null,
+  googleExchange: null, microsoftExchange: null, annotate: null, tokenDelete: null,
 };
 /** The state tokens `GET /user/calendars/google/authorize` has issued, and which of
  *  those have already been consumed by an exchange. Mirrors just enough of the core's real
@@ -127,6 +127,13 @@ let nextUserId = 1;
 const tokens = new Map(); // token string -> { id, userId }
 let nextTokenId = 1;
 
+/** `users.data.identity` as admin-api records it (`identity_provenance.merge_identity`). */
+function identityRecord(provider, emailVerified) {
+  const record = { provider, email_verified: emailVerified === true };
+  if (emailVerified === true) record.verified_at = new Date().toISOString();
+  return record;
+}
+
 function resetAll() {
   meetings = freshMeetings();
   calendars = freshCalendars();
@@ -136,7 +143,7 @@ function resetAll() {
   adminLog.length = 0;
   force = {
     meetings: null, meetingDetail: null, botsQuota: false, search: null,
-    googleExchange: null, microsoftExchange: null, annotate: null,
+    googleExchange: null, microsoftExchange: null, annotate: null, tokenDelete: null,
   };
   issuedGoogleStates = new Set();
   usedGoogleStates = new Set();
@@ -395,6 +402,12 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { ok: true, force });
   }
   if (await handleLiveControl(url, req, res, readJsonBody, sendJson)) return;
+  // The real gateway authenticates the API key on every call; a key admin-api has revoked is a 401.
+  // Only keys this stub minted are judged, so a spec that sends its own key is left alone.
+  const presentedKey = req.headers["x-api-key"];
+  if (typeof presentedKey === "string" && presentedKey.startsWith("e2e-token-") && !tokens.has(presentedKey)) {
+    return sendJson(res, 401, { detail: "Invalid API key" });
+  }
   if (url.pathname === "/__control/searchHold" && req.method === "POST") {
     if (!searchHold) {
       let release;
@@ -1073,7 +1086,8 @@ async function handleAdmin(req, res) {
       });
     }
     if (!user) {
-      user = { id: nextUserId++, email, name: null };
+      user = { id: nextUserId++, email, name: null, data: {} };
+      if (typeof body.identity_provider === "string") user.data.identity = identityRecord(body.identity_provider, body.email_verified === true);
       users.set(email, user);
     }
     return sendJson(res, 200, user);
@@ -1087,7 +1101,16 @@ async function handleAdmin(req, res) {
     if (typeof body.identity_provider !== "string" || typeof body.email_verified !== "boolean") {
       return sendJson(res, 422, { detail: "identity_provider and email_verified must be supplied together" });
     }
+    user.data = user.data || {};
+    if (user.data.identity?.email_verified !== true) user.data.identity = identityRecord(body.identity_provider, body.email_verified);
     return sendJson(res, 200, user);
+  }
+
+  // GET /admin/users/<id> — UserResponse: id, email, name, data (no webhook secret)
+  if (req.method === "GET" && parts.length === 3 && parts[0] === "admin" && parts[1] === "users") {
+    const user = [...users.values()].find((u) => u.id === Number(parts[2]));
+    if (!user) return sendJson(res, 404, { detail: "User not found" });
+    return sendJson(res, 200, { id: user.id, email: user.email, name: user.name, max_concurrent_bots: 3, data: user.data || {} });
   }
 
   // GET /admin/users/<id>/tokens
@@ -1095,7 +1118,7 @@ async function handleAdmin(req, res) {
     const userId = Number(parts[2]);
     const mine = [...tokens.entries()]
       .filter(([, t]) => t.userId === userId)
-      .map(([, t]) => ({ id: t.id, name: t.name, created_at: t.createdAt }));
+      .map(([, t]) => ({ id: t.id, user_id: t.userId, scopes: ["bot", "tx"], name: t.name, created_at: t.createdAt, last_used_at: t.lastUsedAt ?? null, expires_at: null }));
     return sendJson(res, 200, mine);
   }
 
@@ -1112,7 +1135,10 @@ async function handleAdmin(req, res) {
   // DELETE /admin/tokens/<id>
   if (req.method === "DELETE" && parts.length === 3 && parts[0] === "admin" && parts[1] === "tokens") {
     const id = Number(parts[2]);
-    for (const [value, t] of tokens) if (t.id === id) tokens.delete(value);
+    if (force.tokenDelete) return sendJson(res, force.tokenDelete, { detail: "forced failure" });
+    const found = [...tokens.entries()].find(([, t]) => t.id === id);
+    if (!found) return sendJson(res, 404, { detail: "Token not found" });
+    tokens.delete(found[0]);
     return sendJson(res, 204, null);
   }
 
@@ -1125,6 +1151,7 @@ async function handleAdmin(req, res) {
     if (!entry) return sendJson(res, 401, { error: "not_authenticated" });
     const user = [...users.values()].find((u) => u.id === entry.userId);
     if (!user) return sendJson(res, 401, { error: "not_authenticated" });
+    entry.lastUsedAt = new Date().toISOString(); // the core stamps last_used_at on every validate
     return sendJson(res, 200, { user_id: user.id, email: user.email });
   }
 

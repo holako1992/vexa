@@ -79,7 +79,7 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   `npm run dev` (`next dev --port ${PORT:-3001}`) because npm always runs package scripts through
   `cmd.exe` on Windows regardless of the invoking shell, and that bash-style `${VAR:-default}`
   never expands there.
-- `specs/` — the twenty-seven spec files. See `specs/README.md`.
+- `specs/` — the spec files. See `specs/README.md`.
 
 ## Running it
 

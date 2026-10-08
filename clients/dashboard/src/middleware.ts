@@ -57,13 +57,10 @@ export function middleware(req: NextRequest) {
     return finish(NextResponse.redirect(url));
   }
 
-  // A signed-in visitor has no business on the login page.
-  if (authed && pathname === "/login") {
-    const url = req.nextUrl.clone();
-    url.pathname = "/";
-    url.search = "";
-    return finish(NextResponse.redirect(url));
-  }
+  // A visitor who already has a session is bounced off /login by the page itself (login/page.tsx),
+  // which can ask the identity oracle whether the cookie is still good. This gate only sees that a
+  // cookie EXISTS, so bouncing here would loop a revoked session between /login and the page that
+  // sent it there.
 
   // The nonce travels to the app on a request header; Next reads it and stamps its own <script>
   // tags with it, which is what makes a nonce-based CSP work at all with the App Router.

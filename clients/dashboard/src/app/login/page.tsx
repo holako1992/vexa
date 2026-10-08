@@ -5,12 +5,17 @@
  *  provider URL.
  */
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { currentUser } from "@/lib/session";
 import { googleEnabled, microsoftEnabled } from "../api/auth/authOptions";
 import { LoginForm } from "@/components/LoginForm";
 
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  // Someone whose session is still good has no business here. A cookie the oracle rejects (revoked
+  // or expired) is not a session, so the form renders and signing in replaces it.
+  if (await currentUser()) redirect("/");
   const options = {
     google: googleEnabled(),
     microsoft: microsoftEnabled(),

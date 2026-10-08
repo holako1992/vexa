@@ -102,6 +102,12 @@ Twenty files, covering the parts where being wrong is expensive (plus `api.test.
   `activeSegmentIndex` (the LATEST segment at or before `currentTime`, never the nearest — proven
   against a segment with no offset at all, and that it sticks on the last segment once playback
   runs past it).
+- `account.test.ts` — the account page's server logic with `fetch` replaced by a recorder: the
+  caller is the oracle's answer for the cookie and nothing else (a revoked token, no cookie and an
+  unconfigured oracle are all refusals); revoke-all deletes the `dashboard-login` tokens and only
+  those; one failed revoke is a reported failure, not a complete sign-out; an unreadable token
+  list revokes nothing; a missing, malformed or unknown identity record is "not recorded", never
+  "unverified"; the login notice is chosen by a fixed code, so markup in `?notice=` is dropped.
 - `recordings.test.ts` — DB-50/52's `/recordings` list mapping: `toRecording` picks the AUDIO
   entry out of `media_files[]` (never video, never the first entry regardless of type), is `null`
   on `audioMediaFileId` for a video-only or still-uploading recording, and falls back to an honest

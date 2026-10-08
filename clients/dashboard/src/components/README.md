@@ -127,6 +127,9 @@ Client components. They receive identity as props (resolved on the server) and f
   and any past-due / cancel-at-period-end note, from `GET /api/vexa/user/entitlements`
   (`lib/entitlements.ts`'s formatters). No checkout or portal buttons — see the file's own header
   comment for why; a later task fills that slot once DB-73's Stripe endpoints are final.
+- `AccountView` — `/settings/account`: name, read-only email, avatar initials, the recorded sign-in
+  door (`lib/account.ts`'s `describeProvider`), the `dashboard-login` sessions, and **Sign out
+  everywhere** behind `ui/Dialog`. Reads `GET /api/account`, writes `DELETE /api/account/sessions`.
 - `BotControls` — DB-41: the bot's live status (from `GET /bots/status`) and a **Stop recording**
   button behind `ui/Dialog`'s confirm. A join-failure `reason`, when the producer recorded one, is
   shown verbatim — never reworded.
