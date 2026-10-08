@@ -231,6 +231,40 @@ carry a token in its path or query.
 An empty `deliveries` array means no attempt has been recorded for this account — including when
 the feature has never fired at all.
 
+## First-run welcome
+
+The dashboard greets a new account with a three-step welcome — name the bot, connect a calendar,
+send a first meeting link. Where a person is in it is stored on the account, so it follows them to
+another browser.
+
+```bash GET /user/first-run
+curl "$API_BASE/user/first-run" -H "X-API-Key: $API_KEY"
+```
+
+```json Response — 200
+{ "state": "active", "step": "calendar" }
+```
+
+`state` is `active` (a new account that has not finished), `done`, `skipped`, or `none` (an account
+that is not new). `step` is `name`, `calendar` or `meeting`. An account is new for seven days after
+it is created; accounts created before this existed, and older ones, answer `none` and are never
+welcomed.
+
+```bash PUT /user/first-run
+curl -X PUT "$API_BASE/user/first-run" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"step": "meeting"}'
+```
+
+Send a `step` to record where the person is, or a `state` of `done` or `skipped` to end the
+welcome. The answer is the same shape as the read. An ended welcome stays ended — a later write
+returns it unchanged. An unknown field, step or state, or a write to an account that is not new,
+returns **422** with the vocabulary that exists.
+
+The bot's display name the welcome asks for is not a field here: it is the account's default bot
+name, read and written with `bot_name` on [`/user/calendar`](/api/calendar), and used by every bot
+sent without a name of its own.
+
 ## Account limits (admin tier)
 
 Concurrency is an account limit, not a self-serve setting: it is changed with the **admin** key on

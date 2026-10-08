@@ -64,6 +64,14 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   `serveRangeableBytes` — a REAL `Range` parser, not a canned `206` — against the one generated
   `RECORDING_AUDIO_BYTES` clip every recording plays), and `DELETE /recordings/<id>`. See the
   file's own header comment for the full route table.
+  DB-20 adds `GET/PUT /user/first-run` (the producer's rules: a closed vocabulary refused with the
+  list, an ended welcome stays ended, an account that is not new has none) and `GET/PUT
+  /user/calendar` (the default bot name, validated like `set_user_calendar`); `POST /bots` answers
+  with the effective `bot_name` (explicit, else the account default) and, while
+  `/__control/firstRun` has `dispatchCreatesMeeting`, creates the requested row so it can be
+  opened. `/__control/firstRun {state, step, noMeetings, dispatchCreatesMeeting}` sets the account
+  the next sign-in lands on; the default world is a new account that already has meetings, so no
+  other spec meets the welcome.
 - `liveStreamStub.mjs` — DB-40's `GET /agent/meeting/stream`, faked to the producer's shape: the
   collector's write path (a pushed segment is persisted for the REST read AND appended to the
   row's transcript stream; retract and session-end markers), agent-api's `meeting_stream`

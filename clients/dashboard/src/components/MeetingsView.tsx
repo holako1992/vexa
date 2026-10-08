@@ -43,6 +43,8 @@ import { tagHref } from "./MeetingTags";
 import { StatusPill } from "./StatusPill";
 import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
 import { SendBotDialog } from "./SendBotDialog";
+import { FirstRunWizard, type CalendarReturn } from "./FirstRunWizard";
+import { useFirstRun } from "./useFirstRun";
 import { Button, Input, Tab, Tabs, useToast } from "./ui";
 
 const TABS = [
@@ -89,6 +91,14 @@ export function MeetingsView() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [sortBy, setSortBy] = useState<MeetingSort>("newest");
+  // The first-run welcome. Once it has opened it stays mounted until it is closed — it ends the
+  // welcome itself (sending the first bot does), and the "your bot is joining" panel must outlive
+  // that — so the decision to open is latched rather than re-derived on every render.
+  const firstRun = useFirstRun();
+  const [wizardLatched, setWizardLatched] = useState(false);
+  const [wizardClosed, setWizardClosed] = useState(false);
+  const [calendarReturn, setCalendarReturn] = useState<CalendarReturn>(null);
+  useEffect(() => { if (firstRun.visible) setWizardLatched(true); }, [firstRun.visible]);
   const tag = normalizeTag(searchParams.get("tag") ?? "");
   const tagQuery = tag ? `&metadata=${encodeURIComponent(tagFilterValue(tag))}` : "";
   // Kept in refs so the poll effect does not restart on every refresh, and so a concurrent
@@ -170,26 +180,33 @@ export function MeetingsView() {
   // `/calendar/microsoft/callback`) sends the browser back here with `?calendar=connected
   // &provider=<google|microsoft>` (success) or `?calendar=1` (the person clicked "Back to
   // Calendar" after an error, or wants another attempt — no `provider`, since an error already
-  // showed its own message on the callback page and never toasts again here) — either way, land
-  // back on the Calendar tab of the SAME dialog they started the OAuth flow from, rather than the
-  // meetings list. The params are stripped immediately after so a refresh doesn't reopen the
-  // dialog or re-toast. `handledCalendarReturn` guards against React's dev-mode double-invoked
-  // effect firing this twice (and so double-toasting) for the SAME landing — `router.replace`
-  // below is what actually makes it not fire again on a later render.
+  // showed its own message on the callback page and never toasts again here). Where it lands
+  // depends on whether the person is mid-welcome: the welcome picks up where it left off, and
+  // anyone else lands back on the Calendar tab of the SAME dialog they started the OAuth flow
+  // from, rather than the meetings list. So this waits for the welcome's state before deciding.
+  // The params are stripped immediately after so a refresh doesn't reopen the dialog or
+  // re-toast. `handledCalendarReturn` guards against React's dev-mode double-invoked effect
+  // firing this twice (and so double-toasting) for the SAME landing — `router.replace` below is
+  // what actually makes it not fire again on a later render.
   const handledCalendarReturn = useRef(false);
   useEffect(() => {
     const calendarParam = searchParams.get("calendar");
-    if (!calendarParam || handledCalendarReturn.current) return;
+    if (!calendarParam || handledCalendarReturn.current || !firstRun.ready) return;
     handledCalendarReturn.current = true;
-    setDialogInitialTab("calendar");
-    setDialogOpen(true);
-    if (calendarParam === "connected") {
-      const label = searchParams.get("provider") === "microsoft" ? "Microsoft 365" : "Google Calendar";
-      toast.push({ tone: "success", title: `${label} connected.` });
+    const provider = searchParams.get("provider") === "microsoft" ? "microsoft" : "google";
+    if (firstRun.visible) {
+      setCalendarReturn(calendarParam === "connected" ? { kind: "connected", provider } : { kind: "retry" });
+    } else {
+      setDialogInitialTab("calendar");
+      setDialogOpen(true);
+      if (calendarParam === "connected") {
+        const label = provider === "microsoft" ? "Microsoft 365" : "Google Calendar";
+        toast.push({ tone: "success", title: `${label} connected.` });
+      }
     }
     router.replace("/", { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, firstRun.ready, firstRun.visible]);
 
   const visible = useMemo(() => {
     if (!meetings) return [];
@@ -213,6 +230,19 @@ export function MeetingsView() {
 
   return (
     <>
+    {wizardLatched && !wizardClosed && firstRun.status && (
+      <FirstRunWizard
+        initialStep={firstRun.status.step}
+        calendarReturn={calendarReturn}
+        onBotSent={() => { void load(); }}
+        onEnded={(state) => {
+          firstRun.update({ state, step: firstRun.status!.step });
+          // Skipping leaves at once; finishing by sending a bot stays for its "joining" panel.
+          if (state === "skipped") setWizardClosed(true);
+        }}
+        onClose={() => setWizardClosed(true)}
+      />
+    )}
     {dialogOpen && (
       <SendBotDialog
         onClose={() => { setDialogOpen(false); setDialogInitialTab("link"); }}
@@ -313,6 +343,13 @@ export function MeetingsView() {
           title={query ? "No meetings match that search." : tag ? `No meetings tagged “${tag}”.` : "No meetings yet."}
           hint={query || tag ? undefined : "Send a Vexa bot to a meeting and it will show up here."}
         />
+      )}
+      {!error && meetings !== null && meetings.length === 0 && wizardClosed && firstRun.visible && (
+        <div className="flex justify-center pb-10">
+          <Button variant="primary" onClick={() => setWizardClosed(false)}>
+            Finish setup
+          </Button>
+        </div>
       )}
 
       {!error && visible.length > 0 && (

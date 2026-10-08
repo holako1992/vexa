@@ -124,5 +124,13 @@ Twenty files, covering the parts where being wrong is expensive (plus `api.test.
   type, a missing status, a missing required section (one, and all four), and a `skipped` note
   with no `reason` — each its own distinct `{kind: "malformed", detail}`, plus the two well-formed
   shapes (`complete`, `skipped`) parsed correctly.
+- `firstRun.test.ts` — DB-20, weighted towards what is refused: who is NOT welcomed (an account
+  that is not new however empty its list, one that already has meetings, an ended welcome at any
+  step, an unreadable answer, an unknown meeting count), the resume past step one although the
+  calendar the person connected created meetings, and the proxy's two new PUT routes — the
+  producer's `ics_url`/`auto_join` fields and every near-miss body or path refused.
+- `quotaNotice.test.ts` — the refused-send sentence for each producer reason (an unverified address
+  is never called a spent allowance, an unknown reason never renders as raw text) and
+  `isAllowanceSpent` (unknown usage and an unlimited plan are not "spent").
 
 Run: `npm test`.

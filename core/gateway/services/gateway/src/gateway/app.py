@@ -822,6 +822,15 @@ def create_app(
     async def get_user_entitlements(request: Request):
         return await _forward("GET", _admin("/user/entitlements"), request)
 
+    # Where the caller stands in the dashboard's first-run welcome. Identity owns the record.
+    @app.get("/user/first-run")
+    async def get_user_first_run(request: Request):
+        return await _forward("GET", _admin("/user/first-run"), request)
+
+    @app.put("/user/first-run")
+    async def put_user_first_run(request: Request):
+        return await _forward("PUT", _admin("/user/first-run"), request)
+
     # ---- Stripe checkout + portal. Scoped BOT_OR_TX like the rest of /user/* and
     # /billing/*; identity mints the Checkout/Portal session, Stripe hosts the payment UI, this
     # edge never sees card data. The webhook (POST /billing/webhook, admin-api) is deliberately

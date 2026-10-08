@@ -25,3 +25,7 @@ allowlist would have forwarded it to every other GET route too).
 chunk, never buffering it, opens with an SSE comment so the browser receives the response head
 at once, forwards the caller's `Last-Event-ID` only when it is the producer's cursor shape, and
 aborts the upstream request when the browser goes away.
+
+**`PUT` is a write method** (`/user/calendar` for the default bot name, `/user/first-run` for the
+welcome's position), resolved by the same `resolveWriteUpstream` and checked against the same
+per-route body shapes as POST/PATCH/DELETE.

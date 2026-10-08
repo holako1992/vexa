@@ -176,6 +176,15 @@ spec's body is only the property, not the plumbing.
   403 and an anonymous caller 401; a live session is bounced off `/login` while a revoked one gets
   the form (a cookie-only bounce would loop a revoked session between `/login` and the page).
 
+- `30-first-run.spec.ts` — DB-20: who is welcomed (a new account with no meetings; not one with
+  meetings, not one that is not new, not an ended welcome, not an unreadable answer), the bot
+  name saved as the default and said by the send form, a refresh resuming the step, Skip setup from
+  every step saved and final, Escape hiding for the visit only, the calendar consent round trip
+  (and a declined one) landing back inside the welcome, a fresh account reaching its first meeting
+  page in three clicks (jump to the last step, Send Bot, Open meeting), the allowance stated up
+  front and a spent or unverified one explained with the calendar still on offer, keyboard
+  operation, and 375px.
+
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints
 (no new runtime dependency without justification) argue against pulling in just to print one

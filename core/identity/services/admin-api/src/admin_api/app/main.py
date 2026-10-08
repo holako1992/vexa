@@ -41,6 +41,7 @@ from ..schema.models import APIToken, PlatformSetting, User
 from ..token_scope import VALID_SCOPES, generate_prefixed_token
 from .db import get_db
 from . import events as events_mod
+from . import first_run as first_run_mod
 from . import person_settings as person_settings_mod
 from .billing import catalog as billing_catalog
 from .billing.catalog import effective_concurrent_cap
@@ -1459,6 +1460,32 @@ def create_app() -> FastAPI:
             "token_set": bool(prefs.get("token")),
             "token": _mask_secret(prefs.get("token")),
         }
+
+    # --- user tier: the first-run welcome. Owner-scoped like every /user/* route: the person is the
+    # token's owner, never a path or body field. The record and the rules live in first_run.py.
+    @app.get("/user/first-run")
+    async def get_user_first_run(user: User = Depends(get_current_user)):
+        """Where this account stands in the welcome: ``{state: active|done|skipped|none, step}``."""
+        return first_run_mod.read(user.data if isinstance(user.data, dict) else {}, time.time())
+
+    @app.put("/user/first-run")
+    async def put_user_first_run(payload: Any = Body(...),
+                                 user: User = Depends(get_current_user_for_update),
+                                 db: AsyncSession = Depends(get_db)):
+        """Move the welcome to a step, or end it (``state``: done | skipped). Partial, validated
+        whole. An ended welcome stays ended; an account that is not new has none (422)."""
+        from sqlalchemy.orm import attributes
+        data = user.data if isinstance(user.data, dict) else {}
+        try:
+            new_data = first_run_mod.apply(data, payload, time.time())
+        except first_run_mod.Refused as refused:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=refused.detail)
+        if new_data != data:
+            user.data = new_data
+            attributes.flag_modified(user, "data")
+            db.add(user)
+            await db.commit()
+        return first_run_mod.read(new_data, time.time())
 
     # --- user tier: resolved billing entitlements — read-only, same auth as
     # /user/webhook and /user/transcription. This (spawn-time quota enforcement) reads the

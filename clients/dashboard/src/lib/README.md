@@ -115,3 +115,12 @@
   body — the shape `POST /bots` actually sends, with no `{"detail": ...}` envelope; and
   `reasonMessage`, the fixed sentence for the core's `identity_unverified` reason (any code it has no
   words for renders as nothing, never as raw text).
+- **`firstRun.ts`** — the first-run welcome's shapes and pure rules (DB-20): `parseFirstRunStatus`
+  (an answer that is not the producer's shape is `null`, which shows no welcome),
+  `wizardShouldShow` (the producer says the account is new and unfinished; the client adds "no
+  meetings" at the first step only, because what the person starts — a connected calendar —
+  creates meetings), `checkBotName`, and the two body checks the proxy's new `PUT /user/calendar`
+  (exactly `{bot_name}`, never the feed fields) and `PUT /user/first-run` routes use.
+- **`quotaNotice.ts`** — the plain-words notice for a refused send (`quotaNoticeFrom`: reset date,
+  upgrade or billing link, the fixed sentence for a known reason) and `isAllowanceSpent`, the hint
+  for what to show up front. Shared by the Add Bot dialog and the first-run welcome.

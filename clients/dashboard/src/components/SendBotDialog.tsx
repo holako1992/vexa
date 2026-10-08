@@ -17,7 +17,6 @@ import {
   AlertTriangle,
   Bot,
   Calendar,
-  Check,
   ChevronDown,
   ChevronUp,
   Link2,
@@ -27,17 +26,9 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { getJson, mutateJson, presentError, ApiError } from "@/lib/api";
-import { parseMeetingInput, type ParsedMeeting } from "@/lib/meetingId";
-import {
-  formatRemainingAllowance,
-  formatResetDate,
-  isQuotaExceeded,
-  reasonMessage,
-  type Entitlements,
-  type QuotaExceededBody,
-} from "@/lib/entitlements";
-import { CALENDAR_OAUTH_LABEL, type CalendarOAuthProvider, fetchTrustedAuthorizeUrl } from "@/lib/calendarOAuth";
 import { Button, Dialog, Input, Toggle, useToast } from "./ui";
+import { MeetingLinkForm } from "./MeetingLinkForm";
+import { useCalendarOAuthConnect } from "./useCalendarOAuthConnect";
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -61,38 +52,6 @@ interface CalendarConnection {
   enabled: boolean;
 }
 
-/** The message a producer error carries verbatim, when it has one — admin-api's calendar OAuth
- *  routes (Google, Microsoft) answer typed, actionable `detail` strings (missing config, the
- *  provider's own rejection reason, a connection-limit refusal, …) that are more useful than
- *  `presentError`'s generic per-status copy, so this prefers them. Falls back to `presentError`
- *  only for a network failure or a response with no `detail` at all. */
-function oauthErrorMessage(e: unknown): string {
-  if (e instanceof ApiError && e.detail) return e.detail;
-  return presentError(e);
-}
-
-interface BotSendPayload {
-  platform: string;
-  native_meeting_id: string;
-  meeting_url?: string;
-}
-
-// ─── constants ───────────────────────────────────────────────────────────────
-
-const PLATFORM_LABELS: Record<string, string> = {
-  google_meet: "Google Meet",
-  zoom: "Zoom",
-  teams: "Microsoft Teams",
-  jitsi: "Jitsi",
-};
-
-const PLATFORM_COLORS: Record<string, string> = {
-  google_meet: "bg-ok-soft text-ok",
-  zoom: "bg-accent-soft text-accent",
-  teams: "bg-accent-soft text-accent",
-  jitsi: "bg-warn-soft text-warn",
-};
-
 // ─── small shared pieces ─────────────────────────────────────────────────────
 
 /** The link/calendar switcher. Deliberately plain buttons, not the `Tabs` ARIA pattern — these
@@ -110,158 +69,6 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     >
       {children}
     </button>
-  );
-}
-
-// ─── Meeting-link tab ─────────────────────────────────────────────────────────
-
-/** The paywall message for a refused send: what happened, when the allowance resets, and a
- *  link — to the producer's own `upgrade_url` when it sent one, else to the dashboard's own
- *  billing page. */
-interface QuotaResult {
-  ok: false;
-  msg: string;
-  link?: { href: string; label: string };
-}
-
-function quotaResultFrom(body: QuotaExceededBody): QuotaResult {
-  // A stated reason replaces the generic "allowance spent" wording: an unverified account has not
-  // spent anything, and the way out is not a plan link.
-  const why = reasonMessage(body.reason);
-  if (why) return { ok: false, msg: why };
-  const reset = formatResetDate(body.resets_at);
-  const limitPart = body.limit != null ? ` your ${body.limit} meeting${body.limit === 1 ? "" : "s"}` : " your meeting allowance";
-  const msg = `You've used${limitPart} for this billing period.${reset ? ` ${reset}.` : ""}`;
-  return body.upgrade_url
-    ? { ok: false, msg, link: { href: body.upgrade_url, label: "Upgrade" } }
-    : { ok: false, msg, link: { href: "/billing", label: "See billing" } };
-}
-
-function MeetingLinkTab({ onSent }: { onSent: () => void }) {
-  const [url, setUrl] = useState("");
-  const [parsed, setParsed] = useState<ParsedMeeting | null>(null);
-  const [jitsiHosts, setJitsiHosts] = useState<string[]>([]);
-  const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<{ ok: true; msg: string } | { ok: false; msg: string; link?: { href: string; label: string } } | null>(null);
-  const [entitlements, setEntitlements] = useState<Entitlements | null>(null);
-  const toast = useToast();
-
-  useEffect(() => {
-    getJson<{ hosts?: string[] }>("/api/vexa/meeting/jitsi-hosts")
-      .then((d) => setJitsiHosts(Array.isArray(d.hosts) ? d.hosts : []))
-      .catch(() => {});
-    // Informational only — the remaining-allowance line below. The server is the authority on
-    // whether a send is admitted, so a stale or failed read here never disables the button.
-    getJson<Entitlements>("/api/vexa/user/entitlements")
-      .then(setEntitlements)
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    setParsed(parseMeetingInput(url, jitsiHosts));
-  }, [url, jitsiHosts]);
-
-  const send = useCallback(async () => {
-    if (!parsed) return;
-    setSending(true);
-    setResult(null);
-    const payload: BotSendPayload = {
-      platform: parsed.platform,
-      native_meeting_id: parsed.native_meeting_id,
-      meeting_url: url.trim() || undefined,
-    };
-    try {
-      await mutateJson("POST", "/api/vexa/bots", payload);
-      setResult({ ok: true, msg: "Bot is joining the meeting." });
-      toast.push({ tone: "success", title: "Bot is joining the meeting." });
-      setUrl("");
-      onSent();
-    } catch (e) {
-      // Branch on the RESPONSE BODY's `error` field, never on the 402 status alone — a
-      // 402 with a different body is a different failure, and presentError's generic 402 text
-      // would lose the reset date and upgrade link this shape carries.
-      if (e instanceof ApiError && isQuotaExceeded(e.body)) {
-        const quota = quotaResultFrom(e.body as QuotaExceededBody);
-        setResult(quota);
-        toast.push({ tone: "error", title: "Meeting quota reached", description: quota.msg });
-      } else {
-        const msg = presentError(e);
-        setResult({ ok: false, msg });
-        toast.push({ tone: "error", title: "Couldn't send the bot", description: msg });
-      }
-    } finally {
-      setSending(false);
-    }
-  }, [parsed, url, onSent, toast]);
-
-  const remaining = entitlements ? formatRemainingAllowance(entitlements) : null;
-
-  return (
-    <div className="flex flex-col gap-5">
-      <Input
-        id="meeting-url-input"
-        label="Meeting URL"
-        type="url"
-        value={url}
-        onChange={(e) => { setUrl(e.target.value); setResult(null); }}
-        onKeyDown={(e) => { if (e.key === "Enter" && parsed && !sending) void send(); }}
-        placeholder="https://meet.google.com/abc-defg-hij"
-        autoFocus
-      />
-
-      {/* Live parse feedback */}
-      <div className="-mt-3 h-5 text-xs">
-        {parsed ? (
-          <span className={clsx("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium", PLATFORM_COLORS[parsed.platform] ?? "bg-raised text-ink-2")}>
-            <Check size={11} aria-hidden />
-            {PLATFORM_LABELS[parsed.platform] ?? parsed.platform}
-            <span className="opacity-70">· {parsed.native_meeting_id}</span>
-          </span>
-        ) : url ? (
-          <span className="text-ink-3">Paste a Google Meet, Zoom, Teams, or Jitsi link.</span>
-        ) : null}
-      </div>
-
-      {result && (
-        <div
-          role="status"
-          className={clsx(
-            "rounded-lg border px-4 py-2.5 text-sm",
-            result.ok
-              ? "border-ok/30 bg-ok-soft text-ok"
-              : "border-live/30 bg-live-soft text-live",
-          )}
-        >
-          {result.msg}
-          {!result.ok && result.link && (
-            <>
-              {" "}
-              <a href={result.link.href} className="font-medium underline underline-offset-2">
-                {result.link.label}
-              </a>
-            </>
-          )}
-        </div>
-      )}
-
-      <Button
-        variant="primary"
-        onClick={send}
-        disabled={!parsed}
-        loading={sending}
-        icon={<Bot size={15} aria-hidden />}
-        className="h-10"
-      >
-        {sending ? "Sending…" : "Send Bot"}
-      </Button>
-
-      {/* Informational only, never a disable condition — see the effect above. */}
-      {remaining && <p className="text-center text-xs text-ink-3">{remaining}</p>}
-
-      <p className="text-center text-xs text-ink-3">
-        The bot will join the meeting and begin transcribing. It appears in the meeting as "Vexa".
-      </p>
-    </div>
   );
 }
 
@@ -403,10 +210,6 @@ function CalendarTab() {
   const [calendars, setCalendars] = useState<CalendarConnection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // the id being mutated, or "new"
-  // Which OAuth provider's connect/reconnect flow is in flight, if any — kept separate per
-  // provider so clicking "Connect Microsoft 365" never disables "Connect Google Calendar" (and
-  // vice versa), and so a row's own "Reconnect" spinner reflects ONLY its own provider.
-  const [oauthBusy, setOauthBusy] = useState<CalendarOAuthProvider | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
@@ -471,28 +274,17 @@ function CalendarTab() {
     }
   }, [load, toast]);
 
-  /** `GET /user/calendars/<provider>/authorize` → validate the host → full-page redirect. Shared
-   *  by the primary "Connect Google Calendar" / "Connect Microsoft 365" buttons AND every row's
-   *  "Reconnect" action — a reconnect is exactly the same consent flow, run again; the core
-   *  matches the returning account by email and clears `reconnect_needed` on that same connection
-   *  (`main.py`'s `google_calendar_exchange` / `microsoft_calendar_exchange`), so this client
-   *  never needs to say WHICH connection it's reconnecting. */
-  const connectOAuth = useCallback(async (provider: CalendarOAuthProvider) => {
-    setOauthBusy(provider);
+  /** The Connect buttons and every row's "Reconnect" run the same consent flow — a reconnect is
+   *  exactly a connect, run again; the core matches the returning account by email and clears
+   *  `reconnect_needed` on that same connection (`main.py`'s `google_calendar_exchange` /
+   *  `microsoft_calendar_exchange`), so this client never needs to say WHICH connection it's
+   *  reconnecting. `oauthBusy` is per provider, so a row's "Reconnect" spinner reflects ONLY its
+   *  own provider. */
+  const { busy: oauthBusy, connect } = useCalendarOAuthConnect(setError);
+  const connectOAuth = useCallback((provider: "google" | "microsoft") => {
     setError(null);
-    const label = CALENDAR_OAUTH_LABEL[provider];
-    try {
-      const authorize_url = await fetchTrustedAuthorizeUrl(provider);
-      window.location.assign(authorize_url);
-      // The page is navigating away — leave `oauthBusy` set so the button stays disabled for
-      // the (brief) remainder of this page's life rather than flashing re-enabled.
-    } catch (e) {
-      const msg = oauthErrorMessage(e);
-      setError(msg);
-      toast.push({ tone: "error", title: `Couldn't connect ${label}`, description: msg });
-      setOauthBusy(null);
-    }
-  }, [toast]);
+    return connect(provider);
+  }, [connect]);
 
   const handleAdd = useCallback(async () => {
     if (!newName.trim() || !newUrl.trim()) return;
@@ -712,7 +504,7 @@ export function SendBotDialog({ onClose, onBotSent, initialTab = "link" }: SendB
 
       {/* Body */}
       <div className="max-h-[60vh] overflow-y-auto p-6">
-        {tab === "link" && <MeetingLinkTab onSent={onBotSent} />}
+        {tab === "link" && <MeetingLinkForm onSent={() => onBotSent()} />}
         {tab === "calendar" && <CalendarTab />}
       </div>
     </Dialog>

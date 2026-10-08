@@ -10,6 +10,7 @@
  */
 import { isAnnotateBody, isTagFilterValue } from "./annotations";
 import { isChatResetBody, isChatTurnBody } from "./chat";
+import { isBotNameBody, isFirstRunBody } from "./firstRun";
 
 /** A per-parameter shape check: `true` admits the raw string value, `false` drops it. Never a
  *  transform — filterQuery forwards the caller's own bytes for whatever it admits, it does not
@@ -257,6 +258,16 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 2 && segments[0] === "user" && segments[1] === "calendars") {
     return { path: "/user/calendars" };
   }
+  // GET /user/calendar — the person's default bot name (`bot_name`, `users.data.calendar_bot_name`,
+  // the one store meetings resolves when a bot is dispatched without a name). The same answer also
+  // carries the single-feed fields, masked by the producer; only `bot_name` is read here.
+  if (segments.length === 2 && segments[0] === "user" && segments[1] === "calendar") {
+    return { path: "/user/calendar" };
+  }
+  // GET /user/first-run — where a new account stands in the first-run welcome (`{state, step}`).
+  if (segments.length === 2 && segments[0] === "user" && segments[1] === "first-run") {
+    return { path: "/user/first-run" };
+  }
   // GET /meeting/jitsi-hosts — deployment's declared Jitsi hostnames (for the URL parser)
   if (segments.length === 2 && segments[0] === "meeting" && segments[1] === "jitsi-hosts") {
     return { path: "/meeting/jitsi-hosts" };
@@ -391,7 +402,7 @@ function isAutoJoinBody(parsed: unknown): boolean {
   return typeof (parsed as Record<string, unknown>).auto_join === "boolean";
 }
 
-/** Resolve a write (POST / PATCH / DELETE) request against the closed write-path allowlist.
+/** Resolve a write (POST / PUT / PATCH / DELETE) request against the closed write-path allowlist.
  *  Only the write surfaces the dashboard exposes are admitted; everything else is null. */
 export function resolveWriteUpstream(method: string, segments: readonly string[]): UpstreamRoute | null {
   if (method === "POST") {
@@ -480,6 +491,18 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     // period) and "Resume subscription". No body; 409 without a live subscription.
     if (segments.length === 2 && segments[0] === "billing" && (segments[1] === "cancel" || segments[1] === "resume")) {
       return { path: `/billing/${segments[1]}`, body: isEmptyBody };
+    }
+  }
+  if (method === "PUT") {
+    // PUT /user/calendar {bot_name} — the person's default bot name. The producer's route also
+    // takes `ics_url` and `auto_join`; `isBotNameBody` admits only the one key, so this entry is
+    // never a way to rewrite or disconnect a calendar feed.
+    if (segments.length === 2 && segments[0] === "user" && segments[1] === "calendar") {
+      return { path: "/user/calendar", body: isBotNameBody };
+    }
+    // PUT /user/first-run {step?, state?} — move the welcome on, or end it (done | skipped).
+    if (segments.length === 2 && segments[0] === "user" && segments[1] === "first-run") {
+      return { path: "/user/first-run", body: isFirstRunBody };
     }
   }
   if (method === "PATCH") {

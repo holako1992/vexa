@@ -11,8 +11,9 @@ as the `mcp.tools.v1` manifests and for the same reason: the domain that owns th
 route is the only one that can say what the route is and what it costs.
 
     core/meetings/routes.v1.json                   37 rows
-    core/identity/routes.v1.json                   24   (adds /user/calendars/google/{authorize,exchange};
-                                                         /user/calendars/microsoft/{authorize,exchange})
+    core/identity/routes.v1.json                   26   (adds /user/calendars/google/{authorize,exchange};
+                                                         /user/calendars/microsoft/{authorize,exchange};
+                                                         /user/first-run)
     core/meetings/services/mcp/routes.v1.json      12
     core/agent/routes.v1.json                       7   ← absent in the no-agents profile
     core/gateway/services/gateway/routes.v1.json    2   the edge's OWN /health and /auth/me

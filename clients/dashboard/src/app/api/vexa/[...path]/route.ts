@@ -141,6 +141,10 @@ export function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }
   return forwardWrite(req, ctx, "POST");
 }
 
+export function PUT(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  return forwardWrite(req, ctx, "PUT");
+}
+
 export function PATCH(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   return forwardWrite(req, ctx, "PATCH");
 }

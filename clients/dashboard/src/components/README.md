@@ -140,6 +140,25 @@ Client components. They receive identity as props (resolved on the server) and f
   /meetings/<platform>/<native>/participants`, shown as chips in the header. Renders nothing when
   the meeting has no native id or the roster is empty — there is no "0 participants" state to get
   wrong.
+- `FirstRunWizard` + `useFirstRun` — the first-run welcome (DB-20): three steps for a new account
+  with no meetings — name the bot (`PUT /user/calendar {bot_name}`, the account's default bot
+  name, the one store a dispatched or calendar-armed bot takes its name from), connect Google
+  Calendar / Microsoft 365, then paste a meeting link. Where the person is lives at the producer
+  (`GET/PUT /user/first-run`, written on every move), so a refresh or another browser resumes the
+  same step. **Skip setup** is on every step and ends the welcome for good; sending the first bot
+  ends it too; closing the dialog (Escape, X, backdrop) only hides it for this visit and leaves a
+  "Finish setup" button on the empty list. `useFirstRun` asks the producer first and only an
+  account still at step one is also asked for its meetings (`lib/firstRun.ts`'s
+  `wizardShouldShow`); any unreadable answer shows no welcome. `MeetingsView` mounts it and hands it
+  the calendar OAuth return (`?calendar=connected&provider=…`) so the round trip lands back inside
+  the welcome instead of the Add Bot dialog.
+- `MeetingLinkForm` — the paste-a-link-and-send form, shared by `SendBotDialog`'s "Meeting link" tab
+  and the welcome's last step: live platform parse, the remaining-allowance line (above or below
+  the field), and a refused send in plain words (`lib/quotaNotice.ts`) with an optional
+  `whenBlocked` slot for somewhere else to go. It says the account's default bot name in its
+  footnote.
+- `useCalendarOAuthConnect` — start a calendar OAuth connect (authorize URL, trusted-host check,
+  full-page redirect), shared by `SendBotDialog`'s Calendar tab and the welcome's calendar step.
 - `SendBotDialog` — the dispatch door: paste a meeting link and send a bot, or manage the calendar
   connections that arm an unattended join. It parses the link in the browser only to decide what
   to send and what to disable; the platform and id it derives are re-checked at the proxy's write

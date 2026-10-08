@@ -101,6 +101,8 @@ CASES = [
     ("GET", "/user/transcription", "/user/transcription"),
     ("PUT", "/user/transcription", "/user/transcription"),
     ("GET", "/user/entitlements", "/user/entitlements"),
+    ("GET", "/user/first-run", "/user/first-run"),
+    ("PUT", "/user/first-run", "/user/first-run"),
     ("POST", "/billing/checkout", "/billing/checkout"),
     ("POST", "/billing/portal", "/billing/portal"),
     ("POST", "/billing/change", "/billing/change"),

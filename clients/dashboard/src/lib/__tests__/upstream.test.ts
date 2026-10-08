@@ -63,7 +63,7 @@ describe("resolveUpstream — read extras", () => {
   it("refuses near-misses on the read extras", () => {
     for (const path of [
       ["user", "calendars", "1"],
-      ["user", "calendar"],
+      ["user", "calendar", "1"],
       ["users", "calendars"],
       ["meeting", "jitsi-host"],
       ["meeting", "jitsi-hosts", "extra"],

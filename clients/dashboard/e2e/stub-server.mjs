@@ -122,6 +122,18 @@ function releaseChatHold() {
   chat.hold = null;
 }
 
+/** The first-run welcome's record and the person's default bot name, as admin-api keeps them
+ *  (`first_run.py`; `users.data.calendar_bot_name`). One world for every signed-in user, like the
+ *  meetings: a spec sets the account it wants with `/__control/firstRun`. The default is a NEW
+ *  account (`active`, first step) — it only shows the welcome when the list is also empty, which
+ *  the fixture world never is. */
+let firstRun = { state: "active", step: "name" };
+let defaultBotName = "Vexa";
+/** While true, `POST /bots` also creates the requested meeting row (status `requested`), as the
+ *  real spawn path does, so the new meeting can be opened. Off by default: most specs count rows. */
+let dispatchCreatesMeeting = false;
+const FIRST_RUN_STEPS = ["name", "calendar", "meeting"];
+
 let users = new Map(); // email -> { id, email, name }
 let nextUserId = 1;
 const tokens = new Map(); // token string -> { id, userId }
@@ -156,6 +168,9 @@ function resetAll() {
   resetLive();
   releaseChatHold();
   chat = freshChatState();
+  firstRun = { state: "active", step: "name" };
+  defaultBotName = "Vexa";
+  dispatchCreatesMeeting = false;
   users = new Map();
   nextUserId = 1;
   tokens.clear();
@@ -420,6 +435,16 @@ async function handleGateway(req, res) {
     releaseSearchHold();
     return sendJson(res, 200, { ok: true });
   }
+  // The first-run world: `{state, step}` sets the account's welcome record, `noMeetings` empties
+  // the list (a brand-new account), `dispatchCreatesMeeting` makes `POST /bots` create its row.
+  if (url.pathname === "/__control/firstRun" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    if (typeof body.state === "string") firstRun.state = body.state;
+    if (typeof body.step === "string") firstRun.step = body.step;
+    if (body.noMeetings) meetings = [];
+    if (typeof body.dispatchCreatesMeeting === "boolean") dispatchCreatesMeeting = body.dispatchCreatesMeeting;
+    return sendJson(res, 200, { ok: true, firstRun, meetings: meetings.length });
+  }
   if (url.pathname === "/__control/entitlements" && req.method === "POST") {
     entitlements = await readJsonBody(req);
     return sendJson(res, 200, { ok: true, entitlements });
@@ -673,6 +698,50 @@ async function handleGateway(req, res) {
     return sendJson(res, 200, { status: "deleted", id: row.id, platform: row.platform, native_meeting_id: row.native_meeting_id, deleted: "completed_meeting_artifacts" });
   }
 
+  // GET /user/first-run, PUT /user/first-run {step?, state?} — `first_run.py`'s rules: a closed
+  // vocabulary refused WITH the list (422), an ended welcome stays ended and answers the record as
+  // it stands, an account that is not new has none to write (422).
+  if (parts.length === 2 && parts[0] === "user" && parts[1] === "first-run") {
+    if (req.method === "GET") return sendJson(res, 200, firstRun);
+    if (req.method === "PUT") {
+      const body = await readAndLogBody(req, logEntry);
+      const fields = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body) : [];
+      const bad = fields.find((k) => k !== "step" && k !== "state");
+      if (!fields.length || bad) {
+        return sendJson(res, 422, { detail: { refused: bad ? `there is no field called '${bad}'` : "give a step or a state", the_fields_that_exist: { step: FIRST_RUN_STEPS, state: ["done", "skipped"] } } });
+      }
+      if ("step" in body && !FIRST_RUN_STEPS.includes(body.step)) {
+        return sendJson(res, 422, { detail: { refused: `'${body.step}' is not a step`, steps: FIRST_RUN_STEPS } });
+      }
+      if ("state" in body && !["done", "skipped"].includes(body.state)) {
+        return sendJson(res, 422, { detail: { refused: `'${body.state}' is not a way to end the welcome`, states: ["done", "skipped"] } });
+      }
+      if (firstRun.state === "done" || firstRun.state === "skipped") return sendJson(res, 200, firstRun);
+      if (firstRun.state === "none") return sendJson(res, 422, { detail: { refused: "this account has no first-run welcome" } });
+      if ("step" in body) firstRun.step = body.step;
+      if ("state" in body) firstRun.state = body.state;
+      return sendJson(res, 200, firstRun);
+    }
+  }
+
+  // GET /user/calendar, PUT /user/calendar — the legacy single-feed read-back, whose `bot_name` is
+  // the person's default bot name (`users.data.calendar_bot_name`). The PUT validates as
+  // `set_user_calendar` does: trimmed, required, at most 100 characters.
+  if (parts.length === 2 && parts[0] === "user" && parts[1] === "calendar") {
+    const readBack = () => ({ ics_url_set: false, ics_url_masked: null, auto_join: true, bot_name: defaultBotName });
+    if (req.method === "GET") return sendJson(res, 200, readBack());
+    if (req.method === "PUT") {
+      const body = await readAndLogBody(req, logEntry);
+      if ("bot_name" in body) {
+        const name = String(body.bot_name ?? "").trim();
+        if (!name) return sendJson(res, 422, { detail: "bot_name is required" });
+        if (name.length > 100) return sendJson(res, 422, { detail: "bot_name too long" });
+        defaultBotName = name;
+      }
+      return sendJson(res, 200, readBack());
+    }
+  }
+
   // GET /user/calendars
   if (req.method === "GET" && parts.length === 2 && parts[0] === "user" && parts[1] === "calendars") {
     return sendJson(res, 200, { calendars });
@@ -829,7 +898,17 @@ async function handleGateway(req, res) {
     }
     const body = await readAndLogBody(req, logEntry);
     bots.push(body);
-    return sendJson(res, 200, { id: 900 + bots.length, status: "requested", ...body });
+    // An explicit name wins, else the person's default — the order meeting-api's spawn path uses.
+    const sent = { id: 900 + bots.length, status: "requested", ...body, bot_name: body.bot_name || defaultBotName };
+    if (dispatchCreatesMeeting) {
+      meetings.unshift({
+        id: sent.id, platform: body.platform, native_meeting_id: body.native_meeting_id, status: "requested",
+        shared: false, start_time: null, end_time: null,
+        constructed_meeting_url: body.meeting_url ?? null,
+        data: { bot_name: sent.bot_name, attendees: [] },
+      });
+    }
+    return sendJson(res, 200, sent);
   }
 
   // POST /billing/checkout {plan, interval} — the Upgrade button. Mirrors

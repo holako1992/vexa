@@ -89,6 +89,22 @@
       ]
     },
     {
+      "method": "GET",
+      "path": "/user/first-run",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/user/first-run",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/billing/checkout",
       "scopes": [
