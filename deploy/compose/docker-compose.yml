@@ -113,6 +113,13 @@ services:
       # the person either way. The key authenticates the same edge; flows' POST /events is not open.
       - VEXA_FLOWS_API_URL=${VEXA_FLOWS_API_URL:-}
       - VEXA_FLOWS_API_KEY=${VEXA_FLOWS_API_KEY:-}
+      # ── account deletion (DELETE /admin/users/{id}) ────────────────────────────────────────
+      # Identity orchestrates the erasure; meeting-api and agent-api each erase what they hold
+      # (POST /internal/accounts/{id}/erase, X-Internal-Secret). A CALL, not a publish: with a URL
+      # unset that stage reports pending and the account stays locked. Flows is erased through
+      # VEXA_FLOWS_API_URL above, when that domain is carried.
+      - VEXA_MEETING_API_URL=${VEXA_MEETING_API_URL:-http://meeting-api:8080}
+      - VEXA_AGENT_API_URL=${VEXA_AGENT_API_URL:-http://agent-api:8100}
       # DB-72's quota_exceeded refusal body names this page; unset means no such page is named
       # (never a hardcoded vexa.ai URL leaking into a self-hosted response).
       - BILLING_UPGRADE_URL=${BILLING_UPGRADE_URL:-}

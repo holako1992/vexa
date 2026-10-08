@@ -136,6 +136,20 @@
    "targets": ["compose"]
   },
   {
+   "key": "VEXA_MEETING_API_URL",
+   "class": "defaulted",
+   "default": "(unset — account deletion then reports the meetings stage as pending)",
+   "description": "meeting-api's base URL, called ONLY by DELETE /admin/users/{id} (POST /internal/accounts/{id}/erase, X-Internal-Secret) to erase a deleted account's meetings, transcripts and recordings. A CALL, not a publish: the deletion answers 502 'partial' while this stage cannot finish, and the account stays locked until a repeat call completes it (app/account_deletion.py).",
+   "targets": ["compose"]
+  },
+  {
+   "key": "VEXA_AGENT_API_URL",
+   "class": "defaulted",
+   "default": "(unset — account deletion then reports the agent stage as pending)",
+   "description": "agent-api's base URL, called ONLY by DELETE /admin/users/{id} (POST /internal/accounts/{subject}/erase, X-Internal-Secret; subject = str(users.id)) to erase a deleted account's workspace and agent data. Same call-not-publish contract as VEXA_MEETING_API_URL (app/account_deletion.py).",
+   "targets": ["compose"]
+  },
+  {
    "key": "HOST",
    "class": "defaulted",
    "default": "0.0.0.0",

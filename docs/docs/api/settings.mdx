@@ -301,6 +301,39 @@ curl -X PATCH "$ADMIN/admin/users/1" \
 
 Creating accounts and minting keys are covered in [Authentication](/authentication).
 
+## Deleting an account
+
+Deleting an account is **immediate and irreversible**. There is no grace period and no undo.
+
+```bash DELETE /admin/users/{user_id}
+curl -X DELETE "$ADMIN/admin/users/1" -H "X-Admin-API-Key: $ADMIN_TOKEN"
+```
+
+What is erased: the account and every API key; all meetings, transcripts and sessions; the
+recordings stored for the account; connected calendars (Google refresh tokens are revoked at
+Google; a Microsoft grant can only be forgotten on our side, so remove Vexa's access in your
+Microsoft account too); the agent workspace and everything the agent stored; the flows data held
+for the account; and the Stripe customer. A live subscription is **cancelled immediately, with no
+proration credit and no refund** — then the customer is deleted. Stripe keeps its own invoice
+and payment records under its retention. Backups of the database and of object storage are not
+rewritten; they expire under your deployment's retention.
+
+The account is locked the moment the call starts: its keys stop working, and signing in again
+does not bring it back (`POST /admin/users` and `GET /admin/users/email/{email}` answer **409**
+`account_deleting`).
+
+| Status | Meaning |
+|---|---|
+| `200` | `{"status": "deleted", "user_id": 1, "erased": {"identity": {...}, "meetings": {...}, "agent": {...}, "flows": {...}}}` |
+| `404` | No such account — including one that has already been fully deleted, so repeating the call is harmless. |
+| `409` | `{"error": "last_admin"}` — the instance's only admin cannot be deleted; make another account an admin first. |
+| `502` | `{"error": "partial", "pending": ["meetings"], "detail": "..."}` — a stage did not finish. The account stays locked; call again and it resumes, skipping what is finished. |
+
+Meetings and agent data are erased by calls to meeting-api and agent-api; a deployment must set
+`VEXA_MEETING_API_URL` and `VEXA_AGENT_API_URL` on admin-api (the compose stack does). With a URL
+unset that stage stays `pending`. The flows domain is erased through `VEXA_FLOWS_API_URL` when it
+is carried.
+
 ## What is not configurable through the API
 
 These have no settings endpoint today. They are listed so you can stop looking for one.
@@ -312,7 +345,7 @@ These have no settings endpoint today. They are listed so you can stop looking f
 | A default language, task, or bot name for all bots | Set per request on `POST /bots`; calendar connections carry their own `bot_name` ([Calendar API](/api/calendar)). |
 | Notification or email preferences | No such setting is stored. |
 | Reading your own plan, quota usage, or billing state | `GET /auth/me` returns `max_concurrent` only. |
-| Retention or data-deletion policy | Delete individual meetings via the [Meetings API](/api/meetings). |
+| Retention or data-deletion policy | Delete individual meetings via the [Meetings API](/api/meetings), or the whole account with [`DELETE /admin/users/{user_id}`](#deleting-an-account). |
 
 ## Error summary
 
@@ -321,7 +354,7 @@ These have no settings endpoint today. They are listed so you can stop looking f
 | `200` | all reads and writes on this page | Request completed. |
 | `401` | all | API key missing, unknown, or revoked. |
 | `403` | all | The key does not carry a scope this route accepts. |
-| `404` | admin patch | No account with that id. |
+| `404` | admin patch, admin delete | No account with that id. |
 | `422` | model, transcription, webhook writes, admin patch | Invalid `mode`, a non-`http(s)` URL, a string over 2,048 characters, an out-of-range `limit`, or an unrecognized field. |
 | `503` | all | Identity resolution is unavailable — the key was not rejected, it could not be checked. |
 

@@ -48,6 +48,9 @@ EVENT_SUBSCRIPTION_CHANGED = "subscription.changed"
 #: makes that true even across a Stripe retry that mints a brand-new event id for the same unpaid
 #: invoice — see its own docstring.
 EVENT_PAYMENT_FAILED = "payment.failed"
+#: handed to flows once an account's deletion has completed, same publish edge and the same
+#: best-effort contract. It names the person by id only — no address, no name.
+EVENT_ACCOUNT_DELETED = "account.deleted"
 
 log = logging.getLogger("admin_api.events")
 
@@ -211,3 +214,13 @@ def payment_failed_refs(subject, invoice_id) -> dict:
     own idempotency key; no price or due amount is carried here (AGENTS.md: never invent a price
     outside `billing/catalog.py` — this fact is not that source, so it does not repeat one)."""
     return {"subject": str(subject), "invoice_id": str(invoice_id or "")}
+
+
+def account_deleted_source_id(user_id) -> str:
+    """The fact's id, keyed to the PERSON: an account is deleted once, so a re-delivery is a no-op."""
+    return f"account-deleted-{user_id}"
+
+
+def account_deleted_refs(subject) -> dict:
+    """`{subject}` — the id the person was known by, nothing else."""
+    return {"subject": str(subject)}

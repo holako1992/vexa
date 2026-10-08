@@ -130,6 +130,13 @@ called off by the cancellation. `/billing/resume` calls the cancellation off bef
 ends (`{"ends_at": null}`), and the subscription renews as before. A cancelling subscription
 can't be switched until it is resumed. Both answer **409** without a live subscription.
 
+## Deleting the account
+
+Deleting an account ([`DELETE /admin/users/{user_id}`](/api/settings#deleting-an-account)) ends a
+live subscription **immediately** and deletes the Stripe customer. Unlike `/billing/cancel` it does
+not wait for the period end, and it gives **no proration credit and no refund**. A Stripe failure
+leaves the deletion `pending: ["billing"]` and the account locked until the call is repeated.
+
 ## Payment method and invoices
 
 ```bash

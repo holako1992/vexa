@@ -40,6 +40,7 @@ from .. import identity_provenance as identity_mod
 from ..schema.models import APIToken, PlatformSetting, User
 from ..token_scope import VALID_SCOPES, generate_prefixed_token
 from .db import get_db
+from . import account_deletion as account_deletion_mod
 from . import events as events_mod
 from . import first_run as first_run_mod
 from . import person_settings as person_settings_mod
@@ -229,7 +230,7 @@ async def get_current_user(api_key: str = Security(USER_KEY_HEADER),
     if not token_scopes & VALID_SCOPES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Token scope not authorized for this endpoint")
     user = (await db.execute(select(User).where(User.id == row.user_id))).scalars().first()
-    if not user:
+    if not user or account_deletion_mod.is_deleting(user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Invalid API Key")
     return user
 
@@ -700,6 +701,14 @@ def _subscription_view(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _account_deleting_response() -> JSONResponse:
+    """Sign-in and token minting refuse an account whose deletion has begun: it must not be
+    resurrected mid-erasure. The caller may repeat DELETE /admin/users/{id} to finish it."""
+    return JSONResponse(status_code=status.HTTP_409_CONFLICT,
+                        content={"error": "account_deleting",
+                                 "detail": "This account is being deleted."})
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Vexa Admin API (v0.12)")
 
@@ -743,6 +752,8 @@ def create_app() -> FastAPI:
             .order_by(User.id)
         )).scalars().first()
         if existing:
+            if account_deletion_mod.is_deleting(existing):
+                return _account_deleting_response()
             response.status_code = status.HTTP_200_OK
             return UserResponse.model_validate(existing)
 
@@ -811,6 +822,8 @@ def create_app() -> FastAPI:
             )).scalars().first()
             if winner is None:
                 raise
+            if account_deletion_mod.is_deleting(winner):
+                return _account_deleting_response()
             response.status_code = status.HTTP_200_OK
             return UserResponse.model_validate(winner)
         await db.refresh(u)
@@ -859,6 +872,8 @@ def create_app() -> FastAPI:
         )).scalars().first()
         if not user:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+        if account_deletion_mod.is_deleting(user):
+            return _account_deleting_response()
         return UserResponse.model_validate(user)
 
     @app.get("/admin/users/{user_id}", response_model=UserResponse,
@@ -932,6 +947,8 @@ def create_app() -> FastAPI:
         user = await db.get(User, user_id)
         if not user:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+        if account_deletion_mod.is_deleting(user):
+            return _account_deleting_response()
         # Body scopes win when present — a JSON mint must not silently fall through to ["bot"] (#922).
         if body.scopes is not None:
             scope_list = [s.strip() for s in body.scopes if s and s.strip()]
@@ -982,6 +999,16 @@ def create_app() -> FastAPI:
         await db.delete(tok)
         await db.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # --- DELETE /admin/users/{id} — immediate, irreversible account deletion (account_deletion.py).
+    #     Admin tier only; the dashboard's server calls it after resolving the user from the
+    #     session. Not gateway-fronted. 200 deleted · 404 unknown or already deleted · 409 the
+    #     account cannot be deleted now · 502 a downstream erasure failed (locked; call again).
+    @app.delete("/admin/users/{user_id}", dependencies=[Depends(verify_admin_token)])
+    async def delete_user_account(user_id: int, db: AsyncSession = Depends(get_db)):
+        code, body = await account_deletion_mod.delete_account(
+            user_id, db, stripe_factory=lambda: _stripe_client())
+        return JSONResponse(status_code=code, content=body)
 
     # --- user tier: webhook self-serve (writes to user.data JSONB) ---
     @app.put("/user/webhook", response_model=UserResponse)
@@ -1786,6 +1813,10 @@ def create_app() -> FastAPI:
             )
             return {"received": True, "handled": False, "reason": "no matching user"}
 
+        if account_deletion_mod.is_deleting(target_user):
+            # No write, no fact: the account is being erased.
+            return {"received": True, "handled": False, "reason": "account is being deleted"}
+
         data_blob = target_user.data if isinstance(target_user.data, dict) else {}
         stored_id = data_blob.get("stripe_subscription_id")
         if (
@@ -1854,6 +1885,9 @@ def create_app() -> FastAPI:
         if not row:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
         api_token, user = row
+
+        if account_deletion_mod.is_deleting(user):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
         if api_token.expires_at is not None and api_token.expires_at < datetime.utcnow():
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Token expired")
@@ -2080,6 +2114,8 @@ def create_app() -> FastAPI:
         configs = []
         for u in rows:
             data = u.data if isinstance(u.data, dict) else {}
+            if account_deletion_mod.is_deleting(u):
+                continue
             configs.extend(internal_connections(data, u.id))
         return {"configs": configs}
 
@@ -2105,7 +2141,7 @@ def create_app() -> FastAPI:
         user = (await db.execute(
             select(User).where(User.id == body.user_id).with_for_update()
         )).scalar_one_or_none()
-        if user is None:
+        if user is None or account_deletion_mod.is_deleting(user):
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="user not found")
         data = dict(user.data or {})
         connections = connections_from_data(data, user.id, include_deleted=True)
@@ -2168,7 +2204,7 @@ def create_app() -> FastAPI:
         user = (await db.execute(
             select(User).where(User.id == body.user_id).with_for_update()
         )).scalar_one_or_none()
-        if user is None:
+        if user is None or account_deletion_mod.is_deleting(user):
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="user not found")
         data = dict(user.data or {})
         connections = connections_from_data(data, user.id, include_deleted=True)

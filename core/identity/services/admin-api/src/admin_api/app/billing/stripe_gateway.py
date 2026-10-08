@@ -193,6 +193,12 @@ class StripeClient:
         _raise_for_stripe_error(r)
         return r.json()
 
+    async def _delete(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        async with self._client() as client:
+            r = await client.request("DELETE", path, data=_flatten_form(params or {}))
+        _raise_for_stripe_error(r)
+        return r.json()
+
     async def customer_exists(self, customer_id: str) -> bool:
         """`GET /v1/customers/{id}` — False when Stripe has deleted the customer (it answers the
         object with `deleted: true`) or has no such customer at all."""
@@ -260,6 +266,18 @@ class StripeClient:
     async def update_subscription(self, subscription_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """`POST /v1/subscriptions/{id}` — an in-place change, e.g. a new price on its one item."""
         return await self._post(f"/subscriptions/{subscription_id}", params)
+
+    async def cancel_subscription(self, subscription_id: str) -> Dict[str, Any]:
+        """`DELETE /v1/subscriptions/{id}` — ends the subscription NOW, with no proration credit and
+        no final invoice: the person is leaving, so nothing further is billed and nothing is
+        refunded."""
+        return await self._delete(f"/subscriptions/{subscription_id}",
+                                  {"prorate": False, "invoice_now": False})
+
+    async def delete_customer(self, customer_id: str) -> Dict[str, Any]:
+        """`DELETE /v1/customers/{id}` — removes the customer and, with it, its stored payment
+        methods. Stripe keeps its own financial records (invoices, charges) under its retention."""
+        return await self._delete(f"/customers/{customer_id}")
 
     async def create_schedule_from_subscription(self, subscription_id: str) -> Dict[str, Any]:
         """`POST /v1/subscription_schedules {from_subscription}` — a schedule whose one phase

@@ -157,6 +157,21 @@ async def refresh_access_token(*, refresh_token: str, client_id: str, client_sec
     return _token_response_or_raise(resp)
 
 
+REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
+
+
+async def revoke_token(*, token: str, timeout_s: float = 10.0) -> bool:
+    """Ask Google to revoke a refresh token (and the grant behind it). True when Google
+    accepted; raises :class:`GoogleOAuthError` otherwise."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
+        resp = await client.post(REVOKE_ENDPOINT, data={"token": token})
+    if resp.status_code == 200:
+        return True
+    raise GoogleOAuthError(f"revoke refused (HTTP {resp.status_code})")
+
+
 def _token_response_or_raise(resp) -> dict:
     if resp.status_code == 200:
         return resp.json()
