@@ -134,3 +134,25 @@ def test_plan_override_lifts_the_gate_and_verification_lifts_it_too(client):
     client.patch(f"/admin/users/{u['id']}", headers=_admin(),
                  json={"identity_provider": "google", "email_verified": True})
     assert _bot_context(client, u["id"])["quota"]["meetings_per_month"] == 1
+
+
+# ── display name: filled from the sign-in profile when the account has none ───────────────────
+
+def test_patch_sets_a_trimmed_name(client):
+    uid = _create(client, "named@vexa.ai")["id"]
+    r = client.patch(f"/admin/users/{uid}", headers=_admin(), json={"name": "  Ada Lovelace "})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Ada Lovelace"
+    assert client.get(f"/admin/users/{uid}", headers=_admin()).json()["name"] == "Ada Lovelace"
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 101])
+def test_a_blank_or_overlong_name_is_422(client, name):
+    uid = _create(client, "bad-name@vexa.ai")["id"]
+    assert client.patch(f"/admin/users/{uid}", headers=_admin(), json={"name": name}).status_code == 422
+
+
+def test_create_stores_the_name_it_is_given(client):
+    r = client.post("/admin/users", headers=_admin(), json={"email": "created-named@vexa.ai", "name": "Grace Hopper"})
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["name"] == "Grace Hopper"

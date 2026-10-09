@@ -88,12 +88,34 @@ function provenanceBody(p: IdentityProvenance): { identity_provider: string; ema
   return { identity_provider: p.provider, email_verified: p.emailVerified };
 }
 
-function createUser(email: string, clientIp?: string | null, provenance?: IdentityProvenance): Promise<AdminResult<AdminUser>> {
+function createUser(
+  email: string,
+  clientIp?: string | null,
+  provenance?: IdentityProvenance,
+  name?: string | null,
+): Promise<AdminResult<AdminUser>> {
   return adminRequest<AdminUser>(`/admin/users`, {
     method: "POST",
-    body: JSON.stringify({ email, ...(provenance ? provenanceBody(provenance) : {}) }),
+    body: JSON.stringify({ email, ...(name ? { name } : {}), ...(provenance ? provenanceBody(provenance) : {}) }),
     headers: forwardedForHeader(clientIp),
   });
+}
+
+function recordName(userId: string | number, name: string): Promise<AdminResult<AdminUser>> {
+  return adminRequest<AdminUser>(`/admin/users/${encodeURIComponent(String(userId))}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** admin-api stores at most this many characters of a display name (`users.name`). */
+const NAME_MAX = 100;
+
+/** The provider profile's name as admin-api will take it: trimmed, capped, or null when blank. */
+export function displayNameFrom(name: unknown): string | null {
+  if (typeof name !== "string") return null;
+  const trimmed = name.trim().slice(0, NAME_MAX).trim();
+  return trimmed || null;
 }
 
 function recordProvenance(userId: string | number, provenance: IdentityProvenance): Promise<AdminResult<AdminUser>> {
@@ -238,6 +260,9 @@ export type SignInResult =
  *
  *  `clientIp` is the end user's address as `clientAddress()` resolved it (null when unknown); it
  *  rides to admin-api on the create call so the sign-up log records the person, not this server.
+ *  `name` is the sign-in provider's display name: a new account is created with it, and an existing
+ *  account with no name gets it (best-effort, like provenance) — a name already stored is never
+ *  replaced.
  *  `provenance` is how this sign-in proved the address. A new account records it as-is. An
  *  existing account is only ever UPGRADED: a verified claim is sent (best-effort, a failure never
  *  fails the sign-in), an unverified one is not — signing in through the debug email door must not
@@ -249,7 +274,9 @@ export async function findOrCreateUserToken(
   email: string,
   clientIp?: string | null,
   provenance?: IdentityProvenance,
+  name?: string | null,
 ): Promise<SignInResult> {
+  const displayName = displayNameFrom(name);
   const fail = (status: number, error: string, body?: string): SignInResult => ({
     ok: false,
     status,
@@ -268,8 +295,16 @@ export async function findOrCreateUserToken(
         console.warn(`[dashboard-auth] identity provenance not recorded for user ${user.id} (sign-in continues): ${recorded.error}`);
       }
     }
+    if (!user.name && displayName) {
+      const named = await recordName(user.id, displayName);
+      if (named.ok && named.data) {
+        user = { ...user, name: named.data.name };
+      } else {
+        console.warn(`[dashboard-auth] display name not recorded for user ${user.id} (sign-in continues): ${named.error}`);
+      }
+    }
   } else if (found.notFound) {
-    const created = await createUser(email, clientIp, provenance);
+    const created = await createUser(email, clientIp, provenance, displayName);
     if (!created.ok || !created.data) {
       return fail(created.status || 500, created.error || "Failed to create user", created.error);
     }

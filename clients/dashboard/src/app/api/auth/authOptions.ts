@@ -74,6 +74,7 @@ export const authOptions: AuthOptions = {
         user.email.toLowerCase(),
         clientAddress(await headers()),
         provenanceFor(provider, profile),
+        user.name,
       );
       if (!result.ok) {
         console.error(`[dashboard-auth] ${provider} sign-in failed for ${user.email}: ${result.error}`);

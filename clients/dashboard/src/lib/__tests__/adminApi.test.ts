@@ -1,7 +1,7 @@
 /** What the dashboard sends to admin-api on sign-up, and what it makes of a refusal. `fetch` is
  *  replaced with a recorder, so these assert the exact outgoing headers and the typed failure. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { findOrCreateUserToken, forwardedForHeader } from "../adminApi";
+import { displayNameFrom, findOrCreateUserToken, forwardedForHeader } from "../adminApi";
 import { clientAddress, clientKey } from "../rateLimit";
 
 const headersOf = (h: Record<string, string>) => ({ get: (n: string) => h[n.toLowerCase()] ?? null });
@@ -157,5 +157,77 @@ describe("findOrCreateUserToken", () => {
     const r = await findOrCreateUserToken("a@b.co");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.refusal.code).toBe("unavailable");
+  });
+});
+
+describe("findOrCreateUserToken — display name", () => {
+  const calls: { url: string; init: RequestInit }[] = [];
+  let responder: (url: string, init: RequestInit) => Response;
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  beforeEach(() => {
+    process.env.VEXA_ADMIN_API_URL = "http://admin.test";
+    process.env.VEXA_ADMIN_API_KEY = "test-admin-key";
+    calls.length = 0;
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return responder(url, init);
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const existing = (stored: string | null) => (url: string, init: RequestInit) => {
+    if (url.includes("/admin/users/email/")) return json(200, { id: 7, email: "a@b.co", name: stored });
+    if (url.endsWith("/admin/users/7") && init.method === "PATCH") {
+      return json(200, { id: 7, email: "a@b.co", name: JSON.parse(String(init.body)).name });
+    }
+    if (url.includes("/tokens") && init.method === "POST") return json(200, { id: 1, token: "tok" });
+    return json(200, []);
+  };
+  const patches = () => calls.filter((c) => c.init.method === "PATCH").map((c) => JSON.parse(String(c.init.body)));
+
+  it("creates a new account with the provider's name, trimmed", async () => {
+    responder = (url, init) => {
+      if (url.includes("/admin/users/email/")) return json(404, {});
+      if (url.endsWith("/admin/users") && init.method === "POST") return json(201, { id: 7, email: "a@b.co", name: "Ada" });
+      if (url.includes("/tokens") && init.method === "POST") return json(200, { id: 1, token: "tok" });
+      return json(200, []);
+    };
+    await findOrCreateUserToken("a@b.co", null, undefined, "  Ada  ");
+    const create = calls.find((c) => c.url.endsWith("/admin/users"))!;
+    expect(JSON.parse(String(create.init.body)).name).toBe("Ada");
+  });
+
+  it("fills the name of an existing account that has none", async () => {
+    responder = existing(null);
+    const r = await findOrCreateUserToken("a@b.co", null, undefined, "Ada Lovelace");
+    expect(patches()).toEqual([{ name: "Ada Lovelace" }]);
+    expect(r.ok && r.user.name).toBe("Ada Lovelace");
+  });
+
+  it("never replaces a name already stored, and sends nothing for a blank one", async () => {
+    responder = existing("Kept Name");
+    await findOrCreateUserToken("a@b.co", null, undefined, "Other Name");
+    responder = existing(null);
+    await findOrCreateUserToken("a@b.co", null, undefined, "   ");
+    expect(patches()).toEqual([]);
+  });
+
+  it("a failed name write never fails the sign-in", async () => {
+    const base = existing(null);
+    responder = (url, init) => (init.method === "PATCH" ? json(500, { detail: "boom" }) : base(url, init));
+    const r = await findOrCreateUserToken("a@b.co", null, undefined, "Ada");
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe("displayNameFrom", () => {
+  it("trims, caps at 100 characters, and drops blanks and non-strings", () => {
+    expect(displayNameFrom("  Ada  ")).toBe("Ada");
+    expect(displayNameFrom("x".repeat(150))).toHaveLength(100);
+    expect(displayNameFrom("   ")).toBeNull();
+    expect(displayNameFrom(undefined)).toBeNull();
+    expect(displayNameFrom(42)).toBeNull();
   });
 });

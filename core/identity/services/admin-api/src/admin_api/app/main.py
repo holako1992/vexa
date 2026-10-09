@@ -306,6 +306,9 @@ class PlatformBillingDataPatch(BaseModel):
 
 class UserAdminPatch(BaseModel):
     max_concurrent_bots: Optional[int] = Field(default=None, ge=0)
+    #: The person's display name — the dashboard fills it from the sign-in provider's profile
+    #: when the account has none. Surrounding whitespace is dropped; blank is refused.
+    name: Optional[str] = Field(default=None, max_length=100)
     data: Optional[PlatformBillingDataPatch] = None
     #: Support comp: a catalog plan id (`billing.catalog.PLANS`) that wins over the
     #: Stripe-derived tier in `resolve_plan`, or `None` to clear a previously-set override.
@@ -331,13 +334,24 @@ class UserAdminPatch(BaseModel):
             raise ValueError(f"unknown plan id: {value!r}")
         return value
 
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("name must not be blank")
+        return value
+
     @model_validator(mode="after")
     def require_change(self):
         has_data = self.data is not None and bool(self.data.model_fields_set)
         has_override = bool({"plan_override", "quota_bonus"} & self.model_fields_set)
         _identity_claim_pair(self.identity_provider, self.email_verified)
         has_identity = self.identity_provider is not None
-        if self.max_concurrent_bots is None and not has_data and not has_override and not has_identity:
+        if (self.max_concurrent_bots is None and self.name is None and not has_data
+                and not has_override and not has_identity):
             raise ValueError("at least one user field must be supplied")
         return self
 
@@ -897,6 +911,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
         if patch.max_concurrent_bots is not None:
             user.max_concurrent_bots = patch.max_concurrent_bots
+        if patch.name is not None:
+            user.name = patch.name
 
         new_data = dict(user.data or {})
         data_changed = False
