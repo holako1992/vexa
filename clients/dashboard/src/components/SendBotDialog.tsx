@@ -1,12 +1,14 @@
 "use client";
 /**
  * The "Add a Bot" modal — lets the user dispatch a Vexa bot to a live meeting by pasting a URL,
- * or manage ICS calendar connections for automatic join.
+ * or connect and manage calendars for automatic join.
  *
  * Two tabs:
  *   • "Meeting link" — paste a Google Meet / Zoom / Teams / Jitsi URL, see live parse feedback,
  *     then send the bot.
- *   • "Calendar" — list connected ICS calendars, toggle auto-join, sync, connect new, disconnect.
+ *   • "Calendar" — connect a calendar (`CalendarConnectPanel`: Google, Microsoft 365, or an ICS
+ *     link with the in-app guide), then list connections: toggle auto-join, sync, reconnect,
+ *     disconnect.
  *
  * Built on the shared primitives in `./ui`: `Dialog` (focus trap, Escape, backdrop click, focus
  * return — the one `role="dialog"` here) and `Toggle` (a real `role="switch"` for auto-join,
@@ -20,15 +22,15 @@ import {
   ChevronDown,
   ChevronUp,
   Link2,
-  Plus,
   RefreshCw,
   Trash2,
 } from "lucide-react";
 import clsx from "clsx";
-import { getJson, mutateJson, presentError, ApiError } from "@/lib/api";
-import { Button, Dialog, Input, Toggle, useToast } from "./ui";
+import { getJson, mutateJson, presentError } from "@/lib/api";
+import { Button, Dialog, Toggle, useToast } from "./ui";
 import { MeetingLinkForm } from "./MeetingLinkForm";
 import { useCalendarOAuthConnect } from "./useCalendarOAuthConnect";
+import { CalendarConnectPanel } from "./CalendarConnectPanel";
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -191,30 +193,10 @@ function CalendarRow({ cal, onDelete, onPatch, onSync, onReconnect, busy, reconn
   );
 }
 
-/** admin-api's `calendars.py` validators (`new_connection`/`validate_ics_url`) answer a typed 422
- *  `detail` naming exactly which field is wrong. Mapping it back onto the field it names — rather
- *  than a generic banner — is what "surfaced as field hints" means here; anything that doesn't
- *  match either field's known prefixes still shows, just as the general banner. */
-function classifyCalendarError(e: unknown): { field: "name" | "ics_url" | null; message: string } {
-  if (e instanceof ApiError && e.status === 422 && e.detail) {
-    const d = e.detail;
-    if (d.startsWith("name")) return { field: "name", message: d };
-    if (d.startsWith("ics_url") || d.toLowerCase().includes("embed page")) {
-      return { field: "ics_url", message: d };
-    }
-  }
-  return { field: null, message: presentError(e) };
-}
-
 function CalendarTab() {
   const [calendars, setCalendars] = useState<CalendarConnection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null); // the id being mutated, or "new"
-  const [showAdd, setShowAdd] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newUrl, setNewUrl] = useState("");
-  const [newAutoJoin, setNewAutoJoin] = useState(true);
-  const [fieldErrors, setFieldErrors] = useState<{ name?: string; ics_url?: string }>({});
+  const [busy, setBusy] = useState<string | null>(null); // the id being mutated
   const toast = useToast();
 
   const load = useCallback(async () => {
@@ -286,37 +268,6 @@ function CalendarTab() {
     return connect(provider);
   }, [connect]);
 
-  const handleAdd = useCallback(async () => {
-    if (!newName.trim() || !newUrl.trim()) return;
-    setBusy("new");
-    setError(null);
-    setFieldErrors({});
-    try {
-      await mutateJson("POST", "/api/vexa/user/calendars", {
-        name: newName.trim(),
-        ics_url: newUrl.trim(),
-        auto_join: newAutoJoin,
-      });
-      setNewName("");
-      setNewUrl("");
-      setShowAdd(false);
-      await load();
-      toast.push({ tone: "success", title: "Calendar connected." });
-      // Trigger a sync on the newly-connected calendar
-      const fresh = await getJson<{ calendars?: CalendarConnection[] }>("/api/vexa/user/calendars");
-      const newest = (fresh.calendars ?? []).at(-1);
-      if (newest) await mutateJson("POST", `/api/vexa/user/calendars/${encodeURIComponent(newest.id)}/sync`).catch(() => {});
-      await load();
-    } catch (e) {
-      const { field, message } = classifyCalendarError(e);
-      if (field) setFieldErrors({ [field]: message });
-      else setError(message);
-      toast.push({ tone: "error", title: "Couldn't connect the calendar", description: message });
-    } finally {
-      setBusy(null);
-    }
-  }, [newName, newUrl, newAutoJoin, load, toast]);
-
   const canAdd = (calendars?.length ?? 0) < 10;
 
   return (
@@ -327,29 +278,7 @@ function CalendarTab() {
         </div>
       )}
 
-      {/* The primary path — one OAuth click each, no address to find or paste. */}
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Button
-          variant="primary"
-          onClick={() => void connectOAuth("google")}
-          loading={oauthBusy === "google"}
-          disabled={oauthBusy === "google" || !canAdd}
-          icon={<Calendar size={15} aria-hidden />}
-          className="h-10 flex-1"
-        >
-          {oauthBusy === "google" ? "Opening Google…" : "Connect Google Calendar"}
-        </Button>
-        <Button
-          variant="primary"
-          onClick={() => void connectOAuth("microsoft")}
-          loading={oauthBusy === "microsoft"}
-          disabled={oauthBusy === "microsoft" || !canAdd}
-          icon={<Calendar size={15} aria-hidden />}
-          className="h-10 flex-1"
-        >
-          {oauthBusy === "microsoft" ? "Opening Microsoft…" : "Connect Microsoft 365"}
-        </Button>
-      </div>
+      <CalendarConnectPanel disabled={!canAdd} onOAuthStart={() => setError(null)} onIcsConnected={() => void load()} idPrefix="dialog-cal" />
 
       {calendars === null && !error && (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-ink-3" role="status">
@@ -357,13 +286,12 @@ function CalendarTab() {
         </div>
       )}
 
-      {calendars !== null && calendars.length === 0 && !showAdd && (
+      {calendars !== null && calendars.length === 0 && (
         <div className="rounded-xl border border-dashed border-line py-6 text-center">
           <Calendar size={24} className="mx-auto mb-2 text-ink-3" aria-hidden />
           <p className="text-sm font-medium text-ink-2">No calendars connected</p>
           <p className="mt-0.5 text-xs text-ink-3">
-            Connect Google Calendar or Microsoft 365 above, or a secret ICS feed below, and Vexa
-            will auto-join meetings for you.
+            Connect one above and Vexa will auto-join its meetings for you.
           </p>
         </div>
       )}
@@ -384,84 +312,6 @@ function CalendarTab() {
           ))}
         </div>
       )}
-
-      {/* Other calendar (ICS) — the fallback for Outlook/Microsoft 365, or a Google account
-          Google Calendar connect isn't enabled for. */}
-      <div className="border-t border-line pt-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">
-          Other calendar (ICS)
-        </p>
-        {!showAdd && (
-          <p className="mb-3 text-xs text-ink-3">
-            Paste your calendar's secret ICS feed instead. <strong>Google Calendar:</strong>{" "}
-            calendar settings → the calendar you want → <em>Integrate calendar</em> → copy
-            "Secret address in iCal format". <strong>Outlook / Microsoft 365:</strong> Settings →
-            Calendar → Shared calendars → <em>Publish a calendar</em> → copy the ICS link. See the{" "}
-            <a
-              href="https://docs.vexa.ai/how-to/calendar-sync#connect-with-a-secret-ics-address"
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-accent underline underline-offset-2"
-            >
-              full guide
-            </a>{" "}
-            for screenshots and Google Workspace's admin setting.
-          </p>
-        )}
-
-        {showAdd ? (
-          <div className="rounded-xl border border-line bg-raised p-4">
-            <p className="mb-3 text-sm font-semibold">Connect a calendar</p>
-            <div className="flex flex-col gap-3">
-              <Input
-                id="cal-name"
-                label="Name"
-                type="text"
-                value={newName}
-                onChange={(e) => { setNewName(e.target.value); setFieldErrors((f) => ({ ...f, name: undefined })); }}
-                placeholder="Work calendar"
-                maxLength={100}
-                error={fieldErrors.name}
-                className="bg-card"
-              />
-              <Input
-                id="cal-ics"
-                label="Secret ICS address"
-                type="password"
-                autoComplete="off"
-                value={newUrl}
-                onChange={(e) => { setNewUrl(e.target.value); setFieldErrors((f) => ({ ...f, ics_url: undefined })); }}
-                placeholder="https://calendar.google.com/…/basic.ics"
-                error={fieldErrors.ics_url}
-                className="bg-card"
-              />
-              <Toggle checked={newAutoJoin} onChange={setNewAutoJoin} label="Auto-join meetings from this calendar" />
-            </div>
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <Button variant="secondary" onClick={() => { setShowAdd(false); setFieldErrors({}); }}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleAdd}
-                disabled={!newName.trim() || !newUrl.trim()}
-                loading={busy === "new"}
-                icon={<Plus size={15} aria-hidden />}
-              >
-                {busy === "new" ? "Connecting…" : "Connect"}
-              </Button>
-            </div>
-          </div>
-        ) : canAdd && (
-          <button
-            type="button"
-            onClick={() => setShowAdd(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line py-3 text-sm text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
-          >
-            <Plus size={15} aria-hidden /> Connect a calendar
-          </button>
-        )}
-      </div>
     </div>
   );
 }

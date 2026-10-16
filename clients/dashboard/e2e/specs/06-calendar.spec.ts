@@ -51,10 +51,10 @@ test("connect an ICS calendar, then toggle auto-join", async ({ page, request })
   await page.getByRole("button", { name: "Add Bot" }).click();
   await page.getByRole("button", { name: "Calendar" }).click();
 
-  await page.getByRole("button", { name: "Connect a calendar" }).click();
+  await page.getByRole("button", { name: /Use another calendar/ }).click();
   await page.getByLabel("Name").fill("Work calendar");
-  await page.getByLabel("Secret ICS address").fill("https://calendar.example.com/secret/basic.ics");
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.getByLabel("Paste your calendar's ICS link").fill("https://calendar.example.com/secret/basic.ics");
+  await page.getByRole("button", { name: "Connect calendar", exact: true }).click();
 
   await expect(page.getByText("Work calendar")).toBeVisible();
 

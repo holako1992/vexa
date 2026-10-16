@@ -25,7 +25,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { ApiError, mutateJson, presentError } from "@/lib/api";
-import { CALENDAR_OAUTH_LABEL, type CalendarOAuthProvider } from "@/lib/calendarOAuth";
+import { CALENDAR_OAUTH_LABEL, type CalendarOAuthProvider, takeCalendarReturn } from "@/lib/calendarOAuth";
 import { Button } from "./ui";
 
 export type { CalendarOAuthProvider };
@@ -113,7 +113,8 @@ export function CalendarOAuthCallback({ provider }: { provider: CalendarOAuthPro
    *  must name the RIGHT provider — an error already showed its own message on THIS page, so it
    *  never toasts again on the way back. */
   function backToCalendar(param: string) {
-    router.push(param === "connected" ? `/?calendar=connected&provider=${provider}` : `/?calendar=${param}`);
+    const base = takeCalendarReturn() ?? "/";
+    router.push(param === "connected" ? `${base}?calendar=connected&provider=${provider}` : `${base}?calendar=${param}`);
   }
 
   if (state.kind === "exchanging") {

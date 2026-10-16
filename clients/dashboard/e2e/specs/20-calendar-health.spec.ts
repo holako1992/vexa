@@ -16,14 +16,16 @@ import {
 
 test.beforeEach(async ({ request }) => { await resetStub(request); });
 
-test("no calendars connected points at the Add Bot dialog's Calendar tab, never a placeholder", async ({ page }) => {
+test("no calendars connected offers the connect panel right on the page", async ({ page }) => {
   await signIn(page, testEmail("calendar-health-empty"));
   await page.getByRole("link", { name: "Calendar" }).click();
   await page.waitForURL("**/calendar");
 
   await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
   await expect(page.getByText("No calendars connected")).toBeVisible();
-  await expect(page.getByText(/add bot.*calendar tab/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect Google Calendar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect Microsoft 365" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Use another calendar/ })).toBeVisible();
 });
 
 test("shows last sync time and events touched after syncing a healthy ICS connection", async ({ page, request }) => {

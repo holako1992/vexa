@@ -38,3 +38,31 @@ export async function fetchTrustedAuthorizeUrl(provider: CalendarOAuthProvider):
   }
   return authorize_url;
 }
+
+/** Where a calendar OAuth round-trip should land once the provider sends the browser back. The
+ *  default landing is the meetings page (the Add Bot dialog and the first-run welcome both live
+ *  there); the Calendar page asks to come back to itself. One fixed value, so the callback never
+ *  navigates to a path it did not choose. */
+export type CalendarReturnTarget = "/calendar";
+
+const RETURN_KEY = "vexa.calendar-oauth-return";
+
+export function rememberCalendarReturn(target: CalendarReturnTarget | null): void {
+  try {
+    if (target) window.sessionStorage.setItem(RETURN_KEY, target);
+    else window.sessionStorage.removeItem(RETURN_KEY);
+  } catch {
+    // Storage unavailable: the callback falls back to the meetings page.
+  }
+}
+
+/** Read and forget the remembered landing; `null` means the meetings page. */
+export function takeCalendarReturn(): CalendarReturnTarget | null {
+  try {
+    const value = window.sessionStorage.getItem(RETURN_KEY);
+    window.sessionStorage.removeItem(RETURN_KEY);
+    return value === "/calendar" ? "/calendar" : null;
+  } catch {
+    return null;
+  }
+}

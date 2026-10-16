@@ -12,17 +12,19 @@
  *  `{}` — the shape the route answers before any sync has ever run for that connection — reads as
  *  "Never synced yet", not an error.
  *
- *  This page never invents its own connect flow: with no connections at all, it points at the Add
- * Bot dialog's Calendar tab (the actual connect surface) rather than duplicating
- *  Connect Google Calendar / Connect Microsoft 365 / Other calendar (ICS) here.
+ *  Connecting goes through the shared `CalendarConnectPanel` (the same one the Add Bot dialog and
+ *  the first-run welcome render): shown outright when nothing is connected, behind "Add calendar"
+ *  otherwise. A Google/Microsoft connect started here asks the callback to come back here, and the
+ *  `?calendar=connected&provider=…` landing toasts once, re-reads the list and clears the query.
  */
-import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Calendar as CalendarIcon, CheckCircle2, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, Calendar as CalendarIcon, CheckCircle2, Plus, RefreshCw, X } from "lucide-react";
 import clsx from "clsx";
 import { getJson, mutateJson, presentError } from "@/lib/api";
 import { CALENDAR_OAUTH_LABEL, type CalendarOAuthProvider, fetchTrustedAuthorizeUrl } from "@/lib/calendarOAuth";
 import { Button, useToast } from "./ui";
-import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
+import { ErrorState, LoadingState } from "./EmptyState";
+import { CalendarConnectPanel } from "./CalendarConnectPanel";
 
 interface CalendarConnection {
   id: string;
@@ -75,6 +77,7 @@ export function CalendarHealthView() {
   const [state, setState] = useState<ViewState>({ kind: "loading" });
   const [reconnecting, setReconnecting] = useState<string | null>(null); // connection id
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -99,6 +102,24 @@ export function CalendarHealthView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Back from Google/Microsoft after a connect started on this page: say so once, then clear the
+  // query so a refresh doesn't repeat it. `load` above already reads the new connection.
+  const landingHandled = useRef(false);
+  useEffect(() => {
+    if (landingHandled.current) return;
+    landingHandled.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("calendar");
+    if (!outcome) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (outcome === "connected") {
+      const provider: CalendarOAuthProvider = params.get("provider") === "microsoft" ? "microsoft" : "google";
+      toast.push({ tone: "success", title: `${CALENDAR_OAUTH_LABEL[provider]} connected.` });
+    } else {
+      setAdding(true);
+    }
+  }, [toast]);
 
   const syncNow = useCallback(
     async (id: string) => {
@@ -138,21 +159,46 @@ export function CalendarHealthView() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <h1 className="mb-1 text-xl font-semibold">Calendar</h1>
-      <p className="mb-6 text-sm text-ink-3">
-        Health for every connected calendar — last sync, errors, and events touched.
-      </p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="mb-1 text-xl font-semibold">Calendar</h1>
+          <p className="text-sm text-ink-3">
+            Health for every connected calendar — last sync, errors, and events touched.
+          </p>
+        </div>
+        {state.kind === "loaded" && state.rows.length > 0 && (
+          <Button
+            variant={adding ? "secondary" : "primary"}
+            size="sm"
+            onClick={() => setAdding((open) => !open)}
+            icon={adding ? <X size={13} aria-hidden /> : <Plus size={13} aria-hidden />}
+          >
+            {adding ? "Close" : "Add calendar"}
+          </Button>
+        )}
+      </div>
+
+      {state.kind === "loaded" && (state.rows.length === 0 || adding) && (
+        <section aria-label="Connect a calendar" className="mb-6 rounded-xl border border-line bg-card p-4">
+          {state.rows.length === 0 && (
+            <div className="mb-4 text-center">
+              <CalendarIcon size={24} className="mx-auto mb-2 text-ink-3" aria-hidden />
+              <p className="text-sm font-medium text-ink-2">No calendars connected</p>
+              <p className="mt-0.5 text-xs text-ink-3">Connect one and Vexa will auto-join its meetings for you.</p>
+            </div>
+          )}
+          <CalendarConnectPanel
+            returnTo="/calendar"
+            disabled={state.rows.length >= 10}
+            onIcsConnected={() => { setAdding(false); void load(); }}
+            idPrefix="page-cal"
+          />
+        </section>
+      )}
 
       {state.kind === "loading" && <LoadingState label="Loading calendar health…" />}
 
       {state.kind === "error" && <ErrorState message={state.message} onRetry={() => void load()} />}
-
-      {state.kind === "loaded" && state.rows.length === 0 && (
-        <EmptyState
-          title="No calendars connected"
-          hint={"Connect one from the \"Add Bot\" dialog's Calendar tab, then come back here to watch its health."}
-        />
-      )}
 
       {state.kind === "loaded" && state.rows.length > 0 && (
         <div className="flex flex-col gap-3">

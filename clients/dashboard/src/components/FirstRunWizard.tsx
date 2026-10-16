@@ -5,7 +5,8 @@
  *   1. Bot name   — what people in the meeting will see. Saved as the person's default bot name
  *                   (`PUT /user/calendar {bot_name}`), the one store a dispatched or calendar-armed
  *                   bot resolves its name from.
- *   2. Calendar   — Connect Google Calendar / Microsoft 365 through the same consent flow the Add
+ *   2. Calendar   — the shared `CalendarConnectPanel` (Google, Microsoft 365, or an ICS link with
+ *                   the in-app guide). Google/Microsoft run the same consent flow the Add
  *                   Bot dialog runs. The page leaves for the provider and comes back through
  *                   `/calendar/<provider>/callback`; `calendarReturn` is how the welcome knows it
  *                   is back and moves on.
@@ -22,7 +23,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Calendar, Check, CheckCircle2, Sparkles } from "lucide-react";
+import { Check, CheckCircle2, Sparkles } from "lucide-react";
 import clsx from "clsx";
 import { getJson, mutateJson, presentError, ApiError } from "@/lib/api";
 import { CALENDAR_OAUTH_LABEL, type CalendarOAuthProvider } from "@/lib/calendarOAuth";
@@ -36,7 +37,7 @@ import {
 } from "@/lib/firstRun";
 import { Button, Dialog, Input, useToast } from "./ui";
 import { MeetingLinkForm, type DispatchedBot } from "./MeetingLinkForm";
-import { useCalendarOAuthConnect } from "./useCalendarOAuthConnect";
+import { CalendarConnectPanel } from "./CalendarConnectPanel";
 
 /** How the page got here, when it came back from a calendar provider: `connected` with the
  *  provider that finished, or `retry` after a failed or declined attempt (the callback page has
@@ -120,12 +121,12 @@ export function FirstRunWizard({ initialStep, calendarReturn, onBotSent, onEnded
   const [nameError, setNameError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [calendars, setCalendars] = useState<ConnectedCalendar[] | null>(null);
-  const [calendarError, setCalendarError] = useState<string | null>(null);
+  // Bumped after an ICS calendar is connected here, to re-read the connected list.
+  const [calendarsReload, setCalendarsReload] = useState(0);
   const [justConnected, setJustConnected] = useState<string | null>(
     calendarReturn?.kind === "connected" ? CALENDAR_OAUTH_LABEL[calendarReturn.provider] : null,
   );
   const [sent, setSent] = useState<DispatchedBot | null>(null);
-  const { busy: oauthBusy, connect } = useCalendarOAuthConnect(setCalendarError);
 
   // The person's current default name, so the field starts from what a bot would use today.
   useEffect(() => {
@@ -150,7 +151,7 @@ export function FirstRunWizard({ initialStep, calendarReturn, onBotSent, onEnded
       .then((d) => { if (!cancelled) setCalendars((d.calendars ?? []).filter((c) => c.enabled !== false)); })
       .catch(() => { if (!cancelled) setCalendars(null); });
     return () => { cancelled = true; };
-  }, [step]);
+  }, [step, calendarsReload]);
 
   /** Write the position. A failure is a toast, not a block: the person is still where they are on
    *  screen, and the worst outcome is that a refresh resumes one step earlier. */
@@ -296,15 +297,10 @@ export function FirstRunWizard({ initialStep, calendarReturn, onBotSent, onEnded
           <div className="flex flex-col gap-4">
             <h3 className="text-base font-semibold">Connect your calendar</h3>
             <p className="text-sm text-ink-2">
-              Vexa joins the meetings on your calendar for you. One click and a consent screen — no
-              address to find or paste.
+              Vexa joins the meetings on your calendar for you. One click for Google or Microsoft
+              365, or paste a link from any other calendar.
             </p>
-            {calendarError && (
-              <div role="alert" className="rounded-lg border border-live/30 bg-live-soft px-4 py-2.5 text-sm text-live">
-                {calendarError}
-              </div>
-            )}
-            {calendarReturn?.kind === "retry" && !calendarError && (
+            {calendarReturn?.kind === "retry" && (
               <p role="status" className="text-sm text-ink-2">
                 The calendar wasn&apos;t connected. You can try again or move on — it is always on the
                 Calendar page.
@@ -318,31 +314,11 @@ export function FirstRunWizard({ initialStep, calendarReturn, onBotSent, onEnded
                   : `Connected: ${calendars!.map(calendarLabel).join(", ")}.`}
               </p>
             )}
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button
-                variant="primary"
-                onClick={() => { setCalendarError(null); setJustConnected(null); void connect("google"); }}
-                loading={oauthBusy === "google"}
-                disabled={oauthBusy !== null}
-                icon={<Calendar size={15} aria-hidden />}
-                className="h-10 flex-1"
-              >
-                {oauthBusy === "google" ? "Opening Google…" : "Connect Google Calendar"}
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => { setCalendarError(null); setJustConnected(null); void connect("microsoft"); }}
-                loading={oauthBusy === "microsoft"}
-                disabled={oauthBusy !== null}
-                icon={<Calendar size={15} aria-hidden />}
-                className="h-10 flex-1"
-              >
-                {oauthBusy === "microsoft" ? "Opening Microsoft…" : "Connect Microsoft 365"}
-              </Button>
-            </div>
-            <p className="text-xs text-ink-3">
-              Use a different calendar? Add its secret ICS address later from Add Bot → Calendar.
-            </p>
+            <CalendarConnectPanel
+              onOAuthStart={() => setJustConnected(null)}
+              onIcsConnected={() => { setJustConnected("Your calendar"); setCalendarsReload((k) => k + 1); }}
+              idPrefix="welcome-cal"
+            />
             <Button variant="secondary" onClick={() => next && void goTo(next)} loading={busy} className="h-10">
               {justConnected || (calendars && calendars.length > 0) ? "Continue" : "Continue without a calendar"}
             </Button>

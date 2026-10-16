@@ -73,7 +73,7 @@ export function UpcomingView() {
       toast.push({
         tone: "info",
         title: "No calendars connected",
-        description: "Connect one from the Add Bot dialog's Calendar tab first.",
+        description: "Connect one from the Calendar page first.",
       });
       return;
     }
