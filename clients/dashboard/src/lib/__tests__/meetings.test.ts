@@ -17,6 +17,7 @@ import {
   sortMeetingsBy,
   toMeeting,
   toTranscript,
+  utcSeconds,
   transcriptToText,
 } from "../meetings";
 
@@ -348,5 +349,51 @@ describe("filterMeetings — tags", () => {
   it("matches a tag as well as a title", () => {
     const tagged = toMeeting(row({ id: 9, data: { title: "Call", metadata: { tags: ["acme renewal"] } } }));
     expect(filterMeetings([tagged], "renewal").map((x) => x.id)).toEqual(["9"]);
+  });
+});
+
+describe("transcript times", () => {
+  // meeting 61: recording started 14:33:40Z; the live pipeline stamps epoch seconds into `start`.
+  const origin = Date.parse("2026-10-16T14:33:40Z") / 1000;
+
+  it("rebases a wall-clock segment time onto the recording start", () => {
+    const [line] = toTranscript([{ start: origin + 4.176, end: origin + 17.966, speaker: "Meer Muet", text: "Hello" }], {}, origin);
+    expect(line!.at).toBeCloseTo(4.176, 3);
+    expect(line!.end).toBeCloseTo(17.966, 3);
+    expect(formatClock(line!.at)).toBe("0:04");
+  });
+
+  it("passes a true offset through untouched", () => {
+    const [line] = toTranscript([{ start: 12.5, end: 14, speaker: "A", text: "x" }], {}, origin);
+    expect(line!.at).toBe(12.5);
+  });
+
+  it("shows no time rather than a 56-year one when there is no origin", () => {
+    const [line] = toTranscript([{ start: origin + 4, end: origin + 9, speaker: "A", text: "x" }]);
+    expect(line!.at).toBeNull();
+  });
+
+  it("never shows a negative offset for a segment stamped before the origin", () => {
+    const [line] = toTranscript([{ start: origin - 3, speaker: "A", text: "x" }], {}, origin);
+    expect(line!.at).toBe(0);
+  });
+});
+
+describe("utcSeconds", () => {
+  it("reads meeting-api's zoneless timestamps as UTC, not local time", () => {
+    expect(utcSeconds("2026-10-16T14:33:40.545427")).toBeCloseTo(Date.parse("2026-10-16T14:33:40.545Z") / 1000, 2);
+    expect(utcSeconds("2026-10-16 14:33:40")).toBe(Date.parse("2026-10-16T14:33:40Z") / 1000);
+    expect(utcSeconds("2026-10-16T14:33:40+04:00")).toBe(Date.parse("2026-10-16T10:33:40Z") / 1000);
+    expect(utcSeconds("nonsense")).toBeNull();
+    expect(utcSeconds(null)).toBeNull();
+  });
+
+  it("puts the recording's start, else the meeting's, on the meeting", () => {
+    const base = { id: 61, platform: "teams", native_meeting_id: "n", status: "completed" };
+    expect(toMeeting({ ...base, start_time: "2026-10-16T14:33:40",
+      data: { recordings: [{ id: 1, created_at: "2026-10-16T14:33:55Z" }] } } as never).timeOrigin)
+      .toBe(Date.parse("2026-10-16T14:33:55Z") / 1000);
+    expect(toMeeting({ ...base, start_time: "2026-10-16T14:33:40" } as never).timeOrigin)
+      .toBe(Date.parse("2026-10-16T14:33:40Z") / 1000);
   });
 });

@@ -95,6 +95,8 @@ export interface Meeting {
    *  `GET /recordings/<recordingId>/master` from this — never a second lookup by meeting id, since
    *  the row already carries it. */
   recordingId: string | null;
+  /** Epoch seconds a transcript line's offset counts from (`toTranscript`'s `origin`). */
+  timeOrigin: number | null;
   shared: boolean;
   nativeId: string | null;
   meetingUrl: string | null;
@@ -158,6 +160,25 @@ function durationOf(start: string | null, end: string | null): number | null {
 /** The one field this reader needs off a recording entry in `data.recordings[]` — everything else
  *  there (media_files, session_uid, …) is upload bookkeeping the meeting row never surfaces; the
  *  player reads the rest from `GET /recordings/<id>/master` instead, never from this row. */
+/** A producer timestamp as epoch seconds. meeting-api writes UTC without a zone suffix
+ *  (`2026-10-16T14:33:40.545`), which `Date.parse` would read as LOCAL time — so a string with no
+ *  zone is read as UTC. `null` for anything unparseable. */
+export function utcSeconds(iso: unknown): number | null {
+  if (typeof iso !== "string" || !iso.trim()) return null;
+  const s = iso.trim();
+  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(s) ? s : `${s}Z`;
+  const ms = Date.parse(zoned.includes("T") ? zoned : zoned.replace(" ", "T"));
+  return Number.isFinite(ms) ? ms / 1000 : null;
+}
+
+/** Where a transcript's offsets count from: the recording's start (so a line's offset is also
+ *  its position in the audio), else the meeting's own start. */
+function timeOrigin(d: MeetingRowDTO): number | null {
+  const first = d.data?.recordings?.[0];
+  const recorded = first && typeof first === "object" ? (first as { created_at?: unknown }).created_at : null;
+  return utcSeconds(recorded) ?? utcSeconds(d.start_time);
+}
+
 function firstRecordingId(recordings: unknown[] | undefined): string | null {
   const first = recordings?.[0];
   if (first && typeof first === "object" && "id" in first) {
@@ -185,6 +206,7 @@ export function toMeeting(d: MeetingRowDTO): Meeting {
     attendees: d.data?.attendees ?? [],
     hasRecording: !!d.data?.recordings?.length,
     recordingId: firstRecordingId(d.data?.recordings),
+    timeOrigin: timeOrigin(d),
     shared: !!d.shared,
     nativeId: native,
     meetingUrl: d.constructed_meeting_url ?? null,
@@ -352,6 +374,19 @@ function finiteOrNull(n: unknown): number | null {
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
+/** At or above this, a segment's `start`/`end` is an epoch wall-clock time, not an offset — the
+ *  same line meeting-api draws (`collector/adapters.py`'s `_EPOCH_THRESHOLD_S`): the live
+ *  pipeline stamps wall-clock seconds, an offset into a meeting never comes near this. */
+const EPOCH_THRESHOLD_S = 1_000_000_000;
+
+/** A segment time as seconds from `origin`. An offset passes through; a wall-clock time is
+ *  rebased onto `origin` (never below zero), or `null` when there is no origin to rebase onto. */
+function offsetFrom(t: unknown, origin: number | null): number | null {
+  const n = finiteOrNull(t);
+  if (n === null || n < EPOCH_THRESHOLD_S) return n;
+  return origin === null ? null : Math.max(0, n - origin);
+}
+
 /** Map the segments of a transcript response. Empty/blank segments are dropped; nothing is
  *  merged, re-ordered or re-attributed — the producer's order is the order shown. `labels` puts
  *  a person's name on a producer speaker for display; the producer's attribution stays on
@@ -359,14 +394,15 @@ function finiteOrNull(n: unknown): number | null {
 export function toTranscript(
   segments: readonly SegmentDTO[] | undefined | null,
   labels: Readonly<Record<string, string>> = {},
+  origin: number | null = null,
 ): TranscriptLine[] {
   if (!Array.isArray(segments)) return [];
   return segments
     .map((s) => {
       const source = (s.speaker || "").trim() || null;
       return {
-        at: finiteOrNull(s.start),
-        end: finiteOrNull(s.end),
+        at: offsetFrom(s.start, origin),
+        end: offsetFrom(s.end, origin),
         speaker: source ? labelFor(labels, source) : "Unknown speaker",
         sourceSpeaker: source,
         text: (s.text || "").trim(),

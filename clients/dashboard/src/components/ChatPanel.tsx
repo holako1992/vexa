@@ -15,7 +15,8 @@
  *     without its closing frame (`cutStreamMessage`), including one that carried no bytes.
  *
  *  Answer text renders as plain React: paragraphs, with `**strong**` / `_emphasis_` through
- *  `parseInlineEmphasis`. No `dangerouslySetInnerHTML` anywhere.
+ *  `parseInlineEmphasis`, and the agent's workspace references read as their titles
+ *  (`plainReferences`). No `dangerouslySetInnerHTML` anywhere.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageSquarePlus, Send, Square } from "lucide-react";
@@ -26,6 +27,7 @@ import {
   chatRefusalMessage,
   chatTurnBody,
   cutStreamMessage,
+  plainReferences,
   resetChat,
   streamChatTurn,
 } from "@/lib/chat";
@@ -68,7 +70,7 @@ function InlineText({ text }: { text: string }) {
 }
 
 function AnswerText({ text }: { text: string }) {
-  const parts = text.split(/\n{2,}/).filter((p) => p.trim());
+  const parts = plainReferences(text).split(/\n{2,}/).filter((p) => p.trim());
   return (
     <>
       {parts.map((p, i) => (

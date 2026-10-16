@@ -388,3 +388,15 @@ function strayDetail(stray: string): string {
   }
   return text.slice(0, 300);
 }
+
+/** The agent writes references the way the TERMINAL renders them — `[[Title]]`, `[[Title]](path)`,
+ *  or a markdown link to a workspace file — because that is where they become clickable chips.
+ *  The dashboard has no workspace to open, so a reference reads as its title, in bold; a link to
+ *  the web (`http(s)://…`) keeps its URL in brackets so nothing the reader could follow is lost. */
+export function plainReferences(text: string): string {
+  return text
+    .replace(/\[\[([^\]\n]+)\]\]\(([^)\s]*)\)/g, "**$1**")
+    .replace(/\[\[([^\]\n]+)\]\]/g, "**$1**")
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, "$1 ($2)")
+    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, "**$1**");
+}

@@ -74,9 +74,10 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
   // below reads REST only while the stream is not delivering.
   const live = useLiveTranscript(meetingId, meeting?.phase === "live", () => void load());
   const lines = useMemo<TranscriptLine[] | null>(
-    () => (segments === null ? null : toTranscript(applyLiveOps(segments, live.ops), meeting?.speakerLabels)),
+    () => (segments === null ? null
+      : toTranscript(applyLiveOps(segments, live.ops), meeting?.speakerLabels, meeting?.timeOrigin ?? null)),
     // `live.version` stands for `live.ops`, which is appended to in place.
-    [segments, live.version, meeting?.speakerLabels], // eslint-disable-line react-hooks/exhaustive-deps
+    [segments, live.version, meeting?.speakerLabels, meeting?.timeOrigin], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const lineRefs = useRef<Array<HTMLLIElement | null>>([]);
   const playerRef = useRef<AudioPlayerHandle>(null);

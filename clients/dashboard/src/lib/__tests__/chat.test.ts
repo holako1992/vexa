@@ -14,6 +14,7 @@ import {
   isChatTurnBody,
   meetingSession,
   streamChatTurn,
+  plainReferences,
 } from "../chat";
 
 const meeting = { kind: "meeting" as const, meetingId: "102", platformId: "teams", nativeId: "1234567890", status: "completed" };
@@ -200,5 +201,22 @@ describe("messages", () => {
     expect(cutStreamMessage("", true)).toMatch(/stopped before it finished/);
     expect(cutStreamMessage("", false)).toMatch(/No answer came back/);
     expect(cutStreamMessage("Internal Server Error", false)).toBe("The assistant couldn't answer. agent-api said: Internal Server Error");
+  });
+});
+
+describe("plainReferences", () => {
+  it("reads a terminal workspace reference as its title", () => {
+    expect(plainReferences("The existing entity doc [[your meeting]](kg/entities/meeting/2026-10-16-1433-your-meeting.md) already captures this."))
+      .toBe("The existing entity doc **your meeting** already captures this.");
+    expect(plainReferences("Ask [[Anna Smith]] about it.")).toBe("Ask **Anna Smith** about it.");
+    expect(plainReferences("See [the plan](kg/dashboards/plan.md).")).toBe("See **the plan**.");
+  });
+
+  it("keeps a web link the reader can follow", () => {
+    expect(plainReferences("Docs: [Stripe](https://stripe.com/docs).")).toBe("Docs: Stripe (https://stripe.com/docs).");
+  });
+
+  it("leaves ordinary text alone", () => {
+    expect(plainReferences("No links [here] or (there).")).toBe("No links [here] or (there).");
   });
 });
