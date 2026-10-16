@@ -116,6 +116,22 @@ class WorkspaceReader:
             raise ValueError("invalid path")
         return f.read_text() if f.exists() and f.is_file() else None
 
+    def write_at(self, base: Path, path: str, content: str) -> Path:
+        """Write ``content`` to ``path`` within the ``base`` workspace dir and return the file. The
+        read guard plus three refusals a write needs: an absolute path, any ``.git`` component (the
+        repository's own internals), and a target that resolves outside the workspace (``..`` or a
+        symlink). Each raises ``ValueError``."""
+        ws = self._guard_under_root(base)
+        rel = Path(path)
+        if not path or rel.is_absolute() or ".git" in rel.parts:
+            raise ValueError("invalid path")
+        f = (ws / rel).resolve()
+        if ws not in f.parents:
+            raise ValueError("invalid path")
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(content, encoding="utf-8")
+        return f
+
     def _session_id(self, ws: Path, session: str) -> Optional[str]:
         """The claude sessionId for a thread, read from its continuity pointer
         (``.claude/sessions/<session>.session``; the legacy ``main`` falls back to ``.claude/.session``)."""

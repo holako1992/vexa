@@ -19,6 +19,7 @@ import time
 from typing import Optional
 
 import contracts
+from control_plane import provisioning
 from control_plane.workspace_attach import active_workspaces, shared_active_mounts
 from control_plane.workspace_purpose import read_purpose
 from control_plane.system_mounts import GLOBAL_SLUG, SYSTEM_SLUG, global_mount, system_mount
@@ -381,7 +382,8 @@ class Dispatcher:
     through. Validates the envelope at the seam (fail loud, P18), mints the token, and spawns."""
 
     def __init__(self, settings: Settings, runtime: RuntimePort, identity: IdentityPort,
-                 membership_index=None, model_config=None, warm_stream=None) -> None:
+                 membership_index=None, model_config=None, warm_stream=None,
+                 provision: bool = False) -> None:
         self._settings = settings
         self._runtime = runtime
         self._identity = identity
@@ -399,11 +401,29 @@ class Dispatcher:
         # AdminApiModelConfig — user pref > platform setting over the admin-api internal edge).
         # None → deployment env defaults only, exactly as before.
         self._model_config = model_config
+        # Provision the subject's workspace tiers before each spawn (`provisioning.provision_subject`,
+        # idempotent): the runtime mounts them as volume subpaths, which must already exist. The
+        # composed app turns it on; a test that builds a Dispatcher over the default
+        # `workspaces_dir` leaves it off and seeds no baseline.
+        self._provision = provision
         self.dispatched: list[dict] = []  # observability — the dispatches that fired
 
     @property
     def settings(self) -> Settings:
         return self._settings
+
+    def _ensure_workspace(self, subject: str) -> None:
+        """Create the subject's baseline + `_system` tiers if absent. Fails soft, like the membership
+        lookup above: a provisioning error is logged and the spawn proceeds, so the runtime's own
+        refusal (naming the missing mount) is what surfaces — never a second, vaguer one."""
+        try:
+            provisioning.provision_subject(
+                self._settings.workspaces_dir, subject,
+                default_template=self._settings.default_template,
+                seeds_root=self._settings.workspace_seeds_dir,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("workspace provisioning failed for subject=%s — spawning anyway", subject)
 
     def resolve_model_config(self, subject: str) -> Optional[dict]:
         """The subject's effective Settings → Models config (user pref > platform setting).
@@ -445,6 +465,8 @@ class Dispatcher:
         # ungated so async triggers (scheduled/event/transcription) never lose a dispatch; their
         # credential-less failure mode is the clean rewritten done frame (llm/errors taxonomy).
         model_config = self.resolve_model_config(identity["subject"])
+        if self._provision:
+            self._ensure_workspace(identity["subject"])
         env = build_unit_env(self._settings, invocation, unit_id=uid, token=token, memberships=memberships,
                              model_config=model_config)
         # WARM DELIVERY (the lost-turn fix). The runtime's create is an IDEMPOTENT TOUCH for a

@@ -24,6 +24,7 @@ import hmac
 import json
 import logging
 import re
+import subprocess
 import time
 from pathlib import Path
 from typing import Callable, Iterator, Optional
@@ -40,7 +41,7 @@ from control_plane.config_preflight import NOT_CONFIGURED, capability_state, mis
 from shared import units
 from control_plane import workspace_routines as workspace_routines_mod
 from shared.agent_config import default_meeting_model, load_meeting_config
-from shared.seeding import resolve_seed_dir, seed_workspace, validate_seed
+from shared.gitenv import scrubbed_git_env
 from control_plane.workspace_attach import (
     CloneError,
     activate_workspace,
@@ -65,7 +66,7 @@ from control_plane.workspace_git_sync import RemoteSyncError, pull_origin, push_
 from control_plane.workspace_purpose import read_purpose, write_purpose
 from control_plane import workspace_membership as membership_mod
 from control_plane import git_credentials as git_creds
-from control_plane import system_mounts
+from control_plane import provisioning, system_mounts
 from control_plane import account_erasure
 from control_plane.workspace_membership import MembershipError, MembershipIndex, InMemoryMembershipIndex
 from control_plane.dispatch import Dispatcher
@@ -1607,6 +1608,36 @@ def create_app(
     # validated workspace/template the next dispatch mounts. The seams exist downstream (seeding.seed_workspace
     # for init; VEXA_WORKSPACE_REPO/REF in dispatch/spawn for swap, bridge resolves per-meeting) — Phase 6
     # surfaces them here and wires the slim-client init_workspace()/use_workspace().
+    @app.put("/api/workspace/file")
+    def ws_file_write(request: Request, body: dict = Body(...)):
+        """WRITE one file into the caller's OWN workspace and commit it — the door flows' post-meeting
+        steps write a meeting's page through (`flows_steps.agent.workspace_write`). Own baseline (no
+        slug, or the caller's own) and own `_system` only: a write never lands in a shared workspace or
+        another subject's. `kg/templates/` holds entity shapes, not records, and is refused. Committed
+        as `vexa-terminal` so the workspace history records the write."""
+        subject = subject_of(request)
+        rel = str(body.get("path") or "").strip()
+        content = body.get("content")
+        slug = str(body.get("slug") or "").strip()
+        if not rel or not isinstance(content, str):
+            raise HTTPException(status_code=400, detail="need a relative path and string content")
+        if rel.startswith("kg/templates/"):
+            raise HTTPException(status_code=403, detail="kg/templates/ holds entity shapes, not records")
+        if slug and slug not in (subject, system_mounts.SYSTEM_SLUG):
+            raise HTTPException(status_code=403, detail="writes land only in your own workspace")
+        try:
+            target = _read_target(request, slug or None)
+            wsr.write_at(target, rel, content)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid path")
+        if (target / ".git").is_dir():
+            env = scrubbed_git_env()
+            subprocess.run(["git", "-C", str(target), "add", "--", rel], check=False, capture_output=True, env=env)
+            subprocess.run(["git", "-C", str(target), "-c", "user.name=vexa-terminal",
+                            "-c", "user.email=terminal@vexa.local", "commit", "-q", "-m", f"write {rel}"],
+                           check=False, capture_output=True, env=env)
+        return {"path": rel, "written": True}
+
     @app.post("/api/workspace/init", status_code=201)
     def ws_init(request: Request):
         """EAGERLY provision this subject's workspace tiers — the "on account creation" seam (so the
@@ -1616,24 +1647,18 @@ def create_app(
         Idempotent — existing tiers (`.git` present) are returned untouched, so it's safe to call on every
         login. The same seams the worker uses lazily on first dispatch, surfaced as a control."""
         subject = subject_of(request)
-        ws = wsr.workspace_dir(subject)
         # Select the seed out of the registry root (default template for now; per-request template
         # selection lands with the second seed). VEXA_WORKSPACE_SEED_DIR still overrides.
-        seed_dir = resolve_seed_dir(
-            settings.default_template if settings is not None else None,
-            seeds_root=settings.workspace_seeds_dir if settings is not None else None,
-        )
-        problems = validate_seed(seed_dir)
-        if problems:
-            raise HTTPException(status_code=500, detail="invalid workspace seed: " + "; ".join(problems))
-        existed = (ws / ".git").exists()
-        seed_workspace(ws, seed_dir)
-        # The PRIVATE SYSTEM tier (`_system`) — always-mounted, holds the light identity reference. Ensure
-        # it up front too so identity + chats/settings have a home from the very first turn. Idempotent.
-        system_existed = (system_mounts.system_store_path(wsr.root, subject) / ".git").exists()
-        system_mounts.ensure_system_workspace(str(wsr.root), subject)
-        return {"workspace": str(ws), "seeded": not existed, "already_initialized": existed,
-                "system_seeded": not system_existed}
+        try:
+            done = provisioning.provision_subject(
+                str(wsr.root), subject,
+                default_template=settings.default_template if settings is not None else None,
+                seeds_root=settings.workspace_seeds_dir if settings is not None else None,
+            )
+        except provisioning.InvalidSeed as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        return {"workspace": str(done.workspace), "seeded": not done.already_initialized,
+                "already_initialized": done.already_initialized, "system_seeded": done.system_seeded}
 
     @app.get("/api/workspace/attached")
     def ws_attached(request: Request):
@@ -2426,7 +2451,7 @@ def _build_production_app() -> FastAPI:
     # Lane A: the Dispatcher takes the SAME index so shared workspaces the subject is a member of enter
     # the dispatch mount set (read-only for Slice 1), not just the /active listing.
     dispatcher = Dispatcher(settings, runtime, identity, membership_index=membership_index,
-                            model_config=model_config)
+                            model_config=model_config, provision=True)
     app = create_app(
         dispatcher,
         stream_reader=RedisStreamReader(settings.redis_url),
