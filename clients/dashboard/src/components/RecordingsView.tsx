@@ -4,7 +4,8 @@
  * why this never reads `GET /recordings/<id>`). Each row links to its meeting, where the
  * audio player and the click-a-segment-to-seek live; Download and Delete are here,
  *  on the row itself, since browsing and managing recordings — not playing one back — is this
- *  page's job.
+ *  page's job. "Delete all" removes every one the caller owns, after a confirmation that names the
+ *  count, one `DELETE /recordings/<id>` at a time (`deleteAllRecordings`).
  *
  * "Gated by plan": the entitlements resolver carries `limits.recording_retention_days`
  *  — how LONG a recording is kept, never a yes/no "can this account see recordings at all". Every
@@ -16,11 +17,12 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Download, Trash2, Video } from "lucide-react";
-import { getJson, mutateJson, presentError } from "@/lib/api";
+import { ApiError, getJson, mutateJson, presentError } from "@/lib/api";
 import { formatClock } from "@/lib/meetings";
 import {
   type Recording,
   type RecordingsPageDTO,
+  deleteAllRecordings,
   formatRecordedAt,
   formatRetention,
   toRecording,
@@ -43,12 +45,18 @@ export function RecordingsView() {
   const [retentionDays, setRetentionDays] = useState<number | null | undefined>(undefined);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // "Delete all": the confirmation's open state, the count it names (the list's own `total`), and
+  // progress while it runs.
+  const [confirmAll, setConfirmAll] = useState(false);
+  const [total, setTotal] = useState<number | null>(null);
+  const [allProgress, setAllProgress] = useState<{ done: number; total: number } | null>(null);
 
   const load = useCallback(async () => {
     try {
       const body = await getJson<RecordingsPageDTO>(`/api/vexa/recordings?limit=${PAGE_SIZE}&offset=0`);
       setRecordings((body.recordings ?? []).map(toRecording));
       setHasMore(body.has_more ?? false);
+      setTotal(typeof body.total === "number" ? body.total : null);
       setError(null);
     } catch (e) {
       console.warn("recordings load failed", e);
@@ -104,13 +112,54 @@ export function RecordingsView() {
     }
   }
 
+  async function doDeleteAll() {
+    setAllProgress({ done: 0, total: total ?? recordings?.length ?? 0 });
+    try {
+      const result = await deleteAllRecordings(
+        (offset) => getJson<RecordingsPageDTO>(`/api/vexa/recordings?limit=${PAGE_SIZE}&offset=${offset}`),
+        (id) => mutateJson("DELETE", `/api/vexa/recordings/${encodeURIComponent(id)}`).then(() => undefined),
+        (done, of) => setAllProgress({ done, total: of }),
+        (e) => e instanceof ApiError && e.status === 409,
+      );
+      const kept = result.stillRecording + result.failed;
+      toast.push(
+        kept === 0
+          ? { tone: "success", title: `Deleted ${result.deleted} recording${result.deleted === 1 ? "" : "s"}.` }
+          : {
+              tone: result.failed > 0 ? "error" : "info",
+              title: `Deleted ${result.deleted} of ${result.deleted + kept} recordings.`,
+              description: [
+                result.stillRecording > 0
+                  ? `${result.stillRecording} belong to a meeting that hasn't ended yet — delete them once it has.`
+                  : "",
+                result.failed > 0 ? `${result.failed} couldn't be deleted. Try again in a moment.` : "",
+              ].filter(Boolean).join(" "),
+            },
+      );
+    } catch (e) {
+      toast.push({ tone: "error", title: "Couldn't delete your recordings", description: presentError(e) });
+    } finally {
+      setAllProgress(null);
+      setConfirmAll(false);
+      await load();
+    }
+  }
+
   const confirmTarget = recordings?.find((r) => r.id === confirmId) ?? null;
+  const allCount = total ?? recordings?.length ?? 0;
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-8 md:px-8 md:py-10">
-      <header className="mb-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Recordings</h1>
-        <p className="mt-1 text-sm text-ink-2">Every meeting's audio, in one place.</p>
+      <header className="mb-2 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Recordings</h1>
+          <p className="mt-1 text-sm text-ink-2">Every meeting's audio, in one place.</p>
+        </div>
+        {!error && recordings !== null && recordings.length > 0 && (
+          <Button variant="danger" size="sm" icon={<Trash2 size={14} aria-hidden />} onClick={() => setConfirmAll(true)}>
+            Delete all
+          </Button>
+        )}
       </header>
       <p className="mb-6 text-xs text-ink-3">
         {retentionDays !== undefined ? `Your plan: ${formatRetention(retentionDays)}.` : " "}
@@ -185,6 +234,34 @@ export function RecordingsView() {
           </Button>
         </div>
       )}
+
+      <Dialog
+        open={confirmAll}
+        onClose={() => allProgress === null && setConfirmAll(false)}
+        title={`Delete all ${allCount} recording${allCount === 1 ? "" : "s"}?`}
+        icon={<Trash2 size={16} aria-hidden />}
+      >
+        <div className="flex flex-col gap-4 p-6 pt-4">
+          <p className="text-sm text-ink-2" data-testid="delete-all-explanation">
+            This permanently deletes the audio of every meeting you&apos;ve recorded. Transcripts and
+            summaries stay. It can&apos;t be undone — backup copies still expire under this
+            deployment&apos;s normal retention policy.
+          </p>
+          {allProgress && (
+            <p role="status" className="text-sm text-ink-2">
+              Deleting {allProgress.done} of {allProgress.total}…
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmAll(false)} disabled={allProgress !== null}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={() => void doDeleteAll()} loading={allProgress !== null}>
+              {allProgress ? "Deleting…" : "Delete all"}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       <Dialog
         open={confirmTarget != null}

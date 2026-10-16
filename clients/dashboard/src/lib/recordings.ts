@@ -96,3 +96,47 @@ export function formatRetention(days: number | null): string {
   if (days % 30 === 0 && days >= 30) return `Kept for ${days / 30} month${days === 30 ? "" : "s"}`;
   return `Kept for ${days} day${days === 1 ? "" : "s"}`;
 }
+
+export interface DeleteAllResult {
+  deleted: number;
+  /** Recordings the core refused because their meeting has not ended yet (409). */
+  stillRecording: number;
+  /** Any other refusal or failure. */
+  failed: number;
+}
+
+/** Delete every recording the caller owns, one by one through the same `DELETE /recordings/<id>`
+ *  the row's own button uses — the core has no bulk route, and needs none.
+ *
+ *  Every id is collected FIRST, across all pages, then deleted: deleting while paging shifts the
+ *  offsets under the reader and skips rows. One failure never stops the rest. A 409 (the meeting
+ *  is still live) is counted apart from other failures, because it is the one a person can fix by
+ *  waiting. `fetchPage` and `deleteOne` are injected so this is tested without a network. */
+export async function deleteAllRecordings(
+  fetchPage: (offset: number) => Promise<RecordingsPageDTO>,
+  deleteOne: (id: string) => Promise<void>,
+  onProgress: (done: number, total: number) => void = () => {},
+  isStillRecording: (e: unknown) => boolean = () => false,
+): Promise<DeleteAllResult> {
+  const ids: string[] = [];
+  for (let offset = 0; ; ) {
+    const page = await fetchPage(offset);
+    const rows = page.recordings ?? [];
+    ids.push(...rows.map((r) => toRecording(r).id));
+    offset += rows.length;
+    if (!page.has_more || rows.length === 0) break;
+  }
+  const result: DeleteAllResult = { deleted: 0, stillRecording: 0, failed: 0 };
+  onProgress(0, ids.length);
+  for (const [i, id] of ids.entries()) {
+    try {
+      await deleteOne(id);
+      result.deleted += 1;
+    } catch (e) {
+      if (isStillRecording(e)) result.stillRecording += 1;
+      else result.failed += 1;
+    }
+    onProgress(i + 1, ids.length);
+  }
+  return result;
+}

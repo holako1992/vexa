@@ -88,12 +88,12 @@ test("delete: confirm dialog, DELETEs /recordings/<id>, and the row disappears w
   await page.getByRole("link", { name: "Recordings" }).click();
   await page.waitForURL("**/recordings");
 
-  await page.getByRole("button", { name: "Delete" }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Delete this recording?" });
   await expect(dialog).toBeVisible();
 
   const before = await gatewayRequests(request);
-  await dialog.getByRole("button", { name: "Delete" }).click();
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
 
   await expect(page.getByText("Recording deleted.")).toBeVisible();
   await expect(page.getByRole("group", { name: /Recording from/ })).toHaveCount(0);
@@ -101,4 +101,23 @@ test("delete: confirm dialog, DELETEs /recordings/<id>, and the row disappears w
 
   const after = await gatewayRequests(request);
   expect(after.slice(before.length).some((r) => r.method === "DELETE" && r.url === "/recordings/700001")).toBe(true);
+});
+
+test("delete all: names the count, deletes every recording, and the page empties", async ({ page, request }) => {
+  await signIn(page, testEmail("recordings-delete-all"));
+  await page.getByRole("link", { name: "Recordings" }).click();
+  await page.waitForURL("**/recordings");
+
+  await page.getByRole("button", { name: "Delete all" }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete all 1 recording?" });
+  await expect(dialog.getByTestId("delete-all-explanation")).toContainText("Transcripts and summaries stay");
+
+  const before = await gatewayRequests(request);
+  await dialog.getByRole("button", { name: "Delete all" }).click();
+
+  await expect(page.getByText("Deleted 1 recording.")).toBeVisible();
+  await expect(page.getByText("No recordings yet.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete all" })).toHaveCount(0);
+  const after = await gatewayRequests(request);
+  expect(after.slice(before.length).filter((r) => r.method === "DELETE").map((r) => r.url)).toEqual(["/recordings/700001"]);
 });
