@@ -19,8 +19,14 @@ def history(uid: str, session: str) -> list:
     return hist if isinstance(hist, list) else []
 
 
-def dispatch_turn(uid: str, session: str, prompt: str, room: dict | None = None) -> int:
+def dispatch_turn(uid: str, session: str, prompt: str, room: dict | None = None,
+                  context: dict | None = None) -> int:
     """Fire an agent turn; returns the history length BEFORE it (the collect baseline).
+
+    ``context`` is agent-api's own chat context bundle (`ChatContextBody`), sent as-is. A
+    ``{"focus": {"kind": "meeting", "meeting_id": <row>, …}}`` grounds the turn in that meeting:
+    agent-api verifies the caller may read the row, then folds the meeting's notes (or its
+    transcript) into the prompt itself — the turn needs no tool to read the meeting.
     /api/chat is an SSE STREAM that stays open for the whole turn — a client timeout while
     the stream runs is SUCCESS, not failure (the double-dispatch bug of 2026-08-23 evening).
 
@@ -61,6 +67,8 @@ def dispatch_turn(uid: str, session: str, prompt: str, room: dict | None = None)
     So: the status is checked, and only a TIMEOUT is treated as success."""
     base = len(history(uid, session))
     body = {"prompt": prompt, "session": session}
+    if context:
+        body["context"] = context
     headers = {"X-User-Id": uid}
     if room and room.get("meeting_id"):
         headers["X-Internal-Secret"] = require_internal_secret()

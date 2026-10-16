@@ -193,3 +193,21 @@ def test_the_desk_probes_say_when_they_could_not_read(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert out.count("warning: swallowed") == 2
     assert "flows_steps.agent.head_sha" in out and "flows_steps.agent.head_subjects" in out
+
+
+def test_a_chat_context_rides_the_post_as_agent_api_names_it(monkeypatch):
+    """`context` is agent-api's own `ChatContextBody`, passed through untouched: a meeting focus
+    is how a turn reads a meeting without any tool."""
+    seen = {}
+
+    def fake_http(method, url, headers, body=None, timeout=20):
+        if url.endswith("/history"):
+            return 200, {"turns": []}
+        seen["body"] = body
+        return 200, {"ok": True}
+
+    monkeypatch.setattr(ag, "http", fake_http)
+    focus = {"focus": {"kind": "meeting", "meeting_id": "58", "platform": "teams",
+                       "native_id": "n58", "status": "completed"}}
+    ag.dispatch_turn("3", "meet-58", "summarise", context=focus)
+    assert seen["body"] == {"prompt": "summarise", "session": "meet-58", "context": focus}

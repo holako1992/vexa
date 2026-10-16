@@ -173,3 +173,64 @@ def test_transcript_text_separates_unreadable_from_empty(monkeypatch):
         raise StepError("gateway down")
     monkeypatch.setattr(mt, "http", boom)
     assert mt.transcript_text("7", 1) is None
+
+
+def test_the_summary_turn_sends_only_what_agent_api_accepts(monkeypatch):
+    """agent-api's `/api/chat` body is `{prompt, session, context?}` with `extra="forbid"`: it has
+    no meeting-room fields, and a post carrying `room_meeting_id` was a 422 that failed every
+    meeting's summary. The turn names the meeting ROW as agent-api's chat context (which folds the
+    meeting's words into the prompt), and the rules claim no attendee desks it cannot read."""
+    reg, _read = _process_rig(monkeypatch, transcript="we agreed to defer the vote until next quarter")
+    sent = {}
+
+    def capture(uid, session, kick, **kw):
+        sent.update(uid=uid, session=session, kick=kick, kw=kw)
+        return 0
+
+    monkeypatch.setattr(production.ag, "dispatch_turn", capture)
+    monkeypatch.setattr(production, "prompt_for", lambda ctx, fname, default=None: "Summarise meeting {mid}.")
+    monkeypatch.setattr(production, "_meeting_stamp", lambda ctx, uid: "2026-10-16")
+    ctx = _ctx({"uid": "7", "meeting_id": "58", "native": "n58", "platform": "teams", "organizer": "a@b.test",
+                "title": "T", "participants": ["a@b.test", "c@d.test"], "participant_names": {"c@d.test": "C D"}})
+    reg.steps["process_meeting"](ctx)
+    assert sent["session"] == "meet-58"
+    assert sent["kw"] == {"context": {"focus": {"kind": "meeting", "meeting_id": "412", "platform": "teams",
+                                                "native_id": "n58", "status": "completed"}}},         "the meeting row as chat context, and no room: agent-api has no meeting-room fields"
+    assert sent["kick"].startswith("Summarise meeting 58.")
+    assert "READ-ONLY access to the desks" not in sent["kick"]
+
+
+def test_giving_up_on_an_ungrounded_report_leaves_a_skipped_note(monkeypatch):
+    """A terminal failure ends the reaction before `commit_meeting_summary` runs, so without a note
+    the dashboard said "still being generated" forever. The step now leaves a summary.v1
+    `status: skipped` note with a plain reason — and still fails loudly."""
+    reg, _read = _process_rig(monkeypatch, transcript="Anna: the budget review moves to next quarter entirely")
+    written = {}
+    monkeypatch.setattr(production, "ws_file", lambda uid, path, *a: None)
+    monkeypatch.setattr(production.ag, "workspace_write",
+                        lambda uid, path, content: written.update({path: content}))
+    ctx = _ctx({"uid": "7", "meeting_id": 412, "native": "abc", "organizer": "a@b.test",
+                "title": "T", "start": 1_700_003_600.0},
+               scratch={"baseline": 0, "row_id": 412, "head_before": "sha", "regrounded": True})
+    with pytest.raises(StepError) as e:
+        reg.steps["process_meeting"](ctx)
+    assert "not grounded" in str(e.value)
+    note = written["meetings/412/summary.md"]
+    assert "status: skipped" in note
+    assert "didn't match what was said in the meeting" in note
+
+
+def test_a_note_that_cannot_be_written_never_hides_the_steps_own_error(monkeypatch):
+    reg, _read = _process_rig(monkeypatch, transcript="Anna: the budget review moves to next quarter entirely")
+    monkeypatch.setattr(production, "ws_file", lambda uid, path, *a: None)
+
+    def broken(uid, path, content):
+        raise RuntimeError("agent-api down")
+
+    monkeypatch.setattr(production.ag, "workspace_write", broken)
+    ctx = _ctx({"uid": "7", "meeting_id": 412, "native": "abc", "organizer": "a@b.test",
+                "title": "T", "start": 1_700_003_600.0},
+               scratch={"baseline": 0, "row_id": 412, "head_before": "sha", "regrounded": True})
+    with pytest.raises(StepError) as e:
+        reg.steps["process_meeting"](ctx)
+    assert "not grounded" in str(e.value)

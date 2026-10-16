@@ -456,3 +456,20 @@ def test_the_drop_never_runs_an_agent_turn(monkeypatch):
 
     out = reg.steps["drop_to_attendees"](_ctx(dict(REFS), PRIOR))
     assert out.result["dropped"] == 3
+
+
+def test_an_untitled_meeting_is_named_by_its_reports_own_title(monkeypatch):
+    """The row's title is written at the END of the flow, after the desks are dropped on — so an
+    untitled meeting's page was `…-your-meeting.md`, titled "your meeting", and that is the name the
+    chat then cited. The report's own front-matter title is already on the receipt by now."""
+    store = Store()
+    reg = _rig(monkeypatch, store)
+    refs = {k: v for k, v in REFS.items() if k != "title"}
+    prior = dict(PRIOR, process_meeting={
+        "report": "---\ntitle: AI and LLM discussion\ntags: [ai]\n---\n" + REPORT, "group": ""})
+    reg.steps["drop_to_attendees"](_ctx(refs, prior))
+    path = f"kg/entities/meeting/{STAMP}-ai-and-llm-discussion.md"
+    doc = store.of("ben@bank.test", path)
+    assert doc is not None, store.writes
+    assert 'title: "AI and LLM discussion"' in doc
+    assert "# AI and LLM discussion" in doc

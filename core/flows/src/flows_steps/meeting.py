@@ -348,8 +348,11 @@ def room_order(uid: str, meeting_id, participants: list, names: dict,
 
 
 def _phrases(text: str, n: int = 6) -> set:
+    """Six-word runs, in ANY script: words are runs of Unicode letters, digits and apostrophes, so
+    an Arabic or Cyrillic meeting has phrases exactly as an English one does."""
     import re as _re
-    ws = _re.findall(r"[a-z0-9']+", (text or "").lower())
+    ws = [w.strip("_") for w in _re.findall(r"[\w']+", (text or "").casefold())]
+    ws = [w for w in ws if w]
     return {" ".join(ws[i:i + n]) for i in range(len(ws) - n + 1)
             if any(len(w) >= 6 for w in ws[i:i + n])}
 

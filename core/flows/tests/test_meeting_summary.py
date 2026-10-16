@@ -379,3 +379,50 @@ def test_commit_meeting_summary_never_dispatches_an_agent_turn(monkeypatch):
     monkeypatch.setattr(production.ag, "collect_reply", no_turns)
     out = reg.steps["commit_meeting_summary"](_ctx(dict(REFS), PRIOR))
     assert out.result["status"] == "complete"
+
+
+# ── grounding, in any script ─────────────────────────────────────────────────────────────────
+from flows_steps import meeting as _mt  # noqa: E402
+
+_ARABIC_TRANSCRIPT = ("Meer Muet: Hello, good morning everyone.\n"
+                      "Meer Muet: في هذه الحلقة سأتحدث عن الانتخاب الاصطناعي.\n")
+
+
+def test_a_verbatim_arabic_quote_is_grounded():
+    """Words were `[a-z0-9']` only, so an Arabic line produced no phrases at all: a word-for-word
+    quote of the meeting failed the gate, and a meeting held in Arabic could never be summarised."""
+    note = '## Key quote\n> "في هذه الحلقة سأتحدث عن الانتخاب الاصطناعي." — Meer Muet'
+    assert _mt.grounded_in(note, _ARABIC_TRANSCRIPT)
+
+
+def test_arabic_text_not_in_the_meeting_is_still_refused():
+    assert not _mt.grounded_in("تحدث المتحدث عن الكهرباء والطاقة الشمسية في المدينة الكبيرة", _ARABIC_TRANSCRIPT)
+
+
+def test_english_grounding_is_unchanged():
+    transcript = "Anna: we agreed to defer the vote until next quarter because of budget"
+    assert _mt.grounded_in("They agreed to defer the vote until next quarter.", transcript)
+    assert not _mt.grounded_in("Do you want to talk about it later", transcript)
+
+
+
+# ── the prompt's own headings land where a reader looks ──────────────────────────────────────
+def test_a_summary_heading_is_the_overview_and_the_key_quote_stays_with_it(monkeypatch):
+    """Meeting 61's report opened `## Summary`, which was left inside the overview: the note read
+    `## Overview` then `## Summary`, so a reader that splits on `##` saw an empty Overview ("none
+    recorded") and a section it never shows. The key quote and any heading the model invents went
+    the same way."""
+    store, meetings = Store(), FakeMeetings()
+    reg = _rig(monkeypatch, store, meetings)
+    plain = "We agreed the pilot ships on the 21st, and that is the whole of it."
+    report = (f"## Summary\n{plain}\n\n### Background\nA short context line.\n\n"
+              "## Decisions\n- The pilot ships on the 21st\n\n## Key quote\n"
+              f"> \"{plain}\" — Anna")
+    reg.steps["commit_meeting_summary"](_ctx(dict(REFS), {"process_meeting": {"report": report, "group": ""}}))
+    doc = store.of("7", "meetings/97/summary.md")
+    body = doc.split("---", 2)[2]
+    headings = [l for l in body.splitlines() if l.startswith("## ")]
+    assert headings == ["## Overview", "## Decisions", "## Action items", "## Open questions"]
+    overview = body.split("## Overview", 1)[1].split("## Decisions", 1)[0]
+    assert plain in overview and "**Background**" in overview and f"> \"{plain}\" — Anna" in overview
+    assert "- The pilot ships on the 21st" in body.split("## Decisions", 1)[1].split("## Action items", 1)[0]

@@ -316,7 +316,7 @@ def get(name: str) -> str:
 
 def get_int(name: str) -> int:
     """The declared key as an int. A non-numeric value falls back to the declared default rather
-    than crashing a poller mid-flight — the same rule `_room_read_max` states for its own param."""
+    than crashing a poller mid-flight."""
     _cls, default, _why = _decl(name)
     try:
         return int(get(name))
