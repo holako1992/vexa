@@ -117,6 +117,11 @@
   body — the shape `POST /bots` actually sends, with no `{"detail": ...}` envelope; and
   `reasonMessage`, the fixed sentence for the core's `identity_unverified` reason (any code it has no
   words for renders as nothing, never as raw text).
+- **`plans.ts`** / **`planSheet.ts`** — the landing page's pricing. `plans.ts` is pure: it parses
+  admin-api's `GET /internal/billing/plans` answer (`null` when it is not a plan sheet) and turns a
+  plan's catalog limits into card lines and its Stripe prices into a price line — free, priced, or
+  "unpriced" when Stripe confirms no amount, never an invented one. `planSheet.ts` is server-only:
+  it reads the sheet behind `VEXA_INTERNAL_API_SECRET` and resolves `PRODUCT_NAME`.
 - **`firstRun.ts`** — the first-run welcome's shapes and pure rules (DB-20): `parseFirstRunStatus`
   (an answer that is not the producer's shape is `null`, which shows no welcome),
   `wizardShouldShow` (the producer says the account is new and unfinished; the client adds "no

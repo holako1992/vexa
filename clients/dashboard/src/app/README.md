@@ -1,7 +1,9 @@
 # `src/app/` — routes
 
 - `layout.tsx` · `globals.css` — the document shell and the design tokens.
-- `page.tsx` — home: the meetings list inside the app shell.
+- `page.tsx` — home: the meetings list inside the app shell for a signed-in person; for a visitor
+  (no session, or one the oracle rejected) the public landing page (`components/landing/`), with the
+  plan sheet read on the server. `/` is the one page the middleware admits without a session cookie.
 - `meetings/[meetingId]/page.tsx` — one meeting and its transcript. Wraps `MeetingDetail` in a
   `Suspense` boundary — DB-44's `?t=<seconds>` scroll-to-segment link reads it via
   `useSearchParams`, which Next requires one for even under `force-dynamic`.

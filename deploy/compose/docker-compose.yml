@@ -1043,6 +1043,8 @@ services:
       # session cookies to Secure and turns on HSTS.
       - NEXTAUTH_URL=${DASHBOARD_NEXT_URL:-}
       - DASHBOARD_URL=${DASHBOARD_NEXT_URL:-}
+      # The product name the public landing page and the sign-in card show. Default "Vexa".
+      - PRODUCT_NAME=${PRODUCT_NAME:-}
       # OAuth sign-in (NextAuth). Each provider self-gates on its credentials: set BOTH the id and the
       # secret to expose that button. Register the redirect URI in the provider console:
       #   Google    → ${DASHBOARD_NEXT_URL}/api/auth/callback/google

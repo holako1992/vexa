@@ -278,6 +278,47 @@ def test_prices_requires_a_valid_api_key(client):
     assert client.get("/billing/prices").status_code == 401
 
 
+# ── the public plan sheet (the dashboard's signed-out pricing section) ────────────────────────
+
+_CATALOG_PLANS = [
+    {"plan_id": "free", "meetings_per_month": 1, "max_minutes_per_meeting": 60, "concurrent_bots": 1,
+     "recording_retention_days": 7, "ai_summaries_per_month": 1},
+    {"plan_id": "pro", "meetings_per_month": None, "max_minutes_per_meeting": 240, "concurrent_bots": 2,
+     "recording_retention_days": 365, "ai_summaries_per_month": None},
+    {"plan_id": "team", "meetings_per_month": None, "max_minutes_per_meeting": 240, "concurrent_bots": 5,
+     "recording_retention_days": None, "ai_summaries_per_month": None},
+]
+
+
+def test_the_plan_sheet_is_the_catalog_and_stripes_prices(client, monkeypatch):
+    billing_prices.clear_cache()
+    _wire_stripe(monkeypatch, _Recorder())
+    r = client.get("/internal/billing/plans", headers={"X-Internal-Secret": INTERNAL_SECRET})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["plans"] == _CATALOG_PLANS
+    assert body["catalog_version"]
+    assert body["prices"] == [
+        {"plan": "pro", "interval": "month", "unit_amount": 500, "currency": "usd"},
+        {"plan": "pro", "interval": "year", "unit_amount": 500, "currency": "usd"},
+        {"plan": "team", "interval": "month", "unit_amount": 500, "currency": "usd"},
+    ]
+    billing_prices.clear_cache()
+
+
+def test_the_plan_sheet_without_stripe_lists_the_plans_and_no_prices(client, monkeypatch):
+    for key in STRIPE_ENV:
+        monkeypatch.delenv(key, raising=False)
+    r = client.get("/internal/billing/plans", headers={"X-Internal-Secret": INTERNAL_SECRET})
+    assert r.status_code == 200, r.text
+    assert r.json()["plans"] == _CATALOG_PLANS
+    assert r.json()["prices"] == []
+
+
+def test_the_plan_sheet_is_closed_without_the_internal_secret(client):
+    assert client.get("/internal/billing/plans").status_code in (401, 403)
+
+
 # ── one subscription per customer ─────────────────────────────────────────────────────────────
 
 def _live_sub(sub_id="sub_live_1", price="price_test_pro_monthly", status="active"):

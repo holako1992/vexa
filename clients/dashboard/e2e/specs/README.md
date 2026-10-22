@@ -17,7 +17,8 @@ spec's body is only the property, not the plumbing.
   `setStripeCustomer()` (set/clear whether the stub account has a Stripe customer on file, so
   `17-billing-upgrade-manage.spec.ts` can reach `POST /billing/portal`'s success path directly,
   without first driving a real checkout).
-- `01-gate.spec.ts` — an anonymous page request redirects to `/login`; an anonymous
+- `01-gate.spec.ts` — an anonymous page request redirects to `/login` (carrying `next`), except
+  `/`, which is the public landing page; an anonymous
   `/api/vexa/*` request is a 401, not a redirect (a fetch caller can't follow one).
 - `02-signin.spec.ts` — the email door lands on the meetings list and sets both session cookies.
 - `03-list.spec.ts` — the fixture meetings render, the phase tabs filter, search narrows.
@@ -211,6 +212,11 @@ spec's body is only the property, not the plumbing.
   endpoint with a token, then "Use this Vexa's service", clears URL and token together; a token
   with no endpoint is refused by the page and by the proxy (400, nothing reaches the gateway); a
   failed read of either store is "could not ask" with Try again, never a default.
+- `35-landing.spec.ts` — the public landing page at `/`: a visitor gets it (not a redirect) with its
+  sections and both doors to `/login`, and the sign-in card's logo leads back; pricing states the
+  stub plan sheet's limits and prices, read on the server with the internal secret never in the
+  page; a paid plan with no price says "See pricing after sign-up"; a failed read says so with no
+  price; a signed-in person at `/` gets their meetings; no horizontal scroll at 375px.
 
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints

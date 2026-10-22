@@ -23,7 +23,7 @@ export interface LoginOptions {
   emailLogin: boolean;
 }
 
-export function LoginForm({ options }: { options: LoginOptions }) {
+export function LoginForm({ options, productName }: { options: LoginOptions; productName: string }) {
   const params = useSearchParams();
   const next = safeNext(params.get("next"));
   const [email, setEmail] = useState("");
@@ -61,10 +61,14 @@ export function LoginForm({ options }: { options: LoginOptions }) {
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <span className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-accent-ink">
+          <a
+            href="/"
+            aria-label={`${productName} home`}
+            className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-accent-ink"
+          >
             <AudioLines size={22} aria-hidden />
-          </span>
-          <h1 className="text-xl font-semibold tracking-tight">Sign in to Vexa</h1>
+          </a>
+          <h1 className="text-xl font-semibold tracking-tight">Sign in to {productName}</h1>
           <p className="mt-1 text-sm text-ink-2">Your meetings and transcripts.</p>
         </div>
 

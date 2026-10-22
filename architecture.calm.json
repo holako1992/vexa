@@ -2510,6 +2510,22 @@
    "protocol": "HTTPS"
   },
   {
+   "unique-id": "dash-next-admin-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "dashboard-next"
+     },
+     "destination": {
+      "node": "admin-api",
+      "interface": "admin-api-rest"
+     }
+    }
+   },
+   "description": "server-side only: sign-in find-or-create and token mint (X-Admin-API-Key), the identity oracle POST /internal/validate, account deletion, and GET /internal/billing/plans for the public landing page's pricing (X-Internal-Secret) — the browser never reaches admin-api",
+   "protocol": "HTTPS"
+  },
+  {
    "unique-id": "term-gw-ws",
    "relationship-type": {
     "connects": {

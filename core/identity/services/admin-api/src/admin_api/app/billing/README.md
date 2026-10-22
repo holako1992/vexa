@@ -79,6 +79,11 @@ neither adds a THIRD place a plan is decided; both read through the one resolver
   answer)? Reused rather than duplicated because the sweep's calls here are bounded — at most one
   per DISTINCT owner in a tick's candidate batch, the same bound `calendar_sync`'s per-user loop
   already relies on.
+- **`/internal/billing/plans`** (`main.py`) — the plan sheet for a visitor who is not signed in:
+  every `PLANS` entry's limits (`None` = unlimited) plus the prices `prices.configured_prices`
+  confirms with Stripe, behind `X-Internal-Secret`. The dashboard's server renders its landing
+  page's pricing from it, so the public page never states a limit or an amount the catalog and
+  Stripe don't. Without Stripe billing configured, `prices` is `[]` — the plans still list.
 - **`/internal/billing/free-plan-retention`** (`main.py`, new) — the Free plan's CURRENT
   `recording_retention_days`, read straight off `catalog.get_plan(DEFAULT_PLAN_ID)`. Called ONCE
   per sweep TICK (a deployment-wide constant every Free user shares), not per user and not per

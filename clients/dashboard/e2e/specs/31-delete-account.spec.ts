@@ -107,7 +107,7 @@ test("a confirmed delete erases the account, signs everyone out, and the same ad
   // The second browser is refused everywhere.
   expect((await other.request.get("/api/auth/me")).status()).toBe(401);
   expect((await other.request.get("/api/vexa/meetings")).status()).toBe(401);
-  await otherPage.goto("/");
+  await otherPage.goto("/recordings");
   await expect(otherPage).toHaveURL(/\/login/);
   await other.close();
 

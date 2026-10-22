@@ -1,8 +1,9 @@
 /** Every request enters here. Two jobs, in this order.
  *
- *  1. THE GATE. No page and no data route is reachable without a session cookie. A page request
- *     is redirected to /login (carrying where it was going); an /api/vexa/* request gets a 401
- *     JSON body, because a fetch caller cannot follow a login redirect meaningfully.
+ *  1. THE GATE. No page but `/` (the public landing page) and `/login`, and no data route, is
+ *     reachable without a session cookie. A page request is redirected to /login (carrying where
+ *     it was going); an /api/vexa/* request gets a 401 JSON body, because a fetch caller cannot
+ *     follow a login redirect meaningfully.
  *
  *     What this gate is, precisely: a coarse, cheap check that a session cookie EXISTS. It is not
  *     the authorization decision and must never be read as one — the token is authenticated by
@@ -22,6 +23,7 @@ const AUTH_COOKIE = process.env.VEXA_AUTH_COOKIE_NAME || "vexa-token";
 /** Paths reachable without a session. Everything else needs one. */
 function isPublic(pathname: string): boolean {
   return (
+    pathname === "/" || // the landing page for a visitor; the meetings list for a session (app/page.tsx)
     pathname === "/login" ||
     pathname === "/favicon.ico" ||
     pathname.startsWith("/api/auth/") ||
@@ -53,7 +55,7 @@ export function middleware(req: NextRequest) {
     url.search = "";
     // Only a same-site path is ever echoed back into `next`; the login page re-checks it before
     // navigating, so this can never become an open redirect.
-    if (pathname !== "/") url.searchParams.set("next", `${pathname}${search}`);
+    url.searchParams.set("next", `${pathname}${search}`);
     return finish(NextResponse.redirect(url));
   }
 

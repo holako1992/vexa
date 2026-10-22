@@ -1,6 +1,7 @@
 /** Property 1 — the gate (src/middleware.ts).
  *
- *  Expected: an anonymous page request is redirected to /login; an anonymous /api/vexa/* request
+ *  Expected: an anonymous page request is redirected to /login — except `/`, the public landing
+ *  page (spec 35); an anonymous /api/vexa/* request
  *  gets a 401 JSON body, not a redirect, because a fetch caller cannot usefully follow one.
  */
 import { test, expect } from "@playwright/test";
@@ -8,9 +9,15 @@ import { resetStub } from "./helpers";
 
 test.beforeEach(async ({ request }) => { await resetStub(request); });
 
-test("anonymous / redirects to /login", async ({ page }) => {
+test("anonymous / is the landing page, not a redirect", async ({ page }) => {
   await page.goto("/");
-  await expect(page).toHaveURL(/\/login/);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("link", { name: "Log in" }).first()).toHaveAttribute("href", "/login");
+});
+
+test("anonymous /recordings redirects to /login, carrying where it was going", async ({ page }) => {
+  await page.goto("/recordings");
+  await expect(page).toHaveURL(/\/login\?next=%2Frecordings/);
 });
 
 test("anonymous /meetings/1 redirects to /login, carrying where it was going", async ({ page }) => {

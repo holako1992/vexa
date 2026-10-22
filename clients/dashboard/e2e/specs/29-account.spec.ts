@@ -75,7 +75,7 @@ test("sign out everywhere revokes every dashboard-login token, spares the person
   expect((await other.request.get("/api/auth/me")).status()).toBe(401);
   expect((await other.request.get("/api/vexa/meetings")).status()).toBe(401);
   expect((await other.request.get("/api/account")).status()).toBe(401);
-  await otherPage.goto("/");
+  await otherPage.goto("/recordings");
   await expect(otherPage).toHaveURL(/\/login/);
   await other.close();
 });

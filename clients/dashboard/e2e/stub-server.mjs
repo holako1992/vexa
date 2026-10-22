@@ -161,6 +161,7 @@ function resetAll() {
     meetings: null, meetingDetail: null, botsQuota: false, search: null,
     googleExchange: null, microsoftExchange: null, annotate: null, tokenDelete: null,
   userDelete: null, userDeletePartialFirst: 0, userCalendarRead: null, transcriptionRead: null,
+  planSheet: null,
   };
   issuedGoogleStates = new Set();
   usedGoogleStates = new Set();
@@ -1183,6 +1184,26 @@ async function handleAdmin(req, res) {
 
   if (url.pathname === "/__control/health") return sendJson(res, 200, { ok: true });
   if (url.pathname === "/__control/requests") return sendJson(res, 200, adminLog);
+
+  // GET /internal/billing/plans — the landing page's plan sheet (X-Internal-Secret). Limits are
+  // `billing/catalog.py`'s; the prices stand in for Stripe's. `force.planSheet`: "fail" is a 503,
+  // "noPrices" a deployment without Stripe billing.
+  if (req.method === "GET" && url.pathname === "/internal/billing/plans") {
+    if (req.headers["x-internal-secret"] !== INTERNAL_API_SECRET) return sendJson(res, 403, { detail: "Invalid internal secret" });
+    logRequest(adminLog, req);
+    if (force.planSheet === "fail") return sendJson(res, 503, { detail: "stub: forced failure" });
+    const plans = [
+      { plan_id: "free", meetings_per_month: 1, max_minutes_per_meeting: 60, concurrent_bots: 1, recording_retention_days: 7, ai_summaries_per_month: 1 },
+      { plan_id: "pro", meetings_per_month: null, max_minutes_per_meeting: 240, concurrent_bots: 2, recording_retention_days: 365, ai_summaries_per_month: null },
+      { plan_id: "team", meetings_per_month: null, max_minutes_per_meeting: 240, concurrent_bots: 5, recording_retention_days: null, ai_summaries_per_month: null },
+    ];
+    const prices = force.planSheet === "noPrices" ? [] : [
+      { plan: "pro", interval: "month", unit_amount: 1200, currency: "usd" },
+      { plan: "pro", interval: "year", unit_amount: 12000, currency: "usd" },
+      { plan: "team", interval: "month", unit_amount: 2900, currency: "usd" },
+    ];
+    return sendJson(res, 200, { catalog_version: "stub", plans, prices });
+  }
 
   // The internal oracle uses a different header (X-Internal-Secret), checked per-route below.
   if (url.pathname !== "/internal/validate" && !checkAdminKey(req, res)) return;

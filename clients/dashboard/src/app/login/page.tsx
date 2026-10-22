@@ -7,6 +7,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/session";
+import { productName } from "@/lib/planSheet";
 import { googleEnabled, microsoftEnabled } from "../api/auth/authOptions";
 import { LoginForm } from "@/components/LoginForm";
 
@@ -24,7 +25,7 @@ export default async function LoginPage() {
   // useSearchParams (the `next` target) needs a Suspense boundary in the App Router.
   return (
     <Suspense>
-      <LoginForm options={options} />
+      <LoginForm options={options} productName={productName()} />
     </Suspense>
   );
 }

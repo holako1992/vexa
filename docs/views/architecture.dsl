@@ -153,6 +153,7 @@ edges:
   admin-api -write-> postgres
   terminal -req-> gateway  # all REST via gateway
   dashboard-next -req-> gateway  # all REST via gateway — a closed read allowlist (meetings, transcripts), carrying the signed-in user's key
+  dashboard-next -req-> admin-api  # server-side only: sign-in find-or-create and token mint (X-Admin-API-Key), the identity oracle POST /internal/validate, account deletion, and GET /internal/billing/plans for the public landing page's pricing (X-Internal-Secret) — the browser never reaches admin-api
   terminal -req-> gateway  # live WS via gateway
   dashboard -req-> gateway  # dashboard → gateway REST (hosted-compat aliases; the hosted-proven wiring)
   dashboard -req-> gateway  # dashboard → gateway /ws (live transcript view)

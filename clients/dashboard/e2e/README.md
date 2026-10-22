@@ -76,6 +76,9 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   validated and masked like admin-api's `set_user_transcription`/`get_user_transcription`) and two
   `/__control/force` knobs that fail a read: `userCalendarRead` (`GET /user/calendar`) and
   `transcriptionRead` (`GET /user/transcription`).
+  The landing page adds admin-api `GET /internal/billing/plans` (X-Internal-Secret): the catalog's
+  three plans and stand-in Stripe prices; `/__control/force {planSheet: "fail" | "noPrices"}` makes
+  it a 503 or a deployment without Stripe prices.
   Account deletion adds admin-api `DELETE /admin/users/<id>` to the contract: 200
   `{status:"deleted",user_id,erased}` (the user, their tokens and the shared meetings/calendars
   world are gone), 404 for an unknown user, and `/__control/force` knobs `userDelete` (`"conflict"`

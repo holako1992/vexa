@@ -129,6 +129,9 @@ Twenty files, covering the parts where being wrong is expensive (plus `api.test.
   type, a missing status, a missing required section (one, and all four), and a `skipped` note
   with no `reason` — each its own distinct `{kind: "malformed", detail}`, plus the two well-formed
   shapes (`complete`, `skipped`) parsed correctly.
+- `plans.test.ts` — the landing page's pricing rules: the sheet parser refuses a malformed plan
+  (so the page never shows a guess), every catalog limit becomes its line with the catalog's number
+  or "unlimited", and a paid plan Stripe has no price for is "unpriced", never an amount.
 - `firstRun.test.ts` — DB-20, weighted towards what is refused: who is NOT welcomed (an account
   that is not new however empty its list, one that already has meetings, an ended welcome at any
   step, an unreadable answer, an unknown meeting count), the resume past step one although the

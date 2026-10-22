@@ -17,6 +17,7 @@ exercises:
   `expires_in` in body or query; an invalid scope → 422. A JSON body with unknown fields
   is refused (422) — never silently dropped (#922).
 """
+import dataclasses
 import hmac
 import json
 import logging
@@ -2490,6 +2491,24 @@ def create_app() -> FastAPI:
             "plan_id": plan.plan_id,
             "recording_retention_days": plan.recording_retention_days,
             "catalog_version": billing_catalog.CATALOG_VERSION,
+        }
+
+    @app.get("/internal/billing/plans", include_in_schema=False)
+    async def get_billing_plans(request: Request):
+        """The plan sheet a signed-out visitor is shown: every catalog plan's limits (`None` is
+        unlimited) and the prices Stripe confirms for them. A deployment without Stripe billing
+        lists its plans with no prices — never an invented amount."""
+        _check_internal(request)
+        prices = []
+        if config_preflight.capability_state("stripe_billing") == config_preflight.CONFIGURED:
+            prices = await billing_prices.configured_prices(_stripe_client())
+        return {
+            "catalog_version": billing_catalog.CATALOG_VERSION,
+            "plans": [dataclasses.asdict(plan) for plan in billing_catalog.PLANS.values()],
+            "prices": [
+                {"plan": p.plan, "interval": p.interval, "unit_amount": p.unit_amount, "currency": p.currency}
+                for p in prices
+            ],
         }
 
     # --- internal tier: platform-wide settings (the DB layer under per-user prefs) — written by

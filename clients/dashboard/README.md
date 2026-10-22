@@ -101,6 +101,7 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
 | `DASHBOARD_EMAIL_LOGIN_PATTERN` | Regex an address must match for that door. Default: contains `test`. |
 | `DASHBOARD_TRUST_PROXY` | `true` when behind a reverse proxy, so rate limiting reads `X-Forwarded-For`. Off by default — that header is client-settable. |
 | `VEXA_DASHBOARD_LOGIN_TOKEN_CAP` | How many `dashboard-login` tokens one user keeps. Default 3. |
+| `PRODUCT_NAME` | The product name on the public landing page and the sign-in card. Default `Vexa`. |
 
 ## Security posture
 
@@ -195,13 +196,14 @@ widening the allowlist beyond what this client's own UI drives. The scope is the
 ```
 src/
   middleware.ts     the gate + the security headers — every request passes through
-  app/              routes: /, /login, /meetings/[id], /search, and the api/ handlers
+  app/              routes: / (landing page or meetings), /login, /meetings/[id], /search, and the api/ handlers
   components/       the UI: shell, nav, list, detail, search results, login card
+  components/landing/  the public landing page a visitor without a session sees at /
   components/ui/    the design system: Button, Input, Dialog, Toggle, Tabs, Toast, Skeleton
   lib/              session · adminApi · upstream allowlist · meeting mapping · search · security
 ```
 
-Every page but `/login` renders inside `Shell` (`components/Shell.tsx`): a skip-to-content link,
+Every page but `/login` and the landing page renders inside `Shell` (`components/Shell.tsx`): a skip-to-content link,
 a left rail that collapses to a drawer below `md` (responsive down to 375px), and a top bar with
 an account menu. The rail's links come from `components/nav.ts` — a single declared list, filtered
 to the items that are actually implemented, so the sidebar can never point at a page that does not
