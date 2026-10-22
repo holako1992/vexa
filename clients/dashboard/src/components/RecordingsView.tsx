@@ -28,7 +28,7 @@ import {
   toRecording,
 } from "@/lib/recordings";
 import type { Entitlements } from "@/lib/entitlements";
-import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
+import { EmptyState, ErrorState, LINK_BUTTON_CLASS, LoadingState } from "./EmptyState";
 import { Button, Dialog, useToast } from "./ui";
 
 const PAGE_SIZE = 50;
@@ -91,8 +91,9 @@ export function RecordingsView() {
       setRecordings((prev) => [...(prev ?? []), ...page]);
       setHasMore(body.has_more ?? false);
     } catch (e) {
+      // The rows already on screen are still true; only the next page could not be asked for.
       console.warn("recordings load more failed", e);
-      setError(presentError(e));
+      toast.push({ tone: "error", title: "Couldn't load more recordings", description: presentError(e) });
     } finally {
       setLoadingMore(false);
     }
@@ -171,6 +172,11 @@ export function RecordingsView() {
         <EmptyState
           title="No recordings yet."
           hint="Send a Vexa bot to a meeting and its audio will show up here once the meeting ends."
+          action={
+            <Link href="/" className={LINK_BUTTON_CLASS}>
+              Go to your meetings
+            </Link>
+          }
         />
       )}
 

@@ -196,6 +196,8 @@ function CalendarRow({ cal, onDelete, onPatch, onSync, onReconnect, busy, reconn
 function CalendarTab() {
   const [calendars, setCalendars] = useState<CalendarConnection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The roster read failed: "could not ask", kept apart from a failed action on one row.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // the id being mutated
   const toast = useToast();
 
@@ -204,8 +206,9 @@ function CalendarTab() {
       const d = await getJson<{ calendars?: CalendarConnection[] }>("/api/vexa/user/calendars");
       setCalendars(d.calendars ?? []);
       setError(null);
+      setLoadError(null);
     } catch (e) {
-      setError(presentError(e));
+      setLoadError(presentError(e));
     }
   }, []);
 
@@ -280,9 +283,18 @@ function CalendarTab() {
 
       <CalendarConnectPanel disabled={!canAdd} onOAuthStart={() => setError(null)} onIcsConnected={() => void load()} idPrefix="dialog-cal" />
 
-      {calendars === null && !error && (
+      {calendars === null && !loadError && (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-ink-3" role="status">
           Loading…
+        </div>
+      )}
+
+      {calendars === null && loadError && (
+        <div role="alert" className="rounded-xl border border-live/30 bg-live-soft px-4 py-4 text-center text-sm text-live">
+          <p>Couldn&apos;t load your connected calendars. {loadError}</p>
+          <Button variant="secondary" size="sm" className="mt-3" onClick={() => void load()} icon={<RefreshCw size={13} aria-hidden />}>
+            Try again
+          </Button>
         </div>
       )}
 

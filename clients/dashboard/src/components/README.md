@@ -208,7 +208,17 @@ Client components. They receive identity as props (resolved on the server) and f
 - `EmptyState` — loading, failed and genuinely-empty are three distinct states here. A failure that
   renders as "no meetings" is the bug this file exists to make impossible. `LoadingState` pairs a
   `role="status"` announcement with `ui/Skeleton` placeholders — the pulse alone tells a screen
-  reader nothing.
+  reader nothing. `EmptyState` takes an `action` — the control for the next step (send a bot,
+  connect a calendar, search everything, back to the meetings) — and `LINK_BUTTON_CLASS` styles a
+  navigation as a secondary button so it stays a real link. The rule every surface follows:
+  - an empty list, tab or panel names what is missing and offers that next step (`MeetingsView`'s
+    `emptyListCopy` words it per tab, tag and filter);
+  - a failed read is "could not ask", never rendered as "none", with a retry wherever asking again
+    can help (the list pages, `/billing`, `Participants`, `AudioPlayer`, the Add Bot dialog's
+    calendar roster); a failed "Load more" keeps the rows already loaded and says so in a toast;
+  - a 404 that is the producer's answer for "nothing here" (a meeting row, a participants roster)
+    is the empty case, not the error case;
+  - every mutation confirms or fails through `ui/Toast`.
 
 The design language: light canvas, one calm blue accent, hairline borders, type carrying the
 hierarchy. Tokens live in `app/globals.css`; the dark set redefines the same variable names, so no

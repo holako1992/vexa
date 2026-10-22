@@ -1,6 +1,6 @@
 # `src/components/__tests__/` — render tests
 
-Two files, covering the component behaviour a type signature cannot state. Both mock `fetch`
+Three files, covering the component behaviour a type signature cannot state. Both mock `fetch`
 outright: these assert what the UI does with an answer, never that a backend gives one.
 
 - `SendBotDialog.test.tsx` — the dispatch door. Both tabs render; a parsable meeting URL surfaces
@@ -21,5 +21,12 @@ outright: these assert what the UI does with an answer, never that a backend giv
   streamed segments (a scripted `text/event-stream` body) land on the REST transcript by segment
   id — a REST draft replaced by its confirmed text, a new segment appended, two lines not three —
   under the speaker's saved name, with the status line reading `streaming`.
+- `EmptyErrorStates.test.tsx` — "could not ask" and "you have none" stay apart on the surfaces
+  that read on their own: a failed participants read or audio read shows an alert with a retry that
+  recovers, while an empty roster, a participants 404 and a recording with no audio file show no
+  alert at all; the Upcoming page's Sync now reports an unreadable calendar roster as a failure,
+  never as "No calendars connected"; a failed plan read on `/billing` retries into the plan.
+  `emptyListCopy` gives each meetings tab, tag and filter its own words and next action, so a
+  filter that matched nothing never tells someone with meetings to send their first bot.
 
 Run: `npm test`.

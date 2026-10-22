@@ -140,7 +140,9 @@ export function BillingView() {
         if (!cancelled) setState({ kind: "loaded", data });
       })
       .catch((e) => {
-        if (!cancelled && reloadKey === 0) setState({ kind: "error", message: presentError(e) });
+        // A failed re-read keeps the plan already on screen; only a page with nothing to show
+        // turns into the error state.
+        if (!cancelled) setState((prev) => (prev.kind === "loaded" ? prev : { kind: "error", message: presentError(e) }));
       });
     return () => {
       cancelled = true;
@@ -172,7 +174,13 @@ export function BillingView() {
     return (
       <div className="mx-auto max-w-2xl p-6">
         <h1 className="mb-6 text-xl font-semibold">Billing</h1>
-        <ErrorState message={state.message} />
+        <ErrorState
+          message={state.message}
+          onRetry={() => {
+            setState({ kind: "loading" });
+            setReloadKey((k) => k + 1);
+          }}
+        />
       </div>
     );
   }

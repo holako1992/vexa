@@ -31,8 +31,8 @@ import {
 } from "@/lib/meetings";
 import { ApiError, getJson, presentError } from "@/lib/api";
 import { StatusPill } from "./StatusPill";
-import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
-import { Button, Input } from "./ui";
+import { EmptyState, ErrorState, LINK_BUTTON_CLASS, LoadingState } from "./EmptyState";
+import { Button, Input, useToast } from "./ui";
 import { SummaryPanel } from "./SummaryPanel";
 import { BotControls } from "./BotControls";
 import { MeetingActions } from "./MeetingActions";
@@ -64,6 +64,7 @@ const POLL_LIVE_MS = 5_000;
 export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const toast = useToast();
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [segments, setSegments] = useState<SegmentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +229,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
       setTimeout(() => setCopied(false), 1800);
     } catch (e) {
       console.warn("clipboard write failed", e);
+      toast.push({ tone: "error", title: "Couldn't copy to the clipboard." });
     }
   }
 
@@ -244,7 +246,15 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 py-10">
         <BackLink />
-        <EmptyState title="That meeting isn't in your list." hint="It may belong to another account, or have been removed." />
+        <EmptyState
+          title="That meeting isn't in your list."
+          hint="It may belong to another account, or have been removed."
+          action={
+            <Link href="/" className={LINK_BUTTON_CLASS}>
+              Back to your meetings
+            </Link>
+          }
+        />
       </div>
     );
   }
@@ -342,8 +352,22 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
       {lines === null && <LoadingState label="Loading transcript…" />}
       {lines !== null && lines.length === 0 && (
         <EmptyState
-          title={meeting.phase === "live" ? "Waiting for the first words…" : "No transcript for this meeting."}
-          hint={meeting.phase === "live" ? "Lines appear as they are transcribed." : undefined}
+          title={
+            meeting.phase === "live"
+              ? "Waiting for the first words…"
+              : meeting.phase === "scheduled"
+                ? "This meeting hasn't started yet."
+                : "No transcript for this meeting."
+          }
+          hint={
+            meeting.phase === "live"
+              ? "Lines appear as they are transcribed."
+              : meeting.phase === "scheduled"
+                ? "The transcript appears here once the bot joins and people start talking."
+                : meeting.joinFailureReason
+                  ? "The bot didn't get into this meeting; the reason is shown above."
+                  : undefined
+          }
         />
       )}
       {lines !== null && lines.length > 0 && (

@@ -7,11 +7,15 @@
  *  same person is exactly what meeting-api's own route comment says never to do.
  *
  *  Only fetched for a meeting that actually has a native id (a scheduled row with no dispatch yet
- *  has nothing to ask about). */
-import { useEffect, useState } from "react";
-import { Users } from "lucide-react";
-import { getJson } from "@/lib/api";
+ *  has nothing to ask about). An empty roster (or a 404, the route's
+ *  answer when it holds none) renders nothing — the header already lists the
+ *  invitees it knows — but a failed read says so, with a retry, so "could not ask" never passes
+ *  for "nobody was there". */
+import { useCallback, useEffect, useState } from "react";
+import { AlertCircle, RefreshCw, Users } from "lucide-react";
+import { ApiError, getJson, presentError } from "@/lib/api";
 import type { Meeting } from "@/lib/meetings";
+import { Button } from "./ui";
 
 interface ParticipantRow {
   name: string | null;
@@ -22,9 +26,13 @@ interface ParticipantRow {
 
 export function Participants({ meeting }: { meeting: Meeting }) {
   const [rows, setRows] = useState<ParticipantRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
     setRows(null);
+    setError(null);
     if (!meeting.nativeId) return;
     let cancelled = false;
     getJson<{ participants?: ParticipantRow[] }>(
@@ -34,15 +42,35 @@ export function Participants({ meeting }: { meeting: Meeting }) {
         if (!cancelled) setRows(Array.isArray(d.participants) ? d.participants : []);
       })
       .catch((e) => {
+        if (cancelled) return;
+        // A 404 is meeting-api's answer for a meeting it holds no roster for.
+        if (e instanceof ApiError && e.status === 404) {
+          setRows([]);
+          return;
+        }
         console.warn("participants load failed", e);
-        if (!cancelled) setRows([]);
+        setError(presentError(e));
       });
     return () => {
       cancelled = true;
     };
-  }, [meeting.platformId, meeting.nativeId]);
+  }, [meeting.platformId, meeting.nativeId, attempt]);
 
-  if (!meeting.nativeId || !rows || rows.length === 0) return null;
+  if (!meeting.nativeId) return null;
+
+  if (error) {
+    return (
+      <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 text-xs text-live">
+        <AlertCircle size={13} aria-hidden />
+        <span>Couldn&apos;t load participants. {error}</span>
+        <Button variant="ghost" size="sm" onClick={retry} icon={<RefreshCw size={12} aria-hidden />} aria-label="Retry loading participants">
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (!rows || rows.length === 0) return null;
 
   return (
     <div className="mt-3">

@@ -24,7 +24,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, Search, Tag, Users, Video, X } from "lucide-react";
+import { Bot, Calendar as CalendarIcon, Search, Tag, Users, Video, X } from "lucide-react";
 import { getJson, presentError } from "@/lib/api";
 import { normalizeTag, tagFilterValue } from "@/lib/annotations";
 import {
@@ -41,7 +41,7 @@ import {
 } from "@/lib/meetings";
 import { tagHref } from "./MeetingTags";
 import { StatusPill } from "./StatusPill";
-import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
+import { EmptyState, ErrorState, LINK_BUTTON_CLASS, LoadingState } from "./EmptyState";
 import { SendBotDialog } from "./SendBotDialog";
 import { FirstRunWizard, type CalendarReturn } from "./FirstRunWizard";
 import { useFirstRun } from "./useFirstRun";
@@ -54,7 +54,37 @@ const TABS = [
   { id: "scheduled", label: "Upcoming" },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+export type TabId = (typeof TABS)[number]["id"];
+
+/** What an empty list says, and which next action it offers, for the filter that emptied it. A
+ *  filter that matched nothing is a different answer from an account with no meetings, and each
+ *  tab names the step that would fill it. */
+export type EmptyListAction = "search" | "clear-tag" | "send-bot" | "connect-calendar";
+
+export function emptyListCopy({ query, tag, tab }: { query: string; tag: string | null; tab: TabId }): {
+  title: string;
+  hint: string;
+  action: EmptyListAction;
+} {
+  if (query) {
+    return {
+      title: "No meetings match that search.",
+      hint: "This box filters the meetings loaded here. Search everything to look inside transcripts too.",
+      action: "search",
+    };
+  }
+  if (tag) return { title: `No meetings tagged “${tag}”.`, hint: "Tags you add on a meeting's page show up here.", action: "clear-tag" };
+  switch (tab) {
+    case "live":
+      return { title: "No meetings are live right now.", hint: "Send a bot to a meeting in progress and it shows up here.", action: "send-bot" };
+    case "past":
+      return { title: "No past meetings yet.", hint: "A meeting moves here once its bot has left.", action: "send-bot" };
+    case "scheduled":
+      return { title: "Nothing scheduled.", hint: "Connect a calendar and Vexa joins its meetings for you.", action: "connect-calendar" };
+    default:
+      return { title: "No meetings yet.", hint: "Send a Vexa bot to a meeting and it will show up here.", action: "send-bot" };
+  }
+}
 
 const POLL_LIVE_MS = 5_000;
 const POLL_IDLE_MS = 30_000;
@@ -149,12 +179,13 @@ export function MeetingsView() {
       });
       setHasMore(body.has_more ?? false);
     } catch (e) {
+      // The rows already on screen are still true; only the next page could not be asked for.
       console.warn("load more failed", e);
-      setError(presentError(e));
+      toast.push({ tone: "error", title: "Couldn't load more meetings", description: presentError(e) });
     } finally {
       setLoadingMore(false);
     }
-  }, [tagQuery]);
+  }, [tagQuery, toast]);
 
   useEffect(() => {
     // A different tag is a different list: start it from its own first page.
@@ -215,6 +246,17 @@ export function MeetingsView() {
   }, [meetings, tab, query, sortBy]);
 
   const tagsOnScreen = useMemo(() => loadedTags(meetings ?? []), [meetings]);
+  const empty = emptyListCopy({ query, tag, tab });
+
+  function openDialog(initialTab: "link" | "calendar") {
+    setDialogInitialTab(initialTab);
+    setDialogOpen(true);
+  }
+
+  function searchEverything() {
+    const q = query.trim();
+    if (q) router.push(`/search?q=${encodeURIComponent(q)}`);
+  }
 
   /** Reconciling the two searches (vs. this box): this input only ever filters the rows
    *  already loaded into the browser — it cannot see a match sitting on a page nobody has loaded,
@@ -222,10 +264,7 @@ export function MeetingsView() {
    * text to `/search`, which asks the server (the `GET /transcripts/search`) across every
    *  meeting and every transcript, not just what is on screen. */
   function onQueryKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "Enter") return;
-    const q = query.trim();
-    if (!q) return;
-    router.push(`/search?q=${encodeURIComponent(q)}`);
+    if (e.key === "Enter") searchEverything();
   }
 
   return (
@@ -340,8 +379,27 @@ export function MeetingsView() {
       {!error && meetings === null && <LoadingState label="Loading meetings…" />}
       {!error && meetings !== null && visible.length === 0 && (
         <EmptyState
-          title={query ? "No meetings match that search." : tag ? `No meetings tagged “${tag}”.` : "No meetings yet."}
-          hint={query || tag ? undefined : "Send a Vexa bot to a meeting and it will show up here."}
+          title={empty.title}
+          hint={empty.hint}
+          action={
+            empty.action === "search" ? (
+              <Button variant="secondary" icon={<Search size={15} aria-hidden />} onClick={searchEverything}>
+                Search everything
+              </Button>
+            ) : empty.action === "clear-tag" ? (
+              <Link href="/" className={LINK_BUTTON_CLASS}>
+                Show all meetings
+              </Link>
+            ) : empty.action === "connect-calendar" ? (
+              <Button variant="secondary" icon={<CalendarIcon size={15} aria-hidden />} onClick={() => openDialog("calendar")}>
+                Connect a calendar
+              </Button>
+            ) : (
+              <Button variant="secondary" icon={<Bot size={15} aria-hidden />} onClick={() => openDialog("link")}>
+                Send a bot
+              </Button>
+            )
+          }
         />
       )}
       {!error && meetings !== null && meetings.length === 0 && wizardClosed && firstRun.visible && (

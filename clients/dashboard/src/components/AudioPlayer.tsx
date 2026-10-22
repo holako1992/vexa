@@ -33,9 +33,11 @@ interface MasterDTO {
 export const AudioPlayer = forwardRef<AudioPlayerHandle, { recordingId: string; onTimeUpdate?: (seconds: number) => void }>(
   function AudioPlayer({ recordingId, onTimeUpdate }, ref) {
     const audioRef = useRef<HTMLAudioElement>(null);
-    const [state, setState] = useState<"loading" | "error" | "ready">("loading");
+    // "none" is an answer (the recording has no audio file); "error" is a read that failed.
+    const [state, setState] = useState<"loading" | "none" | "error" | "ready">("loading");
     const [error, setError] = useState<string | null>(null);
     const [src, setSrc] = useState<string | null>(null);
+    const [attempt, setAttempt] = useState(0);
 
     useEffect(() => {
       let cancelled = false;
@@ -45,8 +47,7 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, { recordingId: string; 
         .then((meta) => {
           if (cancelled) return;
           if (meta.media_file_id == null) {
-            setState("error");
-            setError("This meeting has no audio to play.");
+            setState("none");
             return;
           }
           setSrc(
@@ -63,7 +64,7 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, { recordingId: string; 
       return () => {
         cancelled = true;
       };
-    }, [recordingId]);
+    }, [recordingId, attempt]);
 
     useImperativeHandle(ref, () => ({
       seekTo(seconds: number) {
@@ -78,7 +79,15 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, { recordingId: string; 
     }));
 
     if (state === "loading") return <LoadingState label="Loading recording…" />;
-    if (state === "error") return <ErrorState message={error ?? "Couldn't load the recording."} />;
+    if (state === "none") return <p className="text-sm text-ink-3">This meeting has no audio to play.</p>;
+    if (state === "error") {
+      return (
+        <ErrorState
+          message={`Couldn't load the recording. ${error ?? ""}`.trim()}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      );
+    }
 
     return (
       // eslint-disable-next-line jsx-a11y/media-has-caption -- a meeting recording has no track to caption.

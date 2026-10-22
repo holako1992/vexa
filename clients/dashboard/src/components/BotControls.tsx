@@ -23,6 +23,8 @@ const POLL_MS = 5_000;
 
 export function BotControls({ meeting, onStopped }: { meeting: Meeting; onStopped: () => void }) {
   const [running, setRunning] = useState<MeetingRowDTO[] | null>(null);
+  // The last `/bots/status` read failed: the row's own status is shown, marked as not refreshed.
+  const [statusStale, setStatusStale] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
   const toast = useToast();
@@ -31,8 +33,10 @@ export function BotControls({ meeting, onStopped }: { meeting: Meeting; onStoppe
     try {
       const body = await getJson<{ running?: MeetingRowDTO[] }>("/api/vexa/bots/status");
       setRunning(Array.isArray(body.running) ? body.running : []);
+      setStatusStale(false);
     } catch (e) {
       console.warn("bot status load failed", e);
+      setStatusStale(true);
     }
   }, []);
 
@@ -85,7 +89,12 @@ export function BotControls({ meeting, onStopped }: { meeting: Meeting; onStoppe
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold">Bot</p>
-          {canStop && <p className="text-xs text-ink-3">Status: {botStatus}</p>}
+          {canStop && (
+            <p className="text-xs text-ink-3">
+              Status: {botStatus}
+              {statusStale && <span className="text-warn"> · couldn&apos;t refresh the bot&apos;s status</span>}
+            </p>
+          )}
         </div>
         {canStop && (
           <Button

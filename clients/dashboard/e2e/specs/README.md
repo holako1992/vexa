@@ -195,6 +195,15 @@ spec's body is only the property, not the plumbing.
   front and a spent or unverified one explained with the calendar still on offer, keyboard
   operation, and 375px.
 
+- `33-empty-error-states.spec.ts` — empty and error states: an account with no meetings gets "No
+  meetings yet." with a "Send a bot" action, and the empty Upcoming tab a "Connect a calendar" that
+  opens the dialog's Calendar tab; a failed "Load more" keeps the loaded rows and toasts; a failed
+  participants read shows a retry that recovers into the roster; empty recordings link back to the
+  meetings; the empty Upcoming page links to `/calendar` and its Sync now with an unreadable roster
+  says so instead of "No calendars connected"; a failed `/billing` plan read retries into the plan;
+  adding a tag toasts. Failures are injected with `page.route` on the browser's own `/api/vexa/*`
+  requests, so the stub's world is untouched.
+
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints
 (no new runtime dependency without justification) argue against pulling in just to print one

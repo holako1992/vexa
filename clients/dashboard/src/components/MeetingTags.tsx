@@ -57,13 +57,14 @@ export function MeetingTags({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function write(next: string[]) {
+  async function write(next: string[], done: string) {
     setBusy(true);
     try {
       await mutateJson("POST", `/api/vexa/meetings/${encodeURIComponent(meetingId)}/annotate`, {
         metadata: { [TAGS_KEY]: next.length ? next : null },
       });
       onChange(next);
+      toast.push({ tone: "success", title: done });
       return true;
     } catch (e) {
       toast.push({ tone: "error", title: "Couldn't update tags", description: presentError(e) });
@@ -84,7 +85,7 @@ export function MeetingTags({
       toast.push({ tone: "error", title: `A meeting can have at most ${MAX_TAGS} tags.` });
       return;
     }
-    if (await write([...tags, tag])) {
+    if (await write([...tags, tag], `Tagged “${tag}”.`)) {
       setText("");
       setAdding(false);
     }
@@ -100,7 +101,7 @@ export function MeetingTags({
           key={t}
           tag={t}
           busy={busy}
-          onRemove={editable ? () => void write(tags.filter((x) => x !== t)) : undefined}
+          onRemove={editable ? () => void write(tags.filter((x) => x !== t), `Removed tag “${t}”.`) : undefined}
         />
       ))}
       {editable && !adding && (

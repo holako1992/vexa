@@ -17,16 +17,19 @@
  *   - the producer's own auto-join skip/failure reason (`data.auto_join_error`,
  *     `bot_spawn/auto_join.py`), shown verbatim, never reworded
  *
- * "Sync now" runs the existing per-connection sync (`POST /user/calendars/<id>/sync`, the
- *  Calendar tab) across every connected calendar, then reloads the list — the same action already
- *  in the Calendar tab, offered here too since this is where its result shows up.
+ * "Sync now" reads the calendar roster (`GET /user/calendars`) at the moment it is clicked, runs
+ *  the existing per-connection sync (`POST /user/calendars/<id>/sync`, the Calendar tab) across
+ *  every connection, then reloads the list — the same action already in the Calendar tab, offered
+ *  here too since this is where its result shows up. A roster that could not be read is reported
+ *  as that, never as "no calendars connected".
  */
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, Calendar as CalendarIcon, RefreshCw } from "lucide-react";
 import { getJson, mutateJson, presentError } from "@/lib/api";
 import { type Meeting, type MeetingsPageDTO, groupUpcomingByDay, toMeeting } from "@/lib/meetings";
 import { Button, Toggle, useToast } from "./ui";
-import { EmptyState, ErrorState, LoadingState } from "./EmptyState";
+import { EmptyState, ErrorState, LINK_BUTTON_CLASS, LoadingState } from "./EmptyState";
 
 /** Just enough of `GET /user/calendars`' rows to drive "Sync now" — every connection's id, kind
  *  is not read here, so it works for ICS, Google and Microsoft connections alike. */
@@ -42,7 +45,6 @@ type ViewState =
 export function UpcomingView() {
   const toast = useToast();
   const [state, setState] = useState<ViewState>({ kind: "loading" });
-  const [calendars, setCalendars] = useState<CalendarConnectionLite[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
@@ -60,16 +62,18 @@ export function UpcomingView() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    // Best-effort: the page (and "Sync now") still work with no connection roster loaded — it
-    // only means "Sync now" has nothing to iterate yet.
-    getJson<{ calendars?: CalendarConnectionLite[] }>("/api/vexa/user/calendars")
-      .then((d) => setCalendars(d.calendars ?? []))
-      .catch(() => {});
-  }, []);
-
   const syncNow = useCallback(async () => {
+    setSyncing(true);
+    let calendars: CalendarConnectionLite[];
+    try {
+      calendars = (await getJson<{ calendars?: CalendarConnectionLite[] }>("/api/vexa/user/calendars")).calendars ?? [];
+    } catch (e) {
+      setSyncing(false);
+      toast.push({ tone: "error", title: "Couldn't read your calendars", description: presentError(e) });
+      return;
+    }
     if (calendars.length === 0) {
+      setSyncing(false);
       toast.push({
         tone: "info",
         title: "No calendars connected",
@@ -77,7 +81,6 @@ export function UpcomingView() {
       });
       return;
     }
-    setSyncing(true);
     let failures = 0;
     for (const cal of calendars) {
       try {
@@ -97,7 +100,7 @@ export function UpcomingView() {
     } else {
       toast.push({ tone: "success", title: "Calendars synced." });
     }
-  }, [calendars, load, toast]);
+  }, [load, toast]);
 
   const toggleAutoJoin = useCallback(
     async (meeting: Meeting, next: boolean) => {
@@ -169,6 +172,11 @@ function UpcomingList({
       <EmptyState
         title="No upcoming meetings"
         hint="Meetings from a connected calendar, or ones you schedule by hand, show up here."
+        action={
+          <Link href="/calendar" className={LINK_BUTTON_CLASS}>
+            Connect a calendar
+          </Link>
+        }
       />
     );
   }
