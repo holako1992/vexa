@@ -59,6 +59,8 @@ VOCAB: Dict[str, Tuple[Any, str, str]] = {
 #: meetings already reads.
 BOT_NAME_KEY = "bot_name"
 BOT_NAME_STORE = "calendar_bot_name"
+#: The longest bot name the store holds — every door that writes `BOT_NAME_STORE` keeps to it.
+BOT_NAME_MAX = 100
 BOT_NAME_MEANING = "the name the notetaker shows up as in the room"
 
 MEANINGS = {**{k: v[2] for k, v in VOCAB.items()}, BOT_NAME_KEY: BOT_NAME_MEANING}
@@ -111,7 +113,7 @@ def coerce(key: str, value: Any) -> Any:  # noqa: C901
         if not name:
             raise Refused({"refused": "bot_name cannot be empty",
                            "give_me": "the name the notetaker should show up as"})
-        return name[:64]
+        return name[:BOT_NAME_MAX]
     if key not in VOCAB:
         raise Refused({
             "refused": f"there is no setting called {key!r}",

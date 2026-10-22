@@ -149,3 +149,31 @@ def test_bot_context_carries_effective_transcription(client):
     cfg = client.get("/user/transcription", headers={"X-API-Key": tok}).json()
     assert cfg["url"] == "https://stt-mine.example.com"
     assert cfg["token_set"] is False
+
+
+def test_a_customer_token_never_rides_the_platform_url(client):
+    uid, tok = _user_token(client, email="stt-orphan@vexa.ai")
+    client.put("/internal/settings/transcription", headers=_internal(),
+               json={"url": "https://stt-global.example.com", "token": "tok-global"})
+
+    # A token with no URL of the customer's own: the platform's endpoint keeps its own credential.
+    client.put("/user/transcription", headers={"X-API-Key": tok}, json={"token": "tok-mine"})
+    r = client.get(f"/internal/users/{uid}/bot-context", headers=_internal())
+    assert r.json()["transcription"] == {
+        "url": "https://stt-global.example.com",
+        "token": "tok-global",
+        "provider": "vexa",
+    }
+
+
+def test_clearing_the_url_clears_its_token(client):
+    uid, tok = _user_token(client, email="stt-clear@vexa.ai")
+    h = {"X-API-Key": tok}
+    client.put("/user/transcription", headers=h,
+               json={"url": "https://stt-mine.example.com", "token": "tok-mine"})
+
+    r = client.put("/user/transcription", headers=h, json={"url": ""})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"url": None, "token_set": False, "token": None}
+    r = client.get(f"/internal/users/{uid}/bot-context", headers=_internal())
+    assert "transcription" not in r.json()

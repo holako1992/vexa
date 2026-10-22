@@ -6,5 +6,9 @@ avatar initials, the sign-in door admin-api recorded, and their dashboard sessio
 **Sign out everywhere** behind a confirmation. It reads `GET /api/account` and writes
 `DELETE /api/account/sessions`; both are in `src/app/api/account/`.
 
-There is no delete-account control here: erasing an account across the core's services is not
-something the core can do yet, and a control that removed only part of the data is not shipped.
+**Delete account** erases the account immediately and for good, behind a dialog that asks for the
+account's email address: `DELETE /api/account {confirmEmail}`, which admin-api's
+`DELETE /admin/users/{id}` carries out across meetings, agent and flows. Success is a hard
+navigation to `/login` with the account-deleted notice. A deletion that only partly finished says so
+and signs the person out (repeating it finishes the rest); the last admin is refused (`409`) until
+another account is made admin.

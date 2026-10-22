@@ -27,6 +27,8 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import HTTPException, status
 
+from .person_settings import BOT_NAME_MAX
+
 MAX_CALENDAR_CONNECTIONS = 10
 DEFAULT_GOOGLE_CALENDAR_IDS = ["primary"]
 DEFAULT_MICROSOFT_CALENDAR_IDS = ["primary"]
@@ -37,7 +39,7 @@ def validate_bot_name(value: str) -> str:
     name = value.strip()
     if not name:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="bot_name is required")
-    if len(name) > 100:
+    if len(name) > BOT_NAME_MAX:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="bot_name too long")
     return name
 

@@ -1387,13 +1387,7 @@ def create_app() -> FastAPI:
         data = dict(user.data or {})
         updated_bot_name = None
         if "bot_name" in calendar_update.model_fields_set:
-            bot_name = (calendar_update.bot_name or "").strip()
-            if not bot_name:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                    detail="bot_name is required")
-            if len(bot_name) > 100:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                    detail="bot_name too long")
+            bot_name = validate_bot_name(calendar_update.bot_name or "")
             data["calendar_bot_name"] = bot_name
             updated_bot_name = bot_name
             from sqlalchemy.orm import attributes
@@ -1490,8 +1484,12 @@ def create_app() -> FastAPI:
     async def set_user_transcription(update: TranscriptionPrefsUpdate,
                                      user: User = Depends(get_current_user_for_update),
                                      db: AsyncSession = Depends(get_db)):
-        """Set the caller's transcription backend override. ``token`` is a SECRET — masked on read."""
-        await _put_user_prefs(update.model_dump(exclude_unset=True), "transcription_prefs", user, db)
+        """Set the caller's transcription backend override. ``token`` is a SECRET — masked on read.
+        A token belongs to the URL it was given for, so clearing ``url`` clears ``token`` with it."""
+        fields = update.model_dump(exclude_unset=True)
+        if fields.get("url") == "":
+            fields["token"] = ""
+        await _put_user_prefs(fields, "transcription_prefs", user, db)
         return await get_user_transcription(user)
 
     @app.get("/user/transcription")
@@ -2462,11 +2460,9 @@ def create_app() -> FastAPI:
                 if user_transcription.get(key) not in (None, "")
             }
         else:
-            transcription = _resolve_effective(
-                user_transcription,
-                platform_transcription,
-                _TRANSCRIPTION_FIELDS,
-            )
+            # No customer endpoint: the platform's URL serves this spawn, so its credential comes
+            # from the platform record alone. A customer token never rides the platform URL.
+            transcription = _resolve_effective({}, platform_transcription, _TRANSCRIPTION_FIELDS)
         if transcription:
             # Ownership follows the URL that will actually serve this spawn. This non-secret
             # discriminator crosses only the internal bot-context edge; the URL/token remain

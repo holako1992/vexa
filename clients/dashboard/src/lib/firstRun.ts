@@ -63,9 +63,9 @@ export function stepIndex(step: FirstRunStep): number {
   return FIRST_RUN_STEPS.indexOf(step);
 }
 
-/** The longest default bot name the dashboard will send; admin-api's own person-settings
- *  vocabulary truncates at the same length. */
-export const BOT_NAME_MAX = 64;
+/** The longest default bot name the dashboard will send — admin-api's `BOT_NAME_MAX`
+ *  (`person_settings.py`), the one limit every door to `users.data.calendar_bot_name` keeps. */
+export const BOT_NAME_MAX = 100;
 
 /** A bot name as a person typed it, checked: trimmed, non-empty, within `BOT_NAME_MAX`. */
 export function checkBotName(raw: string): { ok: true; name: string } | { ok: false; message: string } {
