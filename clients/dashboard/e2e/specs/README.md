@@ -195,6 +195,15 @@ spec's body is only the property, not the plumbing.
   front and a spent or unverified one explained with the calendar still on offer, keyboard
   operation, and 375px.
 
+- `34-transcription-settings.spec.ts` — `/settings/transcription` from the main navigation: the
+  saved bot name and service load (the token never shown or prefilled, the masked value nowhere in
+  the page); a saved name is exactly `PUT /user/calendar {bot_name}`, survives a reload and is the
+  name the Send Bot form states while the dispatch leaves it to the core; the name the first-run
+  welcome saved is the name this page shows; an empty name is refused before any write; your own
+  endpoint with a token, then "Use this Vexa's service", clears URL and token together; a token
+  with no endpoint is refused by the page and by the proxy (400, nothing reaches the gateway); a
+  failed read of either store is "could not ask" with Try again, never a default.
+
 **On Lighthouse:** DB-04's brief names a Lighthouse a11y score. This repo has no Lighthouse CI
 wired in and adding `lighthouse`/`@lhci/cli` would be a new dependency this task's own constraints
 (no new runtime dependency without justification) argue against pulling in just to print one

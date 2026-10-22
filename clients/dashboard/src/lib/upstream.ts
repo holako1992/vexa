@@ -11,6 +11,7 @@
 import { isAnnotateBody, isTagFilterValue } from "./annotations";
 import { isChatResetBody, isChatTurnBody } from "./chat";
 import { isBotNameBody, isFirstRunBody } from "./firstRun";
+import { isTranscriptionBackendBody } from "./transcriptionSettings";
 
 /** A per-parameter shape check: `true` admits the raw string value, `false` drops it. Never a
  *  transform — filterQuery forwards the caller's own bytes for whatever it admits, it does not
@@ -268,6 +269,11 @@ function resolveReadExtras(segments: readonly string[]): UpstreamRoute | null {
   if (segments.length === 2 && segments[0] === "user" && segments[1] === "first-run") {
     return { path: "/user/first-run" };
   }
+  // GET /user/transcription — the account's transcription backend override (`{url, token_set}`;
+  // `url: null` is the deployment's own service). The producer masks the token on this read.
+  if (segments.length === 2 && segments[0] === "user" && segments[1] === "transcription") {
+    return { path: "/user/transcription" };
+  }
   // GET /meeting/jitsi-hosts — deployment's declared Jitsi hostnames (for the URL parser)
   if (segments.length === 2 && segments[0] === "meeting" && segments[1] === "jitsi-hosts") {
     return { path: "/meeting/jitsi-hosts" };
@@ -503,6 +509,12 @@ export function resolveWriteUpstream(method: string, segments: readonly string[]
     // PUT /user/first-run {step?, state?} — move the welcome on, or end it (done | skipped).
     if (segments.length === 2 && segments[0] === "user" && segments[1] === "first-run") {
       return { path: "/user/first-run", body: isFirstRunBody };
+    }
+    // PUT /user/transcription {url?, token?} — use your own transcription endpoint, or go back to
+    // the deployment's. `isTranscriptionBackendBody` admits only those two keys, and never a body
+    // that would leave a token without the URL it was given for.
+    if (segments.length === 2 && segments[0] === "user" && segments[1] === "transcription") {
+      return { path: "/user/transcription", body: isTranscriptionBackendBody };
     }
   }
   if (method === "PATCH") {

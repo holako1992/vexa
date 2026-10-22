@@ -244,7 +244,7 @@ request/response schemas, compatibility endpoints, error statuses, and metadata 
 
 <ParamField body="platform" type="string" required>`google_meet` · `zoom` · `teams`</ParamField>
 <ParamField body="native_meeting_id" type="string" required>The meeting id from the join URL (e.g. `abc-defg-hij`).</ParamField>
-<ParamField body="bot_name" type="string">Display name the bot uses in the call. Defaults to `Vexa`.</ParamField>
+<ParamField body="bot_name" type="string">Display name the bot uses in the call. Defaults to the account's default bot name (`bot_name` on [`/user/calendar`](/api/calendar), itself `Vexa` until set).</ParamField>
 <ParamField body="language" type="string">ISO code (e.g. `en`). **Omitted** = auto mode: each STT
 window's language is detected independently and stamped on its segments' `language` field. **Set** =
 forced mode: every STT call is pinned to this code and every segment carries it. Granularity is the

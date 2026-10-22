@@ -123,6 +123,13 @@
   meetings" at the first step only, because what the person starts — a connected calendar —
   creates meetings), `checkBotName`, and the two body checks the proxy's new `PUT /user/calendar`
   (exactly `{bot_name}`, never the feed fields) and `PUT /user/first-run` routes use.
+- **`transcriptionSettings.ts`** — the transcription settings page's shapes and rules:
+  `parseTranscriptionBackend` (reads `{url, token_set}` and deliberately not the masked `token`; an
+  answer that is not that shape is `null`, so a failed read never shows as "not configured"),
+  `parseDefaultBotName`, `planBackendSave` (the one `PUT` body a form edit means: a token always
+  travels with its URL, a new URL without a new token clears the old one, switching back clears
+  both), and `isTranscriptionBackendBody`, the proxy's check on `PUT /user/transcription`. It exists
+  so a customer's token can never be left behind for a backend it was not given for.
 - **`quotaNotice.ts`** — the plain-words notice for a refused send (`quotaNoticeFrom`: reset date,
   upgrade or billing link, the fixed sentence for a known reason) and `isAllowanceSpent`, the hint
   for what to show up front. Shared by the Add Bot dialog and the first-run welcome.

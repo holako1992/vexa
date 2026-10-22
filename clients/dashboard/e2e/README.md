@@ -72,6 +72,10 @@ REAL running `next dev` dashboard, which talks to a REAL running stub of the two
   opened. `/__control/firstRun {state, step, noMeetings, dispatchCreatesMeeting}` sets the account
   the next sign-in lands on; the default world is a new account that already has meetings, so no
   other spec meets the welcome.
+  The transcription settings page adds `GET/PUT /user/transcription` (`transcriptionPrefs`,
+  validated and masked like admin-api's `set_user_transcription`/`get_user_transcription`) and two
+  `/__control/force` knobs that fail a read: `userCalendarRead` (`GET /user/calendar`) and
+  `transcriptionRead` (`GET /user/transcription`).
   Account deletion adds admin-api `DELETE /admin/users/<id>` to the contract: 200
   `{status:"deleted",user_id,erased}` (the user, their tokens and the shared meetings/calendars
   world are gone), 404 for an unknown user, and `/__control/force` knobs `userDelete` (`"conflict"`
