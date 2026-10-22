@@ -164,6 +164,12 @@ Stated plainly, because "it has auth" is not a description.
   connections, and now renaming/deleting/stopping a meeting you already own — not a widening for
   its own sake. There is still no agent/chat, recordings playback, admin panel, or token
   management path; those stay out of scope below.
+
+  Settings (`/settings/transcription`): `GET`/`PUT user/calendar` read and write the account's
+  default bot name — the `PUT` admits exactly `{bot_name}`, never the feed fields — and
+  `GET`/`PUT user/transcription` read and write the transcription service override. That `PUT`
+  admits only `url` and `token`, and never a body that leaves a token without the URL it was given
+  for; the page never shows or prefills the token.
 - **Least privilege on the minted token.** Sign-in mints `bot,tx` — not the `browser` scope the
   terminal needs. Login tokens are named `dashboard-login` and capped, so a sign-in loop cannot
   mint without bound; self-serve and terminal tokens are never touched.

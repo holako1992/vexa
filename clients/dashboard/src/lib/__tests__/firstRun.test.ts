@@ -101,7 +101,7 @@ describe("the proxy's first-run routes", () => {
 
   it("refuses PUT everywhere else, and every other method on those paths", () => {
     for (const path of [
-      ["user", "calendars"], ["user", "calendars", "cal-1"], ["user", "models"], ["user", "transcription"],
+      ["user", "calendars"], ["user", "calendars", "cal-1"], ["user", "models"],
       ["user", "webhook"], ["user", "entitlements"], ["bots"], ["meetings", "1"], ["user", "calendar", "x"],
       ["user", "first-run", "x"], [],
     ]) {

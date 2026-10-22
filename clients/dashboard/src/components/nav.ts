@@ -13,7 +13,7 @@
  *  That is the whole change. No other file references a nav item.
  */
 import type { ComponentType } from "react";
-import { CalendarDays, Clock, CreditCard, LayoutGrid, Settings, Video } from "lucide-react";
+import { AudioLines, CalendarDays, Clock, CreditCard, LayoutGrid, Settings, Video } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -29,6 +29,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/calendar", label: "Calendar", icon: CalendarDays, implemented: true },
   { href: "/recordings", label: "Recordings", icon: Video, implemented: true },
   { href: "/settings/account", label: "Account", icon: Settings, implemented: true },
+  { href: "/settings/transcription", label: "Transcription", icon: AudioLines, implemented: true },
   { href: "/billing", label: "Billing", icon: CreditCard, implemented: true },
 ];
 

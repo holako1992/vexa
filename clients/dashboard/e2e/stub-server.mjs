@@ -130,6 +130,9 @@ function releaseChatHold() {
  *  the fixture world never is. */
 let firstRun = { state: "active", step: "name" };
 let defaultBotName = "Vexa";
+/** `users.data.transcription_prefs` as admin-api keeps it: `{url?, token?}`, empty = the
+ *  deployment's own service. The token is stored, and `GET /user/transcription` masks it. */
+let transcriptionPrefs = {};
 /** While true, `POST /bots` also creates the requested meeting row (status `requested`), as the
  *  real spawn path does, so the new meeting can be opened. Off by default: most specs count rows. */
 let dispatchCreatesMeeting = false;
@@ -157,7 +160,7 @@ function resetAll() {
   force = {
     meetings: null, meetingDetail: null, botsQuota: false, search: null,
     googleExchange: null, microsoftExchange: null, annotate: null, tokenDelete: null,
-  userDelete: null, userDeletePartialFirst: 0,
+  userDelete: null, userDeletePartialFirst: 0, userCalendarRead: null, transcriptionRead: null,
   };
   issuedGoogleStates = new Set();
   usedGoogleStates = new Set();
@@ -172,6 +175,7 @@ function resetAll() {
   chat = freshChatState();
   firstRun = { state: "active", step: "name" };
   defaultBotName = "Vexa";
+  transcriptionPrefs = {};
   dispatchCreatesMeeting = false;
   users = new Map();
   nextUserId = 1;
@@ -731,7 +735,10 @@ async function handleGateway(req, res) {
   // `set_user_calendar` does: trimmed, required, at most 100 characters.
   if (parts.length === 2 && parts[0] === "user" && parts[1] === "calendar") {
     const readBack = () => ({ ics_url_set: false, ics_url_masked: null, auto_join: true, bot_name: defaultBotName });
-    if (req.method === "GET") return sendJson(res, 200, readBack());
+    if (req.method === "GET") {
+      if (force.userCalendarRead) return sendJson(res, force.userCalendarRead, { detail: "forced_failure" });
+      return sendJson(res, 200, readBack());
+    }
     if (req.method === "PUT") {
       const body = await readAndLogBody(req, logEntry);
       if ("bot_name" in body) {
@@ -740,6 +747,46 @@ async function handleGateway(req, res) {
         if (name.length > 100) return sendJson(res, 422, { detail: "bot_name too long" });
         defaultBotName = name;
       }
+      return sendJson(res, 200, readBack());
+    }
+  }
+
+  // GET /user/transcription, PUT /user/transcription — the transcription backend override, as
+  // admin-api's `get_user_transcription` / `set_user_transcription`: a partial update where an empty
+  // string clears a field, `url` must be http(s) with a host, every value a string under 2048
+  // characters, unknown keys ignored (the pydantic model drops them); the read masks the token.
+  if (parts.length === 2 && parts[0] === "user" && parts[1] === "transcription") {
+    const readBack = () => {
+      const t = transcriptionPrefs.token;
+      return {
+        url: transcriptionPrefs.url ?? null,
+        token_set: Boolean(t),
+        token: t ? "********" + (t.length > 8 ? t.slice(-4) : "") : null,
+      };
+    };
+    if (req.method === "GET") {
+      if (force.transcriptionRead) return sendJson(res, force.transcriptionRead, { detail: "forced_failure" });
+      return sendJson(res, 200, readBack());
+    }
+    if (req.method === "PUT") {
+      const body = await readAndLogBody(req, logEntry);
+      const next = { ...transcriptionPrefs };
+      for (const field of ["url", "token"]) {
+        if (!(field in body)) continue;
+        const raw = body[field];
+        const value = typeof raw === "string" ? raw.trim() : raw;
+        if (value === null || value === undefined || value === "") { delete next[field]; continue; }
+        if (typeof value !== "string" || value.length > 2048) {
+          return sendJson(res, 422, { detail: `${field} must be a string under 2048 chars` });
+        }
+        if (field === "url") {
+          let ok = false;
+          try { const u = new URL(value); ok = (u.protocol === "http:" || u.protocol === "https:") && !!u.hostname; } catch { ok = false; }
+          if (!ok) return sendJson(res, 422, { detail: "url must be an http(s) URL" });
+        }
+        next[field] = value;
+      }
+      transcriptionPrefs = next;
       return sendJson(res, 200, readBack());
     }
   }

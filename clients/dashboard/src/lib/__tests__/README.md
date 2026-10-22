@@ -134,6 +134,11 @@ Twenty files, covering the parts where being wrong is expensive (plus `api.test.
   step, an unreadable answer, an unknown meeting count), the resume past step one although the
   calendar the person connected created meetings, and the proxy's two new PUT routes — the
   producer's `ics_url`/`auto_join` fields and every near-miss body or path refused.
+- `transcriptionSettings.test.ts` — the two `/user/transcription` proxy routes and every near-miss
+  path or method refused; every body that would strand a token (token alone, token with a cleared
+  URL, URL cleared alone), a non-http(s) URL, a wrong type, an over-long value or a foreign key
+  refused; the read parser never carrying the masked token and refusing an unreadable answer; and
+  `planBackendSave` never planning a body the proxy would refuse.
 - `quotaNotice.test.ts` — the refused-send sentence for each producer reason (an unverified address
   is never called a spent allowance, an unknown reason never renders as raw text) and
   `isAllowanceSpent` (unknown usage and an unlimited plan are not "spent").

@@ -21,6 +21,7 @@ Every route on this page accepts a key holding either the `bot` or the `tx` scop
 |---|---|
 | Model provider, model names, credentials | [Model configuration](#model-configuration), below |
 | Transcription backend URL and token | [Transcription backend](#transcription-backend), below |
+| The default name every bot joins as | `bot_name` on [`/user/calendar`](/api/calendar) |
 | Webhook URL, secret, event filter | [Webhook configuration](#webhook-configuration), below |
 | Calendar connections and auto-join | [Calendar API](/api/calendar) |
 | API keys — mint, scope, revoke | [Authentication](/authentication) |
@@ -140,7 +141,12 @@ curl -X PUT "$API_BASE/user/transcription" \
   Credential for that endpoint. Masked on every read-back, exactly like the model credential.
 </ParamField>
 
-Same partial-update and clearing rules as [model configuration](#model-configuration).
+Same partial-update and clearing rules as [model configuration](#model-configuration). To go back
+to the deployment's endpoint, clear `url` and `token` in the same request
+(`{"url": "", "token": ""}`): fields resolve one by one, so a token left behind without its `url`
+is sent to the deployment's endpoint in place of the deployment's own credential. The dashboard's
+**Transcription** page (`/settings/transcription`) edits this override and the default bot name;
+it never shows the token and always clears both together.
 
 ## Webhook configuration
 
@@ -342,7 +348,7 @@ These have no settings endpoint today. They are listed so you can stop looking f
 |---|---|
 | Organization or team settings | Settings are per API-key owner only. |
 | Self-serve key management with your `X-API-Key` | Minting and revoking keys requires the admin key ([Authentication](/authentication)). |
-| A default language, task, or bot name for all bots | Set per request on `POST /bots`; calendar connections carry their own `bot_name` ([Calendar API](/api/calendar)). |
+| A default language, task, or transcription model for all bots | Set `language` and `task` per request on `POST /bots`. The transcription model is not an account setting: an endpoint set by environment variables is asked for `TRANSCRIPTION_MODEL`, and one set in Settings (yours, or the deployment's) for `whisper-1`. The default bot *name* does exist: `bot_name` on [`/user/calendar`](/api/calendar). |
 | Notification or email preferences | No such setting is stored. |
 | Reading your own plan, quota usage, or billing state | `GET /auth/me` returns `max_concurrent` only. |
 | Retention or data-deletion policy | Delete individual meetings via the [Meetings API](/api/meetings), or the whole account with [`DELETE /admin/users/{user_id}`](#deleting-an-account). |
