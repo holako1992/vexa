@@ -168,7 +168,10 @@ test("a meeting shared with the reader has no chat", async ({ page, request }) =
 test("the proxy refuses chat bodies outside the panels' shapes before they reach the gateway", async ({ page, request }) => {
   await signIn(page, testEmail("chat-allowlist"));
   await page.getByRole("heading", { name: "Design Review" }).waitFor();
-  const before = (await gatewayRequests(request)).length;
+  // Only the agent routes are counted: the meetings page keeps reading the gateway in the
+  // background (polling, the first-run probe), and none of that is what this test is about.
+  const agentCalls = async () => (await gatewayRequests(request)).filter((r) => r.url.includes("/agent/")).length;
+  const before = await agentCalls();
 
   const focus = { kind: "meeting", meeting_id: "102", platform: "zoom", native_id: "1234567890", status: "completed" };
   const refusedTurns = [
@@ -193,7 +196,7 @@ test("the proxy refuses chat bodies outside the panels' shapes before they reach
   const sessions = await page.request.post("/api/vexa/agent/sessions", { data: {} });
   expect(sessions.status()).toBe(404);
 
-  expect((await gatewayRequests(request)).length).toBe(before);
+  expect(await agentCalls()).toBe(before);
 });
 
 test("the panel opens, asks, and closes from the keyboard", async ({ page, request }) => {
