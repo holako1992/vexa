@@ -89,7 +89,7 @@ system microsoft-calendar-system  # DB-32: external, optional — a deployment w
 system platform  # shared infra backing the services
   service redis
   database postgres
-  service minio
+  service object-store
 
 system flows  # the reaction engine; owns the reaction row and its effect receipts
   module flows-engine
@@ -124,7 +124,7 @@ edges:
   meeting-api -write-> bot-commands  # PUBLISH leave/speak
   meeting-api -write-> recording-blob  # S3 PUT stitched master
   meeting-api -write-> postgres
-  meeting-api -write-> minio
+  meeting-api -write-> object-store
   meeting-api -req-> runtime  # POST /workloads spawn bot
   meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated calendar connections for sync and disconnect cleanup
   meeting-api -req-> admin-api  # DB-30: POST /internal/calendars/{id}/google-token mints a short-lived Google access token for a google-kind connection's sync; meeting-api never reads identity's tables or the encrypted refresh token directly (the core owns its contracts)
@@ -169,7 +169,7 @@ edges:
   admin-api -req-> agent-api  # Account deletion: POST /internal/accounts/{subject}/erase (X-Internal-Secret; outside /api, so the gateway's /agent/* catch-all cannot reach it) erases workspaces, chat sessions, routines and warm units, and hands shared workspaces to the remaining members; idempotent
   admin-api -req-> flows-api  # Account deletion: POST /internal/accounts/{subject}/erase (X-Internal-Secret, body {emails}) cancels the person's queued reactions and erases their reactions, receipts, signals and mail rows; idempotent
   bot, agent-worker deployed-in runtime
-  gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, minio, transcription deployed-in deploy
+  gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription deployed-in deploy
   flows-api, flows-worker deployed-in deploy
 
 flows:
